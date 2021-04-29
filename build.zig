@@ -17,8 +17,8 @@ pub fn build(b: *Builder) void {
     exe.addIncludeDir("./src/");
     exe.addIncludeDir("/usr/local/include");
     exe.addObjectFile("/usr/local/lib64/libs2n.a");
-    exe.addObjectFile("/usr/local/lib/libcrypto.a");
-    exe.addObjectFile("/usr/local/lib/libssl.a");
+    exe.addObjectFile("/usr/local/lib64/libcrypto.a");
+    exe.addObjectFile("/usr/local/lib64/libssl.a");
     exe.addObjectFile("/usr/local/lib64/libaws-c-auth.a");
     exe.addObjectFile("/usr/local/lib64/libaws-c-cal.a");
     exe.addObjectFile("/usr/local/lib64/libaws-c-common.a");
