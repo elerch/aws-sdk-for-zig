@@ -54,7 +54,7 @@ supercede all other configuration.
 Full dependency tree:
 aws-c-auth
    * s2n
-      * openssl
+      * aws-lc
    * aws-c-common
    * aws-c-compression
      * aws-c-common
@@ -64,17 +64,20 @@ aws-c-auth
      * aws-c-io
        * aws-c-common
        * s2n
-         * openssl
+         * aws-lc
        * aws-c-cal
+         * aws-c-common
+         * aws-lc
      * aws-c-compression
        * aws-c-common
    * aws-c-cal
      * aws-c-common
+     * aws-lc
 
 Build order based on above:
 
 1. aws-c-common
-1. openssl
+1. aws-lc
 2. s2n
 2. aws-c-cal
 2. aws-c-compression
@@ -92,7 +95,7 @@ TODO List:
 * Implement generic response body -> Response type handling (right now, this is hard-coded)
 * Implement codegen for services with xml structures (using Smithy models)
 * Implement codegen for others (using Smithy models)
-* Issue PR in c libraries for full static musl build support (see Dockerfile)
+* Switch to aws-c-cal upsream once PR for full static musl build support is merged (see Dockerfile)
 * Remove compiler 0.7.1 shims when 0.8.0 is released
 
 Compiler wishlist/watchlist:
