@@ -1,5 +1,5 @@
 const std = @import("std");
-const xml = @import("xml.zig");
+const json = @import("json.zig");
 const c = @cImport({
     @cInclude("bitfield-workaround.h");
     @cInclude("aws/common/allocator.h");
@@ -67,17 +67,6 @@ fn ServiceActionResponse(comptime service: []const u8, comptime action: []const 
             arn: []const u8,
             user_id: []const u8,
             account: []const u8,
-            response_metadata: ResponseMetadata,
-
-            allocator: *std.mem.Allocator,
-            raw_response: xml.Document,
-
-            // If this is purely generic we won't be able to do it here as
-            // declarations aren't supported yet
-            // pub fn deinit(self: *const GetCallerIdentityResponse) void {
-            //     self.responseMetadata.deinit();
-            //     self.rawResponse.deinit();
-            // }
         };
     }
     unreachable;
@@ -165,13 +154,6 @@ pub const Aws = struct {
     var tls_ctx_options: ?*c.aws_tls_ctx_options = null;
     var tls_ctx: ?*c.aws_tls_ctx = null;
 
-    pub fn responseDeinit(raw_response: xml.Document, response_metadata: ?ResponseMetadata) void {
-        raw_response.deinit();
-        if (response_metadata) |meta| {
-            meta.deinit();
-        }
-    }
-
     fn AsyncResult(comptime T: type) type {
         return struct {
             result: *T,
@@ -246,13 +228,14 @@ pub const Aws = struct {
             log.debug("Deinit complete", .{});
         }
     }
-    pub fn call(self: Self, comptime request: anytype, options: Options) !Response(request) {
+    pub fn call(self: Self, comptime request: anytype, options: Options) !FullResponse(request) {
         const action_info = actionForRequest(request);
         // This is true weirdness, but we are running into compiler bugs. Touch only if
         // prepared...
         const service = @field(services, action_info.service);
         const action = @field(service, action_info.action);
         const R = Response(request);
+        const FullR = FullResponse(request);
 
         log.debug("service {s}", .{action_info.service});
         log.debug("version {s}", .{service.version});
@@ -260,51 +243,36 @@ pub const Aws = struct {
         const response = try self.callApi(action_info.service, service.version, action.action_name, options);
         defer response.deinit();
         // TODO: Check status code for badness
-        const doc = try xml.parse(self.allocator, response.body);
-        const result = doc.root.findChildByTag("GetCallerIdentityResult");
-        return R{
-            .arn = result.?.getCharData("Arn").?,
-            .user_id = result.?.getCharData("UserId").?,
-            .account = result.?.getCharData("Account").?,
+        var stream = json.TokenStream.init(response.body);
+
+        const parser_options = json.ParseOptions{
             .allocator = self.allocator,
-            .raw_response = doc,
-            .response_metadata = try metadataFromResponse(self.allocator, response.body),
+            .allow_camel_case_conversion = true, // new option
+            .allow_snake_case_conversion = true, // new option
+            .allow_unknown_fields = true, // new option. Cannot yet handle non-struct fields though
         };
-    }
-    fn actionForRequest(comptime request: anytype) struct { service: []const u8, action: []const u8, service_obj: anytype } {
-        const type_name = @typeName(@TypeOf(request));
-        var service_start: usize = 0;
-        var service_end: usize = 0;
-        var action_start: usize = 0;
-        var action_end: usize = 0;
-        for (type_name) |ch, i| {
-            switch (ch) {
-                '(' => service_start = i + 2,
-                ')' => action_end = i - 1,
-                ',' => {
-                    service_end = i - 1;
-                    action_start = i + 2;
-                },
-                else => continue,
-            }
-        }
-        // const zero: usize = 0;
-        // TODO: Figure out why if statement isn't working
-        // if (serviceStart == zero or serviceEnd == zero or actionStart == zero or actionEnd == zero) {
-        //     @compileLog("Type must be a function with two parameters \"service\" and \"action\". Found: " ++ type_name);
-        //     // @compileError("Type must be a function with two parameters \"service\" and \"action\". Found: " ++ type_name);
-        // }
-        return .{
-            .service = type_name[service_start..service_end],
-            .action = type_name[action_start..action_end],
-            .service_obj = @field(services, type_name[service_start..service_end]),
+        const SResponse = ServerResponse(request);
+        const parsed_response = try json.parse(SResponse, &stream, parser_options);
+
+        // Grab the first (and only) object from the server. Server shape expected to be:
+        // { ActionResponse: {ActionResult: {...}, ResponseMetadata: {...} } }
+        //                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        //                          Next line of code pulls this portion
+        //
+        //
+        // And the response property below will pull whatever is the ActionResult object
+        // We can grab index [0] as structs are guaranteed by zig to be returned in the order
+        // declared, and we're declaring in that order in ServerResponse().
+        const real_response = @field(parsed_response, @typeInfo(SResponse).Struct.fields[0].name);
+        return FullR{
+            .response = @field(real_response, @typeInfo(@TypeOf(real_response)).Struct.fields[0].name),
+            .response_metadata = .{
+                .request_id = real_response.ResponseMetadata.RequestId,
+            },
+            .parser_options = parser_options,
+            // .ParsedType = ServerResponse,
+            .raw_parsed = parsed_response,
         };
-    }
-    fn Response(comptime request: anytype) type {
-        const action_info = actionForRequest(request);
-        const service = @field(services, action_info.service);
-        const action = @field(service, action_info.action);
-        return action.Response;
     }
     fn callApi(self: Self, service: []const u8, version: []const u8, action: []const u8, options: Options) !HttpResult {
         const endpoint = try regionSubDomain(self.allocator, service, options.region, options.dualstack);
@@ -618,7 +586,7 @@ pub const Aws = struct {
     fn addHeaders(self: Self, request: *c.aws_http_message, host: []const u8, body: []const u8) !void {
         const accept_header = c.aws_http_header{
             .name = c.aws_byte_cursor_from_c_str("Accept"),
-            .value = c.aws_byte_cursor_from_c_str("*/*"),
+            .value = c.aws_byte_cursor_from_c_str("application/json"),
             .compression = .AWS_HTTP_HEADER_COMPRESSION_USE_CACHE,
         };
         if (c.aws_http_message_add_header(request, accept_header) != c.AWS_OP_SUCCESS)
@@ -962,16 +930,6 @@ fn cDeinit() void { // probably the wrong name
     log.debug("auth clean up complete", .{});
 }
 
-pub const ResponseMetadata = struct {
-    request_id: ?[]const u8,
-    allocator: *std.mem.Allocator,
-    pub fn deinit(self: *const ResponseMetadata) void {
-        if (self.request_id) |id| {
-            self.allocator.free(id);
-        }
-    }
-};
-
 pub const Options = struct {
     region: []const u8 = "aws-global",
     dualstack: bool = false,
@@ -1143,3 +1101,103 @@ const RequestContext = struct {
         });
     }
 };
+fn actionForRequest(comptime request: anytype) struct { service: []const u8, action: []const u8, service_obj: anytype } {
+    const type_name = @typeName(@TypeOf(request));
+    var service_start: usize = 0;
+    var service_end: usize = 0;
+    var action_start: usize = 0;
+    var action_end: usize = 0;
+    for (type_name) |ch, i| {
+        switch (ch) {
+            '(' => service_start = i + 2,
+            ')' => action_end = i - 1,
+            ',' => {
+                service_end = i - 1;
+                action_start = i + 2;
+            },
+            else => continue,
+        }
+    }
+    // const zero: usize = 0;
+    // TODO: Figure out why if statement isn't working
+    // if (serviceStart == zero or serviceEnd == zero or actionStart == zero or actionEnd == zero) {
+    //     @compileLog("Type must be a function with two parameters \"service\" and \"action\". Found: " ++ type_name);
+    //     // @compileError("Type must be a function with two parameters \"service\" and \"action\". Found: " ++ type_name);
+    // }
+    return .{
+        .service = type_name[service_start..service_end],
+        .action = type_name[action_start..action_end],
+        .service_obj = @field(services, type_name[service_start..service_end]),
+    };
+}
+fn ServerResponse(comptime request: anytype) type {
+    const T = Response(request);
+    const action_info = actionForRequest(request);
+    const service = @field(services, action_info.service);
+    const action = @field(service, action_info.action);
+    // NOTE: This is weird capitalization as a performance enhancement and to reduce
+    // allocations in json.zig
+    const ResponseMetadata = struct {
+        RequestId: []u8,
+    };
+    const Result = @Type(.{
+        .Struct = .{
+            .layout = .Auto,
+            .fields = &[_]std.builtin.TypeInfo.StructField{
+                .{
+                    .name = action.action_name ++ "Result",
+                    .field_type = T,
+                    .default_value = null,
+                    .is_comptime = false,
+                    .alignment = 0,
+                },
+                .{
+                    .name = "ResponseMetadata",
+                    .field_type = ResponseMetadata,
+                    .default_value = null,
+                    .is_comptime = false,
+                    .alignment = 0,
+                },
+            },
+            .decls = &[_]std.builtin.TypeInfo.Declaration{},
+            .is_tuple = false,
+        },
+    });
+    return @Type(.{
+        .Struct = .{
+            .layout = .Auto,
+            .fields = &[_]std.builtin.TypeInfo.StructField{
+                .{
+                    .name = action.action_name ++ "Response",
+                    .field_type = Result,
+                    .default_value = null,
+                    .is_comptime = false,
+                    .alignment = 0,
+                },
+            },
+            .decls = &[_]std.builtin.TypeInfo.Declaration{},
+            .is_tuple = false,
+        },
+    });
+}
+fn FullResponse(comptime request: anytype) type {
+    return struct {
+        response: Response(request),
+        response_metadata: struct {
+            request_id: []u8,
+        },
+        parser_options: json.ParseOptions,
+        raw_parsed: ServerResponse(request),
+
+        const Self = @This();
+        pub fn deinit(self: Self) void {
+            json.parseFree(ServerResponse(request), self.raw_parsed, self.parser_options);
+        }
+    };
+}
+fn Response(comptime request: anytype) type {
+    const action_info = actionForRequest(request);
+    const service = @field(services, action_info.service);
+    const action = @field(service, action_info.action);
+    return action.Response;
+}
