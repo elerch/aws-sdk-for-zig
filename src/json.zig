@@ -1451,8 +1451,24 @@ pub const ParseOptions = struct {
         UseLast,
     } = .Error,
 
+    allow_camel_case_conversion: bool = false,
     allow_unknown_fields: bool = false,
 };
+
+fn camelCaseComp(field: []const u8, key: []const u8, options: ParseOptions) !bool {
+    const allocator = options.allocator orelse return error.AllocatorRequired;
+    const source_key_camel_case = try allocator.dupeZ(u8, key);
+    defer allocator.free(source_key_camel_case);
+    var utf8_source_key = (std.unicode.Utf8View.init(source_key_camel_case) catch unreachable).iterator();
+    if (utf8_source_key.nextCodepoint()) |codepoint| {
+        if (codepoint >= 'A' and codepoint <= 'Z') {
+            // First codepoint is uppercase Latin char, which is all we're handling atm
+            source_key_camel_case[0] = source_key_camel_case[0] + ('a' - 'A');
+            // We will assume the target field is in camelCase
+        }
+    }
+    return std.mem.eql(u8, field, source_key_camel_case);
+}
 
 fn parseInternal(comptime T: type, token: Token, tokens: *TokenStream, options: ParseOptions) !T {
     switch (@typeInfo(T)) {
@@ -1556,7 +1572,7 @@ fn parseInternal(comptime T: type, token: Token, tokens: *TokenStream, options: 
                         var found = false;
                         inline for (structInfo.fields) |field, i| {
                             // TODO: using switches here segfault the compiler (#2727?)
-                            if ((stringToken.escapes == .None and mem.eql(u8, field.name, key_source_slice)) or (stringToken.escapes == .Some and (field.name.len == stringToken.decodedLength() and encodesTo(field.name, key_source_slice)))) {
+                            if ((stringToken.escapes == .None and mem.eql(u8, field.name, key_source_slice)) or (stringToken.escapes == .Some and (field.name.len == stringToken.decodedLength() and encodesTo(field.name, key_source_slice))) or (stringToken.escapes == .None and options.allow_camel_case_conversion and try camelCaseComp(field.name, key_source_slice, options))) {
                                 // if (switch (stringToken.escapes) {
                                 //     .None => mem.eql(u8, field.name, key_source_slice),
                                 //     .Some => (field.name.len == stringToken.decodedLength() and encodesTo(field.name, key_source_slice)),
