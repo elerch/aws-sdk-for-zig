@@ -1452,6 +1452,7 @@ pub const ParseOptions = struct {
     } = .Error,
 
     allow_camel_case_conversion: bool = false,
+    allow_snake_case_conversion: bool = false,
     allow_unknown_fields: bool = false,
 };
 
@@ -1469,6 +1470,52 @@ fn camelCaseComp(field: []const u8, key: []const u8, options: ParseOptions) !boo
         }
     }
     return std.mem.eql(u8, field, key);
+}
+fn snakeCaseComp(field: []const u8, key: []const u8, options: ParseOptions) !bool {
+    // snake case is much more intricate. Input:
+    // Field: user_id
+    // Key: UserId
+    // We can duplicate the field and remove all _ characters safely
+    // Then take the key and lowercase all the uppercase.
+    // Then compare
+    var found: u32 = 0;
+    for (field) |ch| {
+        if (ch == '_') {
+            found = found + 1;
+            break;
+        }
+    }
+    if (found == 0)
+        return std.mem.eql(u8, field, key);
+
+    // We have a snake case field. Let's do this
+    const allocator = options.allocator orelse return error.AllocatorRequired;
+    const comp_field = try allocator.alloc(u8, field.len - found);
+    defer allocator.free(comp_field);
+    var inx: u32 = 0;
+    for (field) |ch| {
+        if (ch != '_') {
+            comp_field[inx] = ch;
+            inx = inx + 1;
+        }
+    }
+    // field = 'user_id', comp_field = 'userid'
+
+    // We now transform the key by lowercasing. We will only deal with Latin
+    var utf8_source_key = (std.unicode.Utf8View.init(key) catch unreachable).iterator();
+    const normalized_key = try allocator.dupeZ(u8, key);
+    defer allocator.free(normalized_key);
+    inx = 0;
+    while (utf8_source_key.nextCodepoint()) |codepoint| {
+        if (codepoint > 255) return error.InvalidLiteral;
+        if (codepoint >= 'A' and codepoint <= 'Z') {
+            // First codepoint is uppercase Latin char, which is all we're handling atm
+            normalized_key[inx] = normalized_key[inx] + ('a' - 'A');
+            // We will assume the target field is in camelCase
+        }
+        inx = inx + 1;
+    }
+    return std.mem.eql(u8, comp_field, normalized_key);
 }
 
 fn parseInternal(comptime T: type, token: Token, tokens: *TokenStream, options: ParseOptions) !T {
@@ -1573,7 +1620,7 @@ fn parseInternal(comptime T: type, token: Token, tokens: *TokenStream, options: 
                         var found = false;
                         inline for (structInfo.fields) |field, i| {
                             // TODO: using switches here segfault the compiler (#2727?)
-                            if ((stringToken.escapes == .None and mem.eql(u8, field.name, key_source_slice)) or (stringToken.escapes == .Some and (field.name.len == stringToken.decodedLength() and encodesTo(field.name, key_source_slice))) or (stringToken.escapes == .None and options.allow_camel_case_conversion and try camelCaseComp(field.name, key_source_slice, options))) {
+                            if ((stringToken.escapes == .None and mem.eql(u8, field.name, key_source_slice)) or (stringToken.escapes == .Some and (field.name.len == stringToken.decodedLength() and encodesTo(field.name, key_source_slice))) or (stringToken.escapes == .None and options.allow_camel_case_conversion and try camelCaseComp(field.name, key_source_slice, options)) or (stringToken.escapes == .None and options.allow_snake_case_conversion and try snakeCaseComp(field.name, key_source_slice, options))) {
                                 // if (switch (stringToken.escapes) {
                                 //     .None => mem.eql(u8, field.name, key_source_slice),
                                 //     .Some => (field.name.len == stringToken.decodedLength() and encodesTo(field.name, key_source_slice)),
