@@ -1590,6 +1590,21 @@ fn parseInternal(comptime T: type, token: Token, tokens: *TokenStream, options: 
                         }
                         if (!found and !options.allow_unknown_fields) return error.UnknownField;
                     },
+                    .ObjectBegin => {
+                        if (!options.allow_unknown_fields) return error.UnknownField;
+                        // At this point, we are in a struct that we do not care about. Fast forward
+                        var objects: u64 = 1;
+                        while (true) {
+                            switch ((try tokens.next()) orelse return error.UnexpectedEndOfJson) {
+                                .ObjectBegin => objects = objects + 1,
+                                .ObjectEnd => {
+                                    objects = objects - 1;
+                                    if (objects == 0) break;
+                                },
+                                else => {},
+                            }
+                        }
+                    },
                     else => return error.UnexpectedToken,
                 }
             }
