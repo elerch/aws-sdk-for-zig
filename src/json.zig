@@ -1456,18 +1456,19 @@ pub const ParseOptions = struct {
 };
 
 fn camelCaseComp(field: []const u8, key: []const u8, options: ParseOptions) !bool {
-    const allocator = options.allocator orelse return error.AllocatorRequired;
-    const source_key_camel_case = try allocator.dupeZ(u8, key);
-    defer allocator.free(source_key_camel_case);
-    var utf8_source_key = (std.unicode.Utf8View.init(source_key_camel_case) catch unreachable).iterator();
+    var utf8_source_key = (std.unicode.Utf8View.init(key) catch unreachable).iterator();
     if (utf8_source_key.nextCodepoint()) |codepoint| {
         if (codepoint >= 'A' and codepoint <= 'Z') {
+            const allocator = options.allocator orelse return error.AllocatorRequired;
+            const source_key_camel_case = try allocator.dupeZ(u8, key);
+            defer allocator.free(source_key_camel_case);
             // First codepoint is uppercase Latin char, which is all we're handling atm
             source_key_camel_case[0] = source_key_camel_case[0] + ('a' - 'A');
             // We will assume the target field is in camelCase
+            return std.mem.eql(u8, field, source_key_camel_case);
         }
     }
-    return std.mem.eql(u8, field, source_key_camel_case);
+    return std.mem.eql(u8, field, key);
 }
 
 fn parseInternal(comptime T: type, token: Token, tokens: *TokenStream, options: ParseOptions) !T {
