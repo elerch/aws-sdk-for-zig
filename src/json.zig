@@ -1450,6 +1450,8 @@ pub const ParseOptions = struct {
         Error,
         UseLast,
     } = .Error,
+
+    allow_unknown_fields: bool = false,
 };
 
 fn parseInternal(comptime T: type, token: Token, tokens: *TokenStream, options: ParseOptions) !T {
@@ -1586,7 +1588,7 @@ fn parseInternal(comptime T: type, token: Token, tokens: *TokenStream, options: 
                                 break;
                             }
                         }
-                        if (!found) return error.UnknownField;
+                        if (!found and !options.allow_unknown_fields) return error.UnknownField;
                     },
                     else => return error.UnexpectedToken,
                 }
