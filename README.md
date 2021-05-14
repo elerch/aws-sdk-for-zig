@@ -100,7 +100,12 @@ TODO List:
 
 Compiler wishlist/watchlist:
 
-* Fix the weirdness we see with comptime type generation (see aws.zig around line 251)
-* [Allow declarations for comptime type generation](https://github.com/ziglang/zig/issues/6709)
+* Fix the weirdness we see with comptime type generation (see aws.zig around line 135)
+* ~~[Allow declarations for comptime type generation](https://github.com/ziglang/zig/issues/6709)~~
+
+This is no longer as important. The primary issue was in the return value, but
+due to the way AWS responses are provided, we are able to statically declare a
+type and thus allow our types to be generated.
+
 * [Merge PR to allow stripping -static](https://github.com/ziglang/zig/pull/8248)
 * [comptime allocations](https://github.com/ziglang/zig/issues/1291) so we can read files, etc (or is there another way)
