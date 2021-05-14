@@ -1,3 +1,12 @@
+//! This module provides a low level http interface for working with AWS
+//! It also provides an option to operate outside the AWS ecosystem through
+//! the makeRequest call with a null signingOptions.
+//!
+//! Typical usage:
+//! const client = awshttp.AwsHttp.init(allocator);
+//! defer client.deinit()
+//! const result = client.callApi (or client.makeRequest)
+//! defer result.deinit();
 const std = @import("std");
 const c = @cImport({
     @cInclude("bitfield-workaround.h");
@@ -66,6 +75,7 @@ pub const SigningOptions = struct {
 };
 
 const HttpResult = struct {
+    response_code: u16, // actually 3 digits can fit in u10
     body: []const u8,
     pub fn deinit(self: HttpResult) void {
         httplog.debug("http result deinit complete", .{});
@@ -218,6 +228,10 @@ pub const AwsHttp = struct {
         }
     }
 
+    /// callApi allows the calling of AWS APIs through a higher-level interface.
+    /// It will calculate the appropriate endpoint and action parameters for the
+    /// service called, and will set up the signing options. The return
+    /// value is simply a raw HttpResult
     pub fn callApi(self: Self, service: []const u8, version: []const u8, action: []const u8, options: Options) !HttpResult {
         const endpoint = try regionSubDomain(self.allocator, service, options.region, options.dualstack);
         defer endpoint.deinit();
@@ -231,89 +245,24 @@ pub const AwsHttp = struct {
         return try self.makeRequest(endpoint, "POST", "/", body, signing_options);
     }
 
-    fn signRequest(self: Self, http_request: *c.aws_http_message, options: SigningOptions) !void {
-        const creds = try self.getCredentials();
-        defer c.aws_credentials_release(creds);
-        // print the access key. Creds are an opaque C type, so we
-        // use aws_credentials_get_access_key_id. That gets us an aws_byte_cursor,
-        // from which we create a new aws_string with the contents. We need
-        // to convert to c_str with aws_string_c_str
-        const access_key = c.aws_string_new_from_cursor(c_allocator, &c.aws_credentials_get_access_key_id(creds));
-        defer c.aws_mem_release(c_allocator, access_key);
-        // defer c_allocator.*.mem_release.?(c_allocator, access_key);
-        httplog.debug("Signing with access key: {s}", .{c.aws_string_c_str(access_key)});
-
-        const signable = c.aws_signable_new_http_request(c_allocator, http_request);
-        if (signable == null) {
-            httplog.warn("Could not create signable request", .{});
-            return AwsError.SignableError;
-        }
-        defer c.aws_signable_destroy(signable);
-
-        const signing_region = try std.fmt.allocPrint(self.allocator, "{s}", .{options.region});
-        defer self.allocator.free(signing_region);
-        const signing_service = try std.fmt.allocPrint(self.allocator, "{s}", .{options.service});
-        defer self.allocator.free(signing_service);
-        const temp_signing_config = c.bitfield_workaround_aws_signing_config_aws{
-            .algorithm = .AWS_SIGNING_ALGORITHM_V4,
-            .config_type = .AWS_SIGNING_CONFIG_AWS,
-            .signature_type = .AWS_ST_HTTP_REQUEST_HEADERS,
-            .region = c.aws_byte_cursor_from_c_str(@ptrCast([*c]const u8, signing_region)),
-            .service = c.aws_byte_cursor_from_c_str(@ptrCast([*c]const u8, signing_service)),
-            .should_sign_header = null,
-            .should_sign_header_ud = null,
-            .flags = c.bitfield_workaround_aws_signing_config_aws_flags{
-                .use_double_uri_encode = 0,
-                .should_normalize_uri_path = 0,
-                .omit_session_token = 1,
-            },
-            .signed_body_value = c.aws_byte_cursor_from_c_str(""),
-            .signed_body_header = .AWS_SBHT_X_AMZ_CONTENT_SHA256, //or AWS_SBHT_NONE
-            .credentials = creds,
-            .credentials_provider = self.credentialsProvider,
-            .expiration_in_seconds = 0,
-        };
-        var signing_config = c.new_aws_signing_config(c_allocator, &temp_signing_config);
-        defer c.aws_mem_release(c_allocator, signing_config);
-        var signing_result = AwsAsyncCallbackResult(c.aws_http_message){ .result = http_request };
-        var sign_result_request = AsyncResult(AwsAsyncCallbackResult(c.aws_http_message)){ .result = &signing_result };
-        if (c.aws_sign_request_aws(c_allocator, signable, fullCast([*c]const c.aws_signing_config_base, signing_config), signComplete, &sign_result_request) != c.AWS_OP_SUCCESS) {
-            const error_code = c.aws_last_error();
-            httplog.alert("Could not initiate signing request: {s}:{s}", .{ c.aws_error_name(error_code), c.aws_error_str(error_code) });
-            return AwsError.SigningInitiationError;
-        }
-
-        // Wait for callback. Note that execution, including real work of signing
-        // the http request, will continue in signComplete (below),
-        // then continue beyond this line
-        waitOnCallback(c.aws_http_message, &sign_result_request);
-        if (sign_result_request.result.error_code != c.AWS_ERROR_SUCCESS) {
-            return AwsError.SignableError;
-        }
-    }
-
-    /// It's my theory that the aws event loop has a trigger to corrupt the
-    /// signing result after this call completes. So the technique of assigning
-    /// now, using later will not work
-    fn signComplete(result: ?*c.aws_signing_result, error_code: c_int, user_data: ?*c_void) callconv(.C) void {
-        var async_result = userDataTo(AsyncResult(AwsAsyncCallbackResult(c.aws_http_message)), user_data);
-        var http_request = async_result.result.result;
-        async_result.sync.store(true, .SeqCst);
-
-        async_result.count += 1;
-        async_result.result.error_code = error_code;
-
-        if (result) |res| {
-            if (c.aws_apply_signing_result_to_http_request(http_request, c_allocator, result) != c.AWS_OP_SUCCESS) {
-                httplog.alert("Could not apply signing request to http request: {s}", .{c.aws_error_debug_str(c.aws_last_error())});
-            }
-            httplog.debug("signing result applied", .{});
-        } else {
-            httplog.alert("Did not receive signing result: {s}", .{c.aws_error_debug_str(c.aws_last_error())});
-        }
-        async_result.sync.store(false, .SeqCst);
-    }
-
+    /// makeRequest is a low level http/https function that can be used inside
+    /// or outside the context of AWS services. To use it outside AWS, simply
+    /// pass a null value in for signing_options.
+    ///
+    /// Otherwise, it will simply take a URL endpoint (without path information),
+    /// HTTP method (e.g. GET, POST, etc.), and request body.
+    ///
+    /// At the moment this does not allow the controlling of headers
+    /// This is likely to change. Current headers are:
+    ///
+    /// Accept: application/json
+    /// User-Agent: zig-aws 1.0, Powered by the AWS Common Runtime.
+    /// Content-Type: application/x-www-form-urlencoded
+    /// Content-Length: (length of body)
+    ///
+    /// Return value is an HttpResult, which will need the caller to deinit().
+    /// HttpResult currently contains the body only. The addition of Headers
+    /// and return code would be a relatively minor change
     pub fn makeRequest(self: Self, endpoint: EndPoint, method: []const u8, path: []const u8, body: []const u8, signing_options: ?SigningOptions) !HttpResult {
         // TODO: Try to re-encapsulate this
         // var http_request = try createRequest(method, path, body);
@@ -321,9 +270,6 @@ pub const AwsHttp = struct {
         // TODO: Likely this should be encapsulated more
         var http_request = c.aws_http_message_new_request(c_allocator);
         defer c.aws_http_message_release(http_request);
-        // TODO: Verify if AWS cares about these headers (probably should be passing them...)
-        // Accept-Encoding: identity
-        // Content-Type: application/x-www-form-urlencoded
 
         if (c.aws_http_message_set_request_method(http_request, c.aws_byte_cursor_from_c_str(@ptrCast([*c]const u8, method))) != c.AWS_OP_SUCCESS)
             return AwsError.SetRequestMethodError;
@@ -453,8 +399,6 @@ pub const AwsHttp = struct {
             .request = http_request,
         };
 
-        // C code
-        // app_ctx->response_code_written = false;
         const stream = c.aws_http_connection_make_request(context.connection, &request_options);
         if (stream == null) {
             httplog.alert("failed to create request.", .{});
@@ -484,7 +428,12 @@ pub const AwsHttp = struct {
         if (context.body) |b| {
             final_body = b;
         }
+
+        // Headers would need to be allocated/copied into HttpResult similar
+        // to RequestContext, so we'll leave this as a later excercise
+        // if it becomes necessary
         const rc = HttpResult{
+            .response_code = context.response_code.?,
             .body = final_body,
         };
         return rc;
@@ -495,9 +444,6 @@ pub const AwsHttp = struct {
     fn createRequest(method: []const u8, path: []const u8, body: []const u8) !*c.aws_http_message {
         // TODO: Likely this should be encapsulated more
         var http_request = c.aws_http_message_new_request(c_allocator);
-        // TODO: Verify if AWS cares about these headers (probably should be passing them...)
-        // Accept-Encoding: identity
-        // Content-Type: application/x-www-form-urlencoded
 
         if (c.aws_http_message_set_request_method(http_request, c.aws_byte_cursor_from_c_str(@ptrCast([*c]const u8, method))) != c.AWS_OP_SUCCESS)
             return AwsError.SetRequestMethodError;
@@ -511,6 +457,149 @@ pub const AwsHttp = struct {
         c.aws_http_message_set_body_stream(http_request, request_body);
         return http_request.?;
     }
+
+    // TODO: Re-encapsulate or delete this function. It is not currently
+    // used and will not be touched by the compiler
+    fn setupTls(self: Self, host: []const u8) !*c.aws_tls_connection_options {
+        if (tls_ctx_options == null) {
+            httplog.debug("Setting up tls options", .{});
+            var opts: c.aws_tls_ctx_options = .{
+                .allocator = c_allocator,
+                .minimum_tls_version = @intToEnum(c.aws_tls_versions, c.AWS_IO_TLS_VER_SYS_DEFAULTS),
+                .cipher_pref = @intToEnum(c.aws_tls_cipher_pref, c.AWS_IO_TLS_CIPHER_PREF_SYSTEM_DEFAULT),
+                .ca_file = c.aws_byte_buf_from_c_str(""),
+                .ca_path = c.aws_string_new_from_c_str(c_allocator, ""),
+                .alpn_list = null,
+                .certificate = c.aws_byte_buf_from_c_str(""),
+                .private_key = c.aws_byte_buf_from_c_str(""),
+                .max_fragment_size = 0,
+                .verify_peer = true,
+            };
+            tls_ctx_options = &opts;
+
+            c.aws_tls_ctx_options_init_default_client(tls_ctx_options.?, c_allocator);
+            // h2;http/1.1
+            if (c.aws_tls_ctx_options_set_alpn_list(tls_ctx_options, "http/1.1") != c.AWS_OP_SUCCESS) {
+                httplog.alert("Failed to load alpn list with error {s}.", .{c.aws_error_debug_str(c.aws_last_error())});
+                return AwsError.AlpnError;
+            }
+
+            tls_ctx = c.aws_tls_client_ctx_new(c_allocator, tls_ctx_options.?);
+
+            if (tls_ctx == null) {
+                std.debug.panic("Failed to initialize TLS context with error {s}.", .{c.aws_error_debug_str(c.aws_last_error())});
+            }
+            httplog.debug("tls options setup applied", .{});
+        }
+
+        var tls_connection_options = c.aws_tls_connection_options{
+            .alpn_list = null,
+            .server_name = null,
+            .on_negotiation_result = null,
+            .on_data_read = null,
+            .on_error = null,
+            .user_data = null,
+            .ctx = null,
+            .advertise_alpn_message = false,
+            .timeout_ms = 0,
+        };
+        c.aws_tls_connection_options_init_from_ctx(&tls_connection_options, tls_ctx);
+        var host_var = host;
+        var host_cur = c.aws_byte_cursor_from_c_str(@ptrCast([*c]const u8, host_var));
+        if (c.aws_tls_connection_options_set_server_name(&tls_connection_options, c_allocator, &host_cur) != c.AWS_OP_SUCCESS) {
+            httplog.alert("Failed to set servername with error {s}.", .{c.aws_error_debug_str(c.aws_last_error())});
+            return AwsError.TlsError;
+        }
+        return &tls_connection_options;
+
+        // if (app_ctx.uri.port) {
+        //     port = app_ctx.uri.port;
+        // }
+    }
+
+    fn signRequest(self: Self, http_request: *c.aws_http_message, options: SigningOptions) !void {
+        const creds = try self.getCredentials();
+        defer c.aws_credentials_release(creds);
+        // print the access key. Creds are an opaque C type, so we
+        // use aws_credentials_get_access_key_id. That gets us an aws_byte_cursor,
+        // from which we create a new aws_string with the contents. We need
+        // to convert to c_str with aws_string_c_str
+        const access_key = c.aws_string_new_from_cursor(c_allocator, &c.aws_credentials_get_access_key_id(creds));
+        defer c.aws_mem_release(c_allocator, access_key);
+        // defer c_allocator.*.mem_release.?(c_allocator, access_key);
+        httplog.debug("Signing with access key: {s}", .{c.aws_string_c_str(access_key)});
+
+        const signable = c.aws_signable_new_http_request(c_allocator, http_request);
+        if (signable == null) {
+            httplog.warn("Could not create signable request", .{});
+            return AwsError.SignableError;
+        }
+        defer c.aws_signable_destroy(signable);
+
+        const signing_region = try std.fmt.allocPrint(self.allocator, "{s}", .{options.region});
+        defer self.allocator.free(signing_region);
+        const signing_service = try std.fmt.allocPrint(self.allocator, "{s}", .{options.service});
+        defer self.allocator.free(signing_service);
+        const temp_signing_config = c.bitfield_workaround_aws_signing_config_aws{
+            .algorithm = .AWS_SIGNING_ALGORITHM_V4,
+            .config_type = .AWS_SIGNING_CONFIG_AWS,
+            .signature_type = .AWS_ST_HTTP_REQUEST_HEADERS,
+            .region = c.aws_byte_cursor_from_c_str(@ptrCast([*c]const u8, signing_region)),
+            .service = c.aws_byte_cursor_from_c_str(@ptrCast([*c]const u8, signing_service)),
+            .should_sign_header = null,
+            .should_sign_header_ud = null,
+            .flags = c.bitfield_workaround_aws_signing_config_aws_flags{
+                .use_double_uri_encode = 0,
+                .should_normalize_uri_path = 0,
+                .omit_session_token = 1,
+            },
+            .signed_body_value = c.aws_byte_cursor_from_c_str(""),
+            .signed_body_header = .AWS_SBHT_X_AMZ_CONTENT_SHA256, //or AWS_SBHT_NONE
+            .credentials = creds,
+            .credentials_provider = self.credentialsProvider,
+            .expiration_in_seconds = 0,
+        };
+        var signing_config = c.new_aws_signing_config(c_allocator, &temp_signing_config);
+        defer c.aws_mem_release(c_allocator, signing_config);
+        var signing_result = AwsAsyncCallbackResult(c.aws_http_message){ .result = http_request };
+        var sign_result_request = AsyncResult(AwsAsyncCallbackResult(c.aws_http_message)){ .result = &signing_result };
+        if (c.aws_sign_request_aws(c_allocator, signable, fullCast([*c]const c.aws_signing_config_base, signing_config), signComplete, &sign_result_request) != c.AWS_OP_SUCCESS) {
+            const error_code = c.aws_last_error();
+            httplog.alert("Could not initiate signing request: {s}:{s}", .{ c.aws_error_name(error_code), c.aws_error_str(error_code) });
+            return AwsError.SigningInitiationError;
+        }
+
+        // Wait for callback. Note that execution, including real work of signing
+        // the http request, will continue in signComplete (below),
+        // then continue beyond this line
+        waitOnCallback(c.aws_http_message, &sign_result_request);
+        if (sign_result_request.result.error_code != c.AWS_ERROR_SUCCESS) {
+            return AwsError.SignableError;
+        }
+    }
+
+    /// It's my theory that the aws event loop has a trigger to corrupt the
+    /// signing result after this call completes. So the technique of assigning
+    /// now, using later will not work
+    fn signComplete(result: ?*c.aws_signing_result, error_code: c_int, user_data: ?*c_void) callconv(.C) void {
+        var async_result = userDataTo(AsyncResult(AwsAsyncCallbackResult(c.aws_http_message)), user_data);
+        var http_request = async_result.result.result;
+        async_result.sync.store(true, .SeqCst);
+
+        async_result.count += 1;
+        async_result.result.error_code = error_code;
+
+        if (result) |res| {
+            if (c.aws_apply_signing_result_to_http_request(http_request, c_allocator, result) != c.AWS_OP_SUCCESS) {
+                httplog.alert("Could not apply signing request to http request: {s}", .{c.aws_error_debug_str(c.aws_last_error())});
+            }
+            httplog.debug("signing result applied", .{});
+        } else {
+            httplog.alert("Did not receive signing result: {s}", .{c.aws_error_debug_str(c.aws_last_error())});
+        }
+        async_result.sync.store(false, .SeqCst);
+    }
+
     fn addHeaders(self: Self, request: *c.aws_http_message, host: []const u8, body: []const u8) !void {
         const accept_header = c.aws_http_header{
             .name = c.aws_byte_cursor_from_c_str("Accept"),
@@ -627,65 +716,6 @@ pub const AwsHttp = struct {
         context.request_complete.store(true, .SeqCst);
         c.aws_http_stream_release(stream);
         httplog.debug("request complete", .{});
-    }
-
-    // TODO: Re-encapsulate or delete this function. It is not currently
-    // used and will not be touched by the compiler
-    fn setupTls(self: Self, host: []const u8) !*c.aws_tls_connection_options {
-        if (tls_ctx_options == null) {
-            httplog.debug("Setting up tls options", .{});
-            var opts: c.aws_tls_ctx_options = .{
-                .allocator = c_allocator,
-                .minimum_tls_version = @intToEnum(c.aws_tls_versions, c.AWS_IO_TLS_VER_SYS_DEFAULTS),
-                .cipher_pref = @intToEnum(c.aws_tls_cipher_pref, c.AWS_IO_TLS_CIPHER_PREF_SYSTEM_DEFAULT),
-                .ca_file = c.aws_byte_buf_from_c_str(""),
-                .ca_path = c.aws_string_new_from_c_str(c_allocator, ""),
-                .alpn_list = null,
-                .certificate = c.aws_byte_buf_from_c_str(""),
-                .private_key = c.aws_byte_buf_from_c_str(""),
-                .max_fragment_size = 0,
-                .verify_peer = true,
-            };
-            tls_ctx_options = &opts;
-
-            c.aws_tls_ctx_options_init_default_client(tls_ctx_options.?, c_allocator);
-            // h2;http/1.1
-            if (c.aws_tls_ctx_options_set_alpn_list(tls_ctx_options, "http/1.1") != c.AWS_OP_SUCCESS) {
-                httplog.alert("Failed to load alpn list with error {s}.", .{c.aws_error_debug_str(c.aws_last_error())});
-                return AwsError.AlpnError;
-            }
-
-            tls_ctx = c.aws_tls_client_ctx_new(c_allocator, tls_ctx_options.?);
-
-            if (tls_ctx == null) {
-                std.debug.panic("Failed to initialize TLS context with error {s}.", .{c.aws_error_debug_str(c.aws_last_error())});
-            }
-            httplog.debug("tls options setup applied", .{});
-        }
-
-        var tls_connection_options = c.aws_tls_connection_options{
-            .alpn_list = null,
-            .server_name = null,
-            .on_negotiation_result = null,
-            .on_data_read = null,
-            .on_error = null,
-            .user_data = null,
-            .ctx = null,
-            .advertise_alpn_message = false,
-            .timeout_ms = 0,
-        };
-        c.aws_tls_connection_options_init_from_ctx(&tls_connection_options, tls_ctx);
-        var host_var = host;
-        var host_cur = c.aws_byte_cursor_from_c_str(@ptrCast([*c]const u8, host_var));
-        if (c.aws_tls_connection_options_set_server_name(&tls_connection_options, c_allocator, &host_cur) != c.AWS_OP_SUCCESS) {
-            httplog.alert("Failed to set servername with error {s}.", .{c.aws_error_debug_str(c.aws_last_error())});
-            return AwsError.TlsError;
-        }
-        return &tls_connection_options;
-
-        // if (app_ctx.uri.port) {
-        //     port = app_ctx.uri.port;
-        // }
     }
 
     fn getCredentials(self: Self) !*c.aws_credentials {
