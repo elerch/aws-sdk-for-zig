@@ -93,8 +93,8 @@ TODO List:
 * Implement timeouts and other TODO's in the code
 * Implement error handling for 4xx, 5xx and other unexpected return values
 * Implement generic response body -> Response type handling (right now, this is hard-coded)
-* Implement codegen for services with xml structures (using Smithy models)
-* Implement codegen for others (using Smithy models)
+* ✓ Implement codegen for services with xml structures (using Smithy models)
+* ✓ Implement codegen for others (using Smithy models)
 * Switch to aws-c-cal upsream once PR for full static musl build support is merged (see Dockerfile)
 * Remove compiler 0.7.1 shims when 0.8.0 is released
 
