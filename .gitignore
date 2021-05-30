@@ -1,3 +1,4 @@
 .cache
 zig-cache
 codegen/models/*.zig
+codegen/codegen
