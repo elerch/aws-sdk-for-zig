@@ -59,6 +59,8 @@ pub const TraitType = enum {
     aws_api_service,
     aws_auth_sigv4,
     aws_protocol,
+    ec2_query_name,
+    json_name,
     required,
     documentation,
     pattern,
@@ -79,6 +81,8 @@ pub const Trait = union(TraitType) {
         name: []const u8,
     },
     aws_protocol: AwsProtocol,
+    ec2_query_name: []const u8,
+    json_name: []const u8,
     required: struct {},
     documentation: []const u8,
     pattern: []const u8,
@@ -126,7 +130,7 @@ pub const TypeMember = struct {
     traits: []Trait,
 };
 const Shape = union(ShapeType) {
-    blob: struct {},
+    blob: TraitsOnly,
     boolean: TraitsOnly,
     string: TraitsOnly,
     byte: TraitsOnly,
@@ -138,23 +142,28 @@ const Shape = union(ShapeType) {
     bigInteger: TraitsOnly,
     bigDecimal: TraitsOnly,
     timestamp: TraitsOnly,
-    document: struct {},
-    member: struct {},
+    document: TraitsOnly,
+    member: TraitsOnly,
     list: struct {
         member_target: []const u8,
+        traits: []Trait,
     },
     set: struct {
         member_target: []const u8,
+        traits: []Trait,
     },
     map: struct {
         key: []const u8,
         value: []const u8,
+        traits: []Trait,
     },
     structure: struct {
         members: []TypeMember,
+        traits: []Trait,
     },
     uniontype: struct {
         members: []TypeMember,
+        traits: []Trait,
     },
     service: struct {
         version: []const u8,
@@ -168,7 +177,7 @@ const Shape = union(ShapeType) {
         errors: ?[][]const u8,
         traits: []Trait,
     },
-    resource: struct {},
+    resource: TraitsOnly,
 };
 
 // https://awslabs.github.io/smithy/1.0/spec/aws/index.html
@@ -295,12 +304,14 @@ fn getShape(allocator: *std.mem.Allocator, shape: std.json.Value) SmithyParseErr
         return Shape{
             .structure = .{
                 .members = try parseMembers(allocator, shape.Object.get("members")),
+                .traits = try parseTraits(allocator, shape.Object.get("traits")),
             },
         };
     if (std.mem.eql(u8, shape_type, "union"))
         return Shape{
             .uniontype = .{
                 .members = try parseMembers(allocator, shape.Object.get("members")),
+                .traits = try parseTraits(allocator, shape.Object.get("traits")),
             },
         };
     if (std.mem.eql(u8, shape_type, "operation"))
@@ -321,12 +332,14 @@ fn getShape(allocator: *std.mem.Allocator, shape: std.json.Value) SmithyParseErr
         return Shape{
             .list = .{
                 .member_target = shape.Object.get("member").?.Object.get("target").?.String,
+                .traits = try parseTraits(allocator, shape.Object.get("traits")),
             },
         };
     if (std.mem.eql(u8, shape_type, "set"))
         return Shape{
             .set = .{
                 .member_target = shape.Object.get("member").?.Object.get("target").?.String,
+                .traits = try parseTraits(allocator, shape.Object.get("traits")),
             },
         };
     if (std.mem.eql(u8, shape_type, "map"))
@@ -334,6 +347,7 @@ fn getShape(allocator: *std.mem.Allocator, shape: std.json.Value) SmithyParseErr
             .map = .{
                 .key = shape.Object.get("key").?.Object.get("target").?.String,
                 .value = shape.Object.get("value").?.Object.get("target").?.String,
+                .traits = try parseTraits(allocator, shape.Object.get("traits")),
             },
         };
     if (std.mem.eql(u8, shape_type, "string"))
@@ -356,12 +370,16 @@ fn getShape(allocator: *std.mem.Allocator, shape: std.json.Value) SmithyParseErr
         return Shape{ .bigDecimal = try parseTraitsOnly(allocator, shape) };
     if (std.mem.eql(u8, shape_type, "boolean"))
         return Shape{ .boolean = try parseTraitsOnly(allocator, shape) };
-    if (std.mem.eql(u8, shape_type, "blob")) return Shape{ .blob = .{} };
+    if (std.mem.eql(u8, shape_type, "blob"))
+        return Shape{ .blob = try parseTraitsOnly(allocator, shape) };
     if (std.mem.eql(u8, shape_type, "timestamp"))
         return Shape{ .timestamp = try parseTraitsOnly(allocator, shape) };
-    if (std.mem.eql(u8, shape_type, "document")) return Shape{ .document = .{} };
-    if (std.mem.eql(u8, shape_type, "member")) return Shape{ .member = .{} };
-    if (std.mem.eql(u8, shape_type, "resource")) return Shape{ .resource = .{} };
+    if (std.mem.eql(u8, shape_type, "document"))
+        return Shape{ .document = try parseTraitsOnly(allocator, shape) };
+    if (std.mem.eql(u8, shape_type, "member"))
+        return Shape{ .member = try parseTraitsOnly(allocator, shape) };
+    if (std.mem.eql(u8, shape_type, "resource"))
+        return Shape{ .resource = try parseTraitsOnly(allocator, shape) };
 
     std.debug.print("Invalid Type: {s}", .{shape_type});
     return SmithyParseError.InvalidType;
@@ -483,6 +501,12 @@ fn getTrait(trait_type: []const u8, value: std.json.Value) SmithyParseError!?Tra
     if (std.mem.eql(u8, trait_type, "smithy.api#pattern"))
         return Trait{ .pattern = value.String };
 
+    if (std.mem.eql(u8, trait_type, "aws.protocols#ec2QueryName"))
+        return Trait{ .ec2_query_name = value.String };
+
+    if (std.mem.eql(u8, trait_type, "smithy.api#jsonName"))
+        return Trait{ .json_name = value.String };
+
     // TODO: Maybe care about these traits?
     if (std.mem.eql(u8, trait_type, "smithy.api#title"))
         return null;
@@ -490,22 +514,24 @@ fn getTrait(trait_type: []const u8, value: std.json.Value) SmithyParseError!?Tra
     if (std.mem.eql(u8, trait_type, "smithy.api#xmlNamespace"))
         return null;
     // TODO: win argument with compiler to get this comptime
-    // aws.protocols#ec2QueryName looks important
     const list =
         \\aws.api#arnReference
         \\aws.api#clientDiscoveredEndpoint
         \\aws.api#clientEndpointDiscovery
+        \\aws.api#arn
         \\aws.auth#unsignedPayload
-        \\aws.protocols#ec2QueryName
+        \\aws.iam#disableConditionKeyInference
         \\smithy.api#auth
         \\smithy.api#cors
         \\smithy.api#deprecated
         \\smithy.api#endpoint
         \\smithy.api#enum
+        \\smithy.api#error
         \\smithy.api#eventPayload
         \\smithy.api#externalDocumentation
         \\smithy.api#hostLabel
         \\smithy.api#http
+        \\smithy.api#httpError
         \\smithy.api#httpChecksumRequired
         \\smithy.api#httpHeader
         \\smithy.api#httpLabel
@@ -516,12 +542,16 @@ fn getTrait(trait_type: []const u8, value: std.json.Value) SmithyParseError!?Tra
         \\smithy.api#httpResponseCode
         \\smithy.api#idempotencyToken
         \\smithy.api#idempotent
-        \\smithy.api#jsonName
         \\smithy.api#mediaType
+        \\smithy.api#noReplace
         \\smithy.api#optionalAuth
         \\smithy.api#paginated
         \\smithy.api#readonly
+        \\smithy.api#references
+        \\smithy.api#requiresLength
+        \\smithy.api#retryable
         \\smithy.api#sensitive
+        \\smithy.api#streaming
         \\smithy.api#suppress
         \\smithy.api#tags
         \\smithy.api#timestampFormat
@@ -537,7 +567,7 @@ fn getTrait(trait_type: []const u8, value: std.json.Value) SmithyParseError!?Tra
     }
 
     // Totally unknown type
-    std.debug.print("Invalid Trait Type: {s}\n", .{trait_type});
+    std.log.err("Invalid Trait Type: {s}", .{trait_type});
     return null;
 }
 fn getOptionalNumber(value: std.json.Value, key: []const u8) ?f64 {

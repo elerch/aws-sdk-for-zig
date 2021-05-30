@@ -135,7 +135,7 @@ fn generateOperation(allocator: *std.mem.Allocator, operation: smithy.ShapeInfo,
     try writer.print("        action_name: []const u8 = \"{s}\",\n", .{operation.name});
     _ = try writer.write("        Request: type = ");
     if (operation.shape.operation.input) |member| {
-        try generateTypeFor(allocator, member, shapes, writer, "        ", true, &type_stack);
+        try generateTypeFor(allocator, member, shapes, writer, "        ", false, &type_stack);
     } else _ = try writer.write("struct {}"); // we want to maintain consistency with other ops
     _ = try writer.write(",\n");
     _ = try writer.write("        Response: type = ");
@@ -210,38 +210,37 @@ fn generateTypeFor(allocator: *std.mem.Allocator, shape_id: []const u8, shapes: 
     }
     try type_stack.append(&shape_info);
     switch (shape) {
-        .structure => try generateComplexTypeFor(allocator, shape.structure.members, "struct", shapes, writer, prefix, all_required, type_stack),
-        .uniontype => try generateComplexTypeFor(allocator, shape.uniontype.members, "union", shapes, writer, prefix, all_required, type_stack),
-        .string => _ = try writer.write("[]const u8"),
-        .integer => _ = try writer.write("i64"),
-        .list => {
+        .structure => |s| try generateComplexTypeFor(allocator, shape.structure.members, "struct", shapes, writer, prefix, all_required, type_stack),
+        .uniontype => |s| try generateComplexTypeFor(allocator, shape.uniontype.members, "union", shapes, writer, prefix, all_required, type_stack),
+        .string => |s| try generateSimpleTypeFor(s, "[]const u8", writer, all_required),
+        .integer => |s| try generateSimpleTypeFor(s, "i64", writer, all_required),
+        .list => |s| {
             _ = try writer.write("[]");
             try generateTypeFor(allocator, shape.list.member_target, shapes, writer, prefix, all_required, type_stack);
         },
-        .set => {
+        .set => |s| {
             _ = try writer.write("[]");
             try generateTypeFor(allocator, shape.set.member_target, shapes, writer, prefix, all_required, type_stack);
         },
-        .timestamp => _ = try writer.write("i64"),
-        .blob => _ = try writer.write("[]const u8"),
-        .boolean => _ = try writer.write("bool"),
-        .double => _ = try writer.write("f64"),
-        .float => _ = try writer.write("f32"),
-        .long => _ = try writer.write("i64"),
+        .timestamp => |s| try generateSimpleTypeFor(s, "i64", writer, all_required),
+        .blob => |s| try generateSimpleTypeFor(s, "[]const u8", writer, all_required),
+        .boolean => |s| try generateSimpleTypeFor(s, "bool", writer, all_required),
+        .double => |s| try generateSimpleTypeFor(s, "f64", writer, all_required),
+        .float => |s| try generateSimpleTypeFor(s, "f32", writer, all_required),
+        .long => |s| try generateSimpleTypeFor(s, "i64", writer, all_required),
         .map => {
             _ = try writer.write("[]struct {\n");
             const new_prefix = try std.fmt.allocPrint(allocator, "    {s}", .{prefix});
             defer allocator.free(new_prefix);
             try writer.print("{s}    key: ", .{prefix});
-            // this doesn't have traits, but I expect it will
-            // if (!all_required) try writeOptional(shape.map.traits, writer, null);
+            if (!all_required) try writeOptional(shape.map.traits, writer, null);
             try generateTypeFor(allocator, shape.map.key, shapes, writer, prefix, all_required, type_stack);
-            // if (!all_required) try writeOptional(shape.map.traits, writer, " = null");
+            if (!all_required) try writeOptional(shape.map.traits, writer, " = null");
             _ = try writer.write(",\n");
             try writer.print("{s}    value: ", .{prefix});
-            // if (!all_required) try writeOptional(shape.map.traits, writer, null);
+            if (!all_required) try writeOptional(shape.map.traits, writer, null);
             try generateTypeFor(allocator, shape.map.key, shapes, writer, prefix, all_required, type_stack);
-            // if (!all_required) try writeOptional(shape.map.traits, writer, " = null");
+            if (!all_required) try writeOptional(shape.map.traits, writer, " = null");
             _ = try writer.write(",\n");
             _ = try writer.write(prefix);
             _ = try writer.write("}");
@@ -255,9 +254,14 @@ fn generateTypeFor(allocator: *std.mem.Allocator, shape_id: []const u8, shapes: 
     _ = type_stack.pop();
 }
 
+fn generateSimpleTypeFor(shape: anytype, type_name: []const u8, writer: anytype, all_required: bool) !void {
+    _ = try writer.write(type_name); // This had required stuff but the problem was elsewhere. Better to leave as function just in case
+}
+
 fn generateComplexTypeFor(allocator: *std.mem.Allocator, members: []smithy.TypeMember, type_type_name: []const u8, shapes: anytype, writer: anytype, prefix: []const u8, all_required: bool, type_stack: anytype) anyerror!void {
     // prolog. We'll rely on caller to get the spacing correct here
-    _ = try writer.write("struct {\n");
+    _ = try writer.write(type_type_name);
+    _ = try writer.write(" {\n");
     for (members) |member| {
         const new_prefix = try std.fmt.allocPrint(allocator, "    {s}", .{prefix});
         defer allocator.free(new_prefix);
@@ -278,13 +282,14 @@ fn generateComplexTypeFor(allocator: *std.mem.Allocator, members: []smithy.TypeM
 fn writeOptional(traits: ?[]smithy.Trait, writer: anytype, value: ?[]const u8) !void {
     if (traits) |ts| {
         for (ts) |t|
-            if (t == smithy.TraitType.required) return;
-        // not required
-        if (value) |v| {
-            _ = try writer.write(v);
-        } else
-            _ = try writer.write("?");
+            if (t == .required) return;
     }
+
+    // not required
+    if (value) |v| {
+        _ = try writer.write(v);
+    } else
+        _ = try writer.write("?");
 }
 fn camelCase(allocator: *std.mem.Allocator, name: []const u8) ![]const u8 {
     const first_letter = name[0] + ('a' - 'A');
