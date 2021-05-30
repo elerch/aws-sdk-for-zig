@@ -13,6 +13,8 @@ pub fn build(b: *Builder) void {
     const mode = b.standardReleaseOptions();
     const exe = b.addExecutable("start-hand-test", "src/main.zig");
 
+    // TODO: Generate src/models.zig
+
     exe.addCSourceFile("src/bitfield-workaround.c", &[_][]const u8{"-std=c99"});
     exe.addIncludeDir("./src/");
     exe.addIncludeDir("/usr/local/include");
