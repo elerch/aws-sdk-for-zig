@@ -92,11 +92,18 @@ TODO List:
 * Implement jitter/exponential backoff. This appears to be configuration of `aws_c_io` and should therefore be trivial
 * Implement timeouts and other TODO's in the code
 * Implement error handling for 4xx, 5xx and other unexpected return values
-* Implement generic response body -> Response type handling (right now, this is hard-coded)
+* ✓ Implement generic response body -> Response type handling (right now, this is hard-coded)
 * ✓ Implement codegen for services with xml structures (using Smithy models)
 * ✓ Implement codegen for others (using Smithy models)
-* Switch to aws-c-cal upsream once PR for full static musl build support is merged (see Dockerfile)
+* Switch to aws-c-cal upsream once [PR for full static musl build support is merged](https://github.com/awslabs/aws-c-cal/pull/89) (see Dockerfile)
 * Remove compiler 0.7.1 shims when 0.8.0 is released
+(new 2021-05-29. I will proceed in this order unless I get other requests)
+* Implement [AWS query protocol](https://awslabs.github.io/smithy/1.0/spec/aws/aws-query-protocol.html). This is the protocol in use by sts.getcalleridentity
+* Implement [AWS Json 1.0 protocol](https://awslabs.github.io/smithy/1.0/spec/aws/aws-json-1_0-protocol.html)
+* Implement [AWS Json 1.1 protocol](https://awslabs.github.io/smithy/1.0/spec/aws/aws-json-1_1-protocol.html)
+* Implement [AWS restXml protocol](https://awslabs.github.io/smithy/1.0/spec/aws/aws-restxml-protocol.html)
+* Implement [AWS EC2 query protocol](https://awslabs.github.io/smithy/1.0/spec/aws/aws-ec2-query-protocol.html)
+
 
 Compiler wishlist/watchlist:
 
