@@ -2,23 +2,6 @@ const std = @import("std");
 const models = @import("models.zig");
 const json = @import("json.zig");
 
-const Model = []struct {
-    smithy: []const u8,
-metadata: struct {
-    suppressions: []struct {
-        id: []const u8,
-        namespace: []const u8,
-        },
-    },
-    shapes: struct
-};
-const model = {
-    var stream = json.TokenStream.init(models);
-    const res = json.parse(Config, &stream, .{});
-    // Assert no error can occur since we are
-    // parsing this JSON at comptime!
-    break :x res catch unreachable;
-};
 // TODO: Make generic
 fn Services() type {
     const types = [_]type{
