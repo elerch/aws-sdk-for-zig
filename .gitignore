@@ -1,4 +1,4 @@
 .cache
 zig-cache
-codegen/models/*.zig
-codegen/codegen
+src/codegen/models/*.zig
+src/codegen/codegen
