@@ -10,50 +10,27 @@ pub fn main() anyerror!void {
     const args = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, args);
     const stdout = std.io.getStdOut().writer();
-    var save_as_zig_files = false;
+    const manifest_file = try std.fs.cwd().createFile("service_manifest.zig", .{});
+    defer manifest_file.close();
+    errdefer manifest_file.close();
+    const manifest = manifest_file.writer();
+    _ = try manifest.write("pub const services = [_]struct { name: []const u8, file_name: []const u8, export_name: []const u8 }{\n");
     var inx: u32 = 0;
-    var preamble_written = false;
     for (args) |arg| {
         if (inx == 0) {
             inx = inx + 1;
             continue;
         }
-        if (inx == 1 and std.mem.eql(u8, "-s", arg)) {
-            save_as_zig_files = true;
-            inx = inx + 1;
-            continue;
-        }
-        if (!save_as_zig_files and !preamble_written)
-            _ = try stdout.write("const smithy = @import(\"smithy.zig\");\n\n\n");
-        var writer = &stdout;
-        var file: std.fs.File = undefined;
-        if (save_as_zig_files) {
-            const filename = try std.fmt.allocPrint(allocator, "{s}.zig", .{arg});
-            defer allocator.free(filename);
-            file = try std.fs.cwd().createFile(filename, .{ .truncate = true });
-            errdefer file.close();
-            writer = &file.writer();
-        }
-        std.log.info("Processing file: {s}", .{arg});
-        generateServicesForFilePath(allocator, ";", arg, writer) catch |err| {
-            std.log.crit("Error processing file: {s}", .{arg});
-            return err;
-        };
-        if (save_as_zig_files)
-            file.close();
+        try processFile(arg, stdout, manifest);
         inx = inx + 1;
     }
 
     if (args.len == 0)
-        try generateServices(allocator, ";", std.io.getStdIn(), stdout);
+        _ = try generateServices(allocator, ";", std.io.getStdIn(), stdout);
+    _ = try manifest.write("};\n");
 }
 
-fn generateServicesForFilePath(allocator: *std.mem.Allocator, comptime terminator: []const u8, path: []const u8, writer: anytype) !void {
-    const file = try std.fs.cwd().openFile(path, .{ .read = true, .write = false });
-    defer file.close();
-    try generateServices(allocator, terminator, file, writer);
-}
-fn generateServices(ally_no_op: *std.mem.Allocator, comptime terminator: []const u8, file: std.fs.File, writer: anytype) !void {
+fn processFile(arg: []const u8, stdout: anytype, manifest: anytype) !void {
     // It's probably best to create our own allocator here so we can deint at the end and
     // toss all allocations related to the services in this file
     // I can't guarantee we're not leaking something, and at the end of the
@@ -61,7 +38,37 @@ fn generateServices(ally_no_op: *std.mem.Allocator, comptime terminator: []const
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const allocator = &arena.allocator;
+    var writer = &stdout;
+    var file: std.fs.File = undefined;
+    const filename = try std.fmt.allocPrint(allocator, "{s}.zig", .{arg});
+    defer allocator.free(filename);
+    file = try std.fs.cwd().createFile(filename, .{ .truncate = true });
+    errdefer file.close();
+    writer = &file.writer();
+    _ = try writer.write("const smithy = @import(\"smithy.zig\");\n\n\n");
+    std.log.info("Processing file: {s}", .{arg});
+    const service_names = generateServicesForFilePath(allocator, ";", arg, writer) catch |err| {
+        std.log.crit("Error processing file: {s}", .{arg});
+        return err;
+    };
+    defer {
+        for (service_names) |name| allocator.free(name);
+        allocator.free(service_names);
+    }
+    file.close();
+    for (service_names) |name| {
+        _ = try manifest.write("    .{");
+        try manifest.print(" .name = \"{s}\", .file_name = \"{s}\", .export_name = \"{s}\"", .{ name, std.fs.path.basename(filename), name });
+        _ = try manifest.write(" },\n");
+    }
+}
 
+fn generateServicesForFilePath(allocator: *std.mem.Allocator, comptime terminator: []const u8, path: []const u8, writer: anytype) ![][]const u8 {
+    const file = try std.fs.cwd().openFile(path, .{ .read = true, .write = false });
+    defer file.close();
+    return try generateServices(allocator, terminator, file, writer);
+}
+fn generateServices(allocator: *std.mem.Allocator, comptime terminator: []const u8, file: std.fs.File, writer: anytype) ![][]const u8 {
     const json = try file.readToEndAlloc(allocator, 1024 * 1024 * 1024);
     defer allocator.free(json);
     const model = try smithy.parse(allocator, json);
@@ -78,6 +85,8 @@ fn generateServices(ally_no_op: *std.mem.Allocator, comptime terminator: []const
             else => {},
         }
     }
+    var constant_names = std.ArrayList([]const u8).init(allocator);
+    defer constant_names.deinit();
     for (services.items) |service| {
         var sdk_id: []const u8 = undefined;
         var version: []const u8 = service.shape.service.version;
@@ -103,7 +112,9 @@ fn generateServices(ally_no_op: *std.mem.Allocator, comptime terminator: []const
         // name of the field will be snake_case of whatever comes in from
         // sdk_id. Not sure this will simple...
         // TODO: Use sdk_id. Right now I think arn_namespace might be a better answer
-        try writer.print("pub const {s}: struct ", .{try makeZiggy(allocator, arn_namespace)});
+        const constant_name = try makeZiggy(allocator, arn_namespace);
+        try constant_names.append(constant_name);
+        try writer.print("pub const {s}: struct ", .{constant_name});
         _ = try writer.write("{\n");
 
         try writer.print("    version: []const u8 = \"{s}\",\n", .{service.shape.service.version});
@@ -297,6 +308,5 @@ fn camelCase(allocator: *std.mem.Allocator, name: []const u8) ![]const u8 {
     return try std.fmt.allocPrint(allocator, "{c}{s}", .{ first_letter, name[1..] });
 }
 fn makeZiggy(allocator: *std.mem.Allocator, id: []const u8) ![]const u8 {
-    // TODO: stuff
-    return id;
+    return try allocator.dupeZ(u8, id);
 }
