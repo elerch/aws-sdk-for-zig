@@ -122,15 +122,16 @@ fn generateServices(ally_no_op: *std.mem.Allocator, comptime terminator: []const
         _ = try writer.write("} = .{}" ++ terminator ++ " // end of service: ");
         try writer.print("{s}\n", .{arn_namespace}); // this var needs to match above
     }
+    return constant_names.toOwnedSlice();
 }
 fn generateOperation(allocator: *std.mem.Allocator, operation: smithy.ShapeInfo, shapes: anytype, writer: anytype) !void {
-    const camel_name = try camelCase(allocator, operation.name);
-    defer allocator.free(camel_name);
+    const snake_case_name = try snake.fromPascalCase(allocator, operation.name);
+    defer allocator.free(snake_case_name);
 
     var type_stack = std.ArrayList(*const smithy.ShapeInfo).init(allocator);
     defer type_stack.deinit();
     // indent should start at 4 spaces here
-    try writer.print("    {s}: struct ", .{camel_name});
+    try writer.print("    {s}: struct ", .{snake_case_name});
     _ = try writer.write("{\n");
     try writer.print("        action_name: []const u8 = \"{s}\",\n", .{operation.name});
     _ = try writer.write("        Request: type = ");
