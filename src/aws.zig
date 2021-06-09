@@ -6,7 +6,10 @@ const servicemodel = @import("servicemodel.zig");
 
 const log = std.log.scoped(.aws);
 
-pub const Options = awshttp.Options;
+pub const Options = struct {
+    region: []const u8 = "aws-global",
+    dualstack: bool = false,
+};
 
 pub const services = servicemodel.services;
 
@@ -39,7 +42,16 @@ pub const Aws = struct {
         log.debug("service sigv4 name {s}", .{service.sigv4_name});
         log.debug("version {s}", .{service.version});
         log.debug("action {s}", .{action.action_name});
-        const response = try self.aws_http.callApi(action_info.service, service.version, action.action_name, options);
+        const response = try self.aws_http.callApi(
+            service.endpoint_prefix,
+            service.version,
+            action.action_name,
+            .{
+                .region = options.region,
+                .dualstack = options.dualstack,
+                .sigv4_service_name = service.sigv4_name,
+            },
+        );
         defer response.deinit();
         // TODO: Check status code for badness
         var stream = json.TokenStream.init(response.body);

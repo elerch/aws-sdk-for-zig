@@ -67,9 +67,10 @@ pub const AwsError = error{
 pub const Options = struct {
     region: []const u8 = "aws-global",
     dualstack: bool = false,
+    sigv4_service_name: ?[]const u8 = null,
 };
 
-pub const SigningOptions = struct {
+const SigningOptions = struct {
     region: []const u8 = "aws-global",
     service: []const u8,
 };
@@ -240,7 +241,7 @@ pub const AwsHttp = struct {
         httplog.debug("Calling {s}.{s}, endpoint {s}", .{ service, action, endpoint.uri });
         const signing_options: SigningOptions = .{
             .region = options.region,
-            .service = service,
+            .service = if (options.sigv4_service_name) |name| name else service,
         };
         return try self.makeRequest(endpoint, "POST", "/", body, signing_options);
     }
