@@ -32,7 +32,11 @@ pub fn fromPascalCase(allocator: *std.mem.Allocator, name: []const u8) ![]u8 {
                 }
             }
         } else {
-            rc[target_inx] = ascii_char;
+            if (ascii_char == ' ') {
+                rc[target_inx] = '_';
+            } else {
+                rc[target_inx] = ascii_char;
+            }
             target_inx = target_inx + 1;
         }
         previous_codepoint = codepoint;

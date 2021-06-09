@@ -111,8 +111,7 @@ fn generateServices(allocator: *std.mem.Allocator, comptime terminator: []const 
         // Service struct
         // name of the field will be snake_case of whatever comes in from
         // sdk_id. Not sure this will simple...
-        // TODO: Use sdk_id. Right now I think arn_namespace might be a better answer
-        const constant_name = try makeZiggy(allocator, arn_namespace);
+        const constant_name = try snake.fromPascalCase(allocator, sdk_id);
         try constant_names.append(constant_name);
         try writer.print("pub const {s}: struct ", .{constant_name});
         _ = try writer.write("{\n");
@@ -307,6 +306,4 @@ fn camelCase(allocator: *std.mem.Allocator, name: []const u8) ![]const u8 {
     const first_letter = name[0] + ('a' - 'A');
     return try std.fmt.allocPrint(allocator, "{c}{s}", .{ first_letter, name[1..] });
 }
-fn makeZiggy(allocator: *std.mem.Allocator, id: []const u8) ![]const u8 {
-    return try allocator.dupeZ(u8, id);
 }
