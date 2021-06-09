@@ -126,7 +126,7 @@ fn generateServices(allocator: *std.mem.Allocator, comptime terminator: []const 
 
         // Operations
         for (service.shape.service.operations) |op|
-            try generateOperation(allocator, shapes.get(op).?, shapes, writer);
+            try generateOperation(allocator, shapes.get(op).?, shapes, writer, constant_name);
 
         // End service
         _ = try writer.write("} = .{}" ++ terminator ++ " // end of service: ");
@@ -134,24 +134,31 @@ fn generateServices(allocator: *std.mem.Allocator, comptime terminator: []const 
     }
     return constant_names.toOwnedSlice();
 }
-fn generateOperation(allocator: *std.mem.Allocator, operation: smithy.ShapeInfo, shapes: anytype, writer: anytype) !void {
+fn generateOperation(allocator: *std.mem.Allocator, operation: smithy.ShapeInfo, shapes: anytype, writer: anytype, service: []const u8) !void {
     const snake_case_name = try snake.fromPascalCase(allocator, operation.name);
     defer allocator.free(snake_case_name);
 
+    comptime const prefix = "        ";
     var type_stack = std.ArrayList(*const smithy.ShapeInfo).init(allocator);
     defer type_stack.deinit();
     // indent should start at 4 spaces here
-    try writer.print("    {s}: struct ", .{snake_case_name});
+    const operation_name = avoidReserved(snake_case_name);
+    try writer.print("    {s}: struct ", .{operation_name});
     _ = try writer.write("{\n");
     try writer.print("        action_name: []const u8 = \"{s}\",\n", .{operation.name});
     _ = try writer.write("        Request: type = ");
     if (operation.shape.operation.input) |member| {
-        try generateTypeFor(allocator, member, shapes, writer, "        ", false, &type_stack);
-    } else _ = try writer.write("struct {}"); // we want to maintain consistency with other ops
+        try generateTypeFor(allocator, member, shapes, writer, prefix, false, &type_stack, false);
+        _ = try writer.write("\n");
+        try generateMetadataFunction(service, operation_name, prefix, writer);
+    } else {
+        _ = try writer.write("struct {\n");
+        try generateMetadataFunction(service, operation_name, prefix, writer);
+    }
     _ = try writer.write(",\n");
     _ = try writer.write("        Response: type = ");
     if (operation.shape.operation.output) |member| {
-        try generateTypeFor(allocator, member, shapes, writer, "        ", true, &type_stack);
+        try generateTypeFor(allocator, member, shapes, writer, "        ", true, &type_stack, true);
     } else _ = try writer.write("struct {}"); // we want to maintain consistency with other ops
     _ = try writer.write(",\n");
 
@@ -166,6 +173,19 @@ fn generateOperation(allocator: *std.mem.Allocator, operation: smithy.ShapeInfo,
     _ = try writer.write("    } = .{},\n");
 }
 
+fn generateMetadataFunction(service: []const u8, operation_name: []const u8, comptime prefix: []const u8, writer: anytype) !void {
+    // TODO: Shove these lines in here, and also the else portion
+    // pub fn metaInfo(self: @This()) struct { service: @TypeOf(sts), action: @TypeOf(sts.get_caller_identity) } {
+    //     return .{ .service = sts, .action = sts.get_caller_identity };
+    // }
+    // We want to add a short "get my parents" function into the response
+    try writer.print("{s}    ", .{prefix});
+    _ = try writer.write("pub fn metaInfo(self: @This()) struct { ");
+    try writer.print("service: @TypeOf({s}), action: @TypeOf({s}.{s})", .{ service, service, operation_name });
+    _ = try writer.write(" } {\n" ++ prefix ++ "        return .{ ");
+    try writer.print(".service = {s}, .action = {s}.{s}", .{ service, service, operation_name });
+    _ = try writer.write(" };\n" ++ prefix ++ "    }\n" ++ prefix ++ "}");
+}
 fn getErrorName(err_name: []const u8) []const u8 {
     if (endsWith("Exception", err_name))
         return err_name[0 .. err_name.len - "Exception".len];
@@ -180,7 +200,7 @@ fn endsWith(item: []const u8, str: []const u8) bool {
     return std.mem.eql(u8, item, str[str.len - item.len ..]);
 }
 /// return type is anyerror!void as this is a recursive function, so the compiler cannot properly infer error types
-fn generateTypeFor(allocator: *std.mem.Allocator, shape_id: []const u8, shapes: anytype, writer: anytype, prefix: []const u8, all_required: bool, type_stack: anytype) anyerror!void {
+fn generateTypeFor(allocator: *std.mem.Allocator, shape_id: []const u8, shapes: anytype, writer: anytype, prefix: []const u8, all_required: bool, type_stack: anytype, end_structure: bool) anyerror!void {
     if (shapes.get(shape_id) == null) {
         std.debug.print("Shape ID not found. This is most likely a bug. Shape ID: {s}\n", .{shape_id});
         return error.InvalidType;
@@ -213,6 +233,7 @@ fn generateTypeFor(allocator: *std.mem.Allocator, shape_id: []const u8, shapes: 
         // type to properly reference. Realistically, AWS or the service
         // must be blocking deep recursion somewhere or this would be a great
         // DOS attack
+        try generateSimpleTypeFor("nothing", "[]const u8", writer, all_required);
         std.log.warn("Type cycle detected, limiting depth. Type: {s}", .{shape_id});
         // std.log.info("  Type stack:\n", .{});
         // for (type_stack.items) |i|
@@ -221,17 +242,29 @@ fn generateTypeFor(allocator: *std.mem.Allocator, shape_id: []const u8, shapes: 
     }
     try type_stack.append(&shape_info);
     switch (shape) {
-        .structure => |s| try generateComplexTypeFor(allocator, shape.structure.members, "struct", shapes, writer, prefix, all_required, type_stack),
-        .uniontype => |s| try generateComplexTypeFor(allocator, shape.uniontype.members, "union", shapes, writer, prefix, all_required, type_stack),
+        .structure => |s| {
+            try generateComplexTypeFor(allocator, shape.structure.members, "struct", shapes, writer, prefix, all_required, type_stack);
+            if (end_structure) {
+                // epilog
+                try writer.print("{s}", .{prefix});
+                _ = try writer.write("}");
+            }
+        },
+        .uniontype => |s| {
+            try generateComplexTypeFor(allocator, shape.uniontype.members, "union", shapes, writer, prefix, all_required, type_stack);
+            // epilog
+            try writer.print("{s}", .{prefix});
+            _ = try writer.write("}");
+        },
         .string => |s| try generateSimpleTypeFor(s, "[]const u8", writer, all_required),
         .integer => |s| try generateSimpleTypeFor(s, "i64", writer, all_required),
         .list => |s| {
             _ = try writer.write("[]");
-            try generateTypeFor(allocator, shape.list.member_target, shapes, writer, prefix, all_required, type_stack);
+            try generateTypeFor(allocator, shape.list.member_target, shapes, writer, prefix, all_required, type_stack, true);
         },
         .set => |s| {
             _ = try writer.write("[]");
-            try generateTypeFor(allocator, shape.set.member_target, shapes, writer, prefix, all_required, type_stack);
+            try generateTypeFor(allocator, shape.set.member_target, shapes, writer, prefix, all_required, type_stack, true);
         },
         .timestamp => |s| try generateSimpleTypeFor(s, "i64", writer, all_required),
         .blob => |s| try generateSimpleTypeFor(s, "[]const u8", writer, all_required),
@@ -245,12 +278,12 @@ fn generateTypeFor(allocator: *std.mem.Allocator, shape_id: []const u8, shapes: 
             defer allocator.free(new_prefix);
             try writer.print("{s}    key: ", .{prefix});
             if (!all_required) try writeOptional(shape.map.traits, writer, null);
-            try generateTypeFor(allocator, shape.map.key, shapes, writer, prefix, all_required, type_stack);
+            try generateTypeFor(allocator, shape.map.key, shapes, writer, prefix, all_required, type_stack, true);
             if (!all_required) try writeOptional(shape.map.traits, writer, " = null");
             _ = try writer.write(",\n");
             try writer.print("{s}    value: ", .{prefix});
             if (!all_required) try writeOptional(shape.map.traits, writer, null);
-            try generateTypeFor(allocator, shape.map.key, shapes, writer, prefix, all_required, type_stack);
+            try generateTypeFor(allocator, shape.map.key, shapes, writer, prefix, all_required, type_stack, true);
             if (!all_required) try writeOptional(shape.map.traits, writer, " = null");
             _ = try writer.write(",\n");
             _ = try writer.write(prefix);
@@ -278,16 +311,13 @@ fn generateComplexTypeFor(allocator: *std.mem.Allocator, members: []smithy.TypeM
         defer allocator.free(new_prefix);
         const snake_case_member = try snake.fromPascalCase(allocator, member.name);
         defer allocator.free(snake_case_member);
-        try writer.print("{s}    {s}: ", .{ prefix, snake_case_member });
+        try writer.print("{s}    {s}: ", .{ prefix, avoidReserved(snake_case_member) });
         if (!all_required) try writeOptional(member.traits, writer, null);
-        try generateTypeFor(allocator, member.target, shapes, writer, new_prefix, all_required, type_stack);
-        if (!all_required) try writeOptional(member.traits, writer, " = null");
+        try generateTypeFor(allocator, member.target, shapes, writer, new_prefix, all_required, type_stack, true);
+        if (!all_required and !std.mem.eql(u8, "union", type_type_name))
+            try writeOptional(member.traits, writer, " = null");
         _ = try writer.write(",\n");
     }
-
-    // epilog
-    try writer.print("{s}", .{prefix});
-    _ = try writer.write("}");
 }
 
 fn writeOptional(traits: ?[]smithy.Trait, writer: anytype, value: ?[]const u8) !void {
@@ -299,11 +329,19 @@ fn writeOptional(traits: ?[]smithy.Trait, writer: anytype, value: ?[]const u8) !
     // not required
     if (value) |v| {
         _ = try writer.write(v);
-    } else
-        _ = try writer.write("?");
+    } else _ = try writer.write("?");
 }
 fn camelCase(allocator: *std.mem.Allocator, name: []const u8) ![]const u8 {
     const first_letter = name[0] + ('a' - 'A');
     return try std.fmt.allocPrint(allocator, "{c}{s}", .{ first_letter, name[1..] });
 }
+fn avoidReserved(snake_name: []const u8) []const u8 {
+    if (std.mem.eql(u8, snake_name, "error")) return "@\"error\"";
+    if (std.mem.eql(u8, snake_name, "return")) return "@\"return\"";
+    if (std.mem.eql(u8, snake_name, "not")) return "@\"not\"";
+    if (std.mem.eql(u8, snake_name, "and")) return "@\"and\"";
+    if (std.mem.eql(u8, snake_name, "or")) return "@\"or\"";
+    if (std.mem.eql(u8, snake_name, "test")) return "@\"test\"";
+    if (std.mem.eql(u8, snake_name, "null")) return "@\"null\"";
+    return snake_name;
 }
