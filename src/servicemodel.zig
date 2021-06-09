@@ -1,108 +1,50 @@
 const std = @import("std");
-const models = @import("models.zig");
-const json = @import("json.zig");
+const expectEqualStrings = std.testing.expectEqualStrings;
 
 // TODO: Make generic
 fn Services() type {
-    const types = [_]type{
-        Service("sts"),
-    };
+    // This service list can be imported from a master file of all services
+    // provided by codegen
+    const service_list = @import("codegen/service_manifest.zig").services;
+
+    // From here, the fields of our structure can be generated at comptime...
+    var fields: [service_list.len]std.builtin.TypeInfo.StructField = undefined;
+    for (fields) |*item, i| {
+        const import = @field(@import("codegen/models/" ++ service_list[i].file_name), service_list[i].export_name);
+        item.* = .{
+            .name = service_list[i].name,
+            .field_type = @TypeOf(import),
+            .default_value = import,
+            .is_comptime = false,
+            .alignment = 0,
+        };
+    }
+
+    // finally, generate the type
     return @Type(.{
         .Struct = .{
             .layout = .Auto,
-            .fields = &[_]std.builtin.TypeInfo.StructField{
-                .{
-                    .name = "sts",
-                    .field_type = types[0],
-                    .default_value = new(types[0]),
-                    .is_comptime = false,
-                    .alignment = 0,
-                },
-            },
+            .fields = &fields,
             .decls = &[_]std.builtin.TypeInfo.Declaration{},
             .is_tuple = false,
         },
     });
 }
-
-fn ServiceActionResponse(comptime service: []const u8, comptime action: []const u8) type {
-    if (std.mem.eql(u8, service, "sts") and std.mem.eql(u8, action, "get_caller_identity")) {
-        return struct {
-            arn: []const u8,
-            user_id: []const u8,
-            account: []const u8,
-        };
-    }
-    unreachable;
-}
-
-fn ServiceAction(comptime service: []const u8, comptime action: []const u8) type {
-    if (std.mem.eql(u8, service, "sts") and std.mem.eql(u8, action, "get_caller_identity")) {
-        return @Type(.{
-            .Struct = .{
-                .layout = .Auto,
-                .fields = &[_]std.builtin.TypeInfo.StructField{
-                    .{
-                        .name = "Request",
-                        .field_type = type,
-                        .default_value = struct {},
-                        .is_comptime = false,
-                        .alignment = 0,
-                    },
-                    .{
-                        .name = "action_name",
-                        .field_type = @TypeOf("GetCallerIdentity"),
-                        .default_value = "GetCallerIdentity",
-                        .is_comptime = false,
-                        .alignment = 0,
-                    },
-                    .{
-                        .name = "Response",
-                        .field_type = type,
-                        .default_value = ServiceActionResponse("sts", "get_caller_identity"),
-                        .is_comptime = false,
-                        .alignment = 0,
-                    },
-                },
-                .decls = &[_]std.builtin.TypeInfo.Declaration{},
-                .is_tuple = false,
-            },
-        });
-    }
-    unreachable;
-}
-
+// TODO: One constant to rule them all is a bit much. We can keep this
+// in the back pocket, but let's move to a factory style getService("blah");
 pub const services = Services(){};
 
-fn new(comptime T: type) T {
-    return T{};
+test "services includes sts" {
+    expectEqualStrings("2011-06-15", services.sts.version);
 }
-fn Service(comptime service: []const u8) type {
-    if (std.mem.eql(u8, "sts", service)) {
-        return @Type(.{
-            .Struct = .{
-                .layout = .Auto,
-                .fields = &[_]std.builtin.TypeInfo.StructField{
-                    .{
-                        .name = "version",
-                        .field_type = @TypeOf("2011-06-15"),
-                        .default_value = "2011-06-15",
-                        .is_comptime = false,
-                        .alignment = 0,
-                    },
-                    .{
-                        .name = "get_caller_identity",
-                        .field_type = ServiceAction("sts", "get_caller_identity"),
-                        .default_value = new(ServiceAction("sts", "get_caller_identity")),
-                        .is_comptime = false,
-                        .alignment = 0,
-                    },
-                },
-                .decls = &[_]std.builtin.TypeInfo.Declaration{},
-                .is_tuple = false,
-            },
-        });
-    }
-    unreachable;
+test "sts includes get_caller_identity" {
+    expectEqualStrings("GetCallerIdentity", services.sts.get_caller_identity.action_name);
 }
-// End code "generation" prototype
+test "can get service and action name from request" {
+    // get request object. This call doesn't have parameters
+    const req = services.sts.get_caller_identity.Request{};
+    // const metadata = @TypeOf(req).metaInfo();
+    const metadata = req.metaInfo();
+    expectEqualStrings("2011-06-15", metadata.service.version);
+    // expectEqualStrings("GetCallerIdentity", metadata.action.action_name);
+}

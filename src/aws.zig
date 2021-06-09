@@ -27,15 +27,16 @@ pub const Aws = struct {
     }
 
     pub fn call(self: Self, comptime request: anytype, options: Options) !FullResponse(request) {
-        const action_info = actionForRequest(request);
-        // This is true weirdness, but we are running into compiler bugs. Touch only if
-        // prepared...
-        const service = @field(services, action_info.service);
-        const action = @field(service, action_info.action);
+        // every codegenned request object includes a metaInfo function to get
+        // pointers to service and action
+        const meta_info = request.metaInfo();
+        const service = meta_info.service;
+        const action = meta_info.action;
         const R = Response(request);
         const FullR = FullResponse(request);
 
-        log.debug("service {s}", .{action_info.service});
+        log.debug("service endpoint {s}", .{service.endpoint_prefix});
+        log.debug("service sigv4 name {s}", .{service.sigv4_name});
         log.debug("version {s}", .{service.version});
         log.debug("action {s}", .{action.action_name});
         const response = try self.aws_http.callApi(action_info.service, service.version, action.action_name, options);
@@ -73,40 +74,9 @@ pub const Aws = struct {
     }
 };
 
-fn actionForRequest(comptime request: anytype) struct { service: []const u8, action: []const u8, service_obj: anytype } {
-    const type_name = @typeName(@TypeOf(request));
-    var service_start: usize = 0;
-    var service_end: usize = 0;
-    var action_start: usize = 0;
-    var action_end: usize = 0;
-    for (type_name) |ch, i| {
-        switch (ch) {
-            '(' => service_start = i + 2,
-            ')' => action_end = i - 1,
-            ',' => {
-                service_end = i - 1;
-                action_start = i + 2;
-            },
-            else => continue,
-        }
-    }
-    // const zero: usize = 0;
-    // TODO: Figure out why if statement isn't working
-    // if (serviceStart == zero or serviceEnd == zero or actionStart == zero or actionEnd == zero) {
-    //     @compileLog("Type must be a function with two parameters \"service\" and \"action\". Found: " ++ type_name);
-    //     // @compileError("Type must be a function with two parameters \"service\" and \"action\". Found: " ++ type_name);
-    // }
-    return .{
-        .service = type_name[service_start..service_end],
-        .action = type_name[action_start..action_end],
-        .service_obj = @field(services, type_name[service_start..service_end]),
-    };
-}
 fn ServerResponse(comptime request: anytype) type {
     const T = Response(request);
-    const action_info = actionForRequest(request);
-    const service = @field(services, action_info.service);
-    const action = @field(service, action_info.action);
+    const action = request.metaInfo().action;
     // NOTE: The non-standard capitalization here is used as a performance
     // enhancement and to reduce allocations in json.zig. These fields are
     // not (nor are they ever intended to be) exposed outside this codebase
@@ -169,8 +139,5 @@ fn FullResponse(comptime request: anytype) type {
     };
 }
 fn Response(comptime request: anytype) type {
-    const action_info = actionForRequest(request);
-    const service = @field(services, action_info.service);
-    const action = @field(service, action_info.action);
-    return action.Response;
+    return request.metaInfo().action.Response;
 }
