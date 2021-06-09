@@ -38,7 +38,14 @@ pub fn build(b: *Builder) void {
     //     "-static",
     //     "--strip",
     // });
+    //
+    // To compile on stock 0.8.0, comment this line of code, or use the Makefile
+    // See https://github.com/ziglang/zig/pull/8248
+    //
+    // On a musl-based x86_64 system, this pre-compiled zig can be used:
+    // https://github.com/elerch/zig/releases/download/0.8.0/zig-0.8.0-static-support-musl-libz.tgz
     exe.is_static = true;
+
     exe.strip = true;
     exe.install();
 
