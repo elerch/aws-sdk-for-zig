@@ -27,7 +27,6 @@ const c = @cImport({
     @cInclude("aws/io/socket.h");
     @cInclude("aws/io/stream.h");
 });
-const std_atomic_bool = @import("bool.zig"); // This is in std in 0.8.0
 
 const CN_NORTH_1_HASH = std.hash_map.hashString("cn-north-1");
 const CN_NORTHWEST_1_HASH = std.hash_map.hashString("cn-northwest-1");
@@ -816,7 +815,7 @@ fn AsyncResult(comptime T: type) type {
     return struct {
         result: *T,
         requiredCount: u32 = 1,
-        sync: std_atomic_bool.Bool = std_atomic_bool.Bool.init(false), // This is a 0.8.0 feature... :(
+        sync: std.atomic.Atomic(bool) = std.atomic.Atomic(bool).init(false),
         count: u8 = 0,
     };
 }
@@ -912,8 +911,8 @@ fn endPointFromUri(allocator: *std.mem.Allocator, uri: []const u8) !EndPoint {
 
 const RequestContext = struct {
     connection: ?*c.aws_http_connection = null,
-    connection_complete: std_atomic_bool.Bool = std_atomic_bool.Bool.init(false), // This is a 0.8.0 feature... :(
-    request_complete: std_atomic_bool.Bool = std_atomic_bool.Bool.init(false), // This is a 0.8.0 feature... :(
+    connection_complete: std.atomic.Atomic(bool) = std.atomic.Atomic(bool).init(false),
+    request_complete: std.atomic.Atomic(bool) = std.atomic.Atomic(bool).init(false),
     return_error: ?AwsError = null,
     allocator: *std.mem.Allocator,
     body: ?[]const u8 = null,
