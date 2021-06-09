@@ -214,13 +214,13 @@ fn shapes(allocator: *std.mem.Allocator, map: anytype) ![]ShapeInfo {
     var list = try std.ArrayList(ShapeInfo).initCapacity(allocator, map.count());
     var iterator = map.iterator();
     while (iterator.next()) |kv| {
-        const id_info = try parseId(kv.key);
+        const id_info = try parseId(kv.key_ptr.*);
         try list.append(.{
             .id = id_info.id,
             .namespace = id_info.namespace,
             .name = id_info.name,
             .member = id_info.member,
-            .shape = try getShape(allocator, kv.value),
+            .shape = try getShape(allocator, kv.value_ptr.*),
         });
     }
     // This seems to be a synonym for the simple type "string"
@@ -395,9 +395,9 @@ fn parseMembers(allocator: *std.mem.Allocator, shape: ?std.json.Value) SmithyPar
     var iterator = map.iterator();
     while (iterator.next()) |kv| {
         try list.append(TypeMember{
-            .name = kv.key,
-            .target = kv.value.Object.get("target").?.String,
-            .traits = try parseTraits(allocator, kv.value.Object.get("traits")),
+            .name = kv.key_ptr.*,
+            .target = kv.value_ptr.*.Object.get("target").?.String,
+            .traits = try parseTraits(allocator, kv.value_ptr.*.Object.get("traits")),
         });
     }
     return list.toOwnedSlice();
@@ -426,7 +426,7 @@ fn parseTraits(allocator: *std.mem.Allocator, shape: ?std.json.Value) SmithyPars
     var list = std.ArrayList(Trait).initCapacity(allocator, map.count()) catch return SmithyParseError.OutOfMemory;
     var iterator = map.iterator();
     while (iterator.next()) |kv| {
-        if (try getTrait(kv.key, kv.value)) |t|
+        if (try getTrait(kv.key_ptr.*, kv.value_ptr.*)) |t|
             try list.append(t);
     }
     return list.toOwnedSlice();
