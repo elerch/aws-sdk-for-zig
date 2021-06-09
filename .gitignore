@@ -2,3 +2,6 @@
 zig-cache
 src/codegen/models/*.zig
 src/codegen/codegen
+*.tgz
+service_manifest.zig
+demo
