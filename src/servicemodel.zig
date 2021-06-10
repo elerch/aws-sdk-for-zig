@@ -8,6 +8,12 @@ pub fn Services(service_imports: anytype) type {
 
     // From here, the fields of our structure can be generated at comptime...
     var fields: [serviceCount(service_list, service_imports)]std.builtin.TypeInfo.StructField = undefined;
+
+    // This is run at comptime with multiple nested loops and a large (267 at
+    // time of writing) number of services. 4 was chosen by trial and error,
+    // but otherwise the branch count will be the product of field length,
+    // service list length and the number of imports requested
+    @setEvalBranchQuota(4 * fields.len * service_list.len * std.math.min(service_imports.len, 1));
     var inx = 0;
     for (fields) |*item, i| {
         if (service_imports.len == 0) {
