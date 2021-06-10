@@ -20,10 +20,31 @@ pub const Smithy = struct {
     pub fn deinit(self: Self) void {
         for (self.shapes) |s| {
             switch (s.shape) {
-                .string, .byte, .short, .integer, .long, .float, .double, .bigInteger, .bigDecimal => |v| self.allocator.free(v.traits),
+                .string,
+                .byte,
+                .short,
+                .integer,
+                .long,
+                .float,
+                .double,
+                .bigInteger,
+                .bigDecimal,
+                .blob,
+                .boolean,
+                .timestamp,
+                .document,
+                .member,
+                .resource,
+                => |v| self.allocator.free(v.traits),
                 .structure => |v| {
                     for (v.members) |m| self.allocator.free(m.traits);
                     self.allocator.free(v.members);
+                    self.allocator.free(v.traits);
+                },
+                .uniontype => |v| {
+                    for (v.members) |m| self.allocator.free(m.traits);
+                    self.allocator.free(v.members);
+                    self.allocator.free(v.traits);
                 },
                 .service => |v| {
                     self.allocator.free(v.traits);
@@ -33,7 +54,17 @@ pub const Smithy = struct {
                     if (v.errors) |e| self.allocator.free(e);
                     self.allocator.free(v.traits);
                 },
-                else => {},
+                .list => |v| {
+                    self.allocator.free(v.traits);
+                },
+                .set => |v| {
+                    self.allocator.free(v.traits);
+                },
+                .map => |v| {
+                    self.allocator.free(v.key);
+                    self.allocator.free(v.value);
+                    self.allocator.free(v.traits);
+                },
             }
         }
         self.allocator.free(self.shapes);
@@ -212,6 +243,7 @@ pub fn parse(allocator: *std.mem.Allocator, json_model: []const u8) !Smithy {
 // list must be deinitialized by caller
 fn shapes(allocator: *std.mem.Allocator, map: anytype) ![]ShapeInfo {
     var list = try std.ArrayList(ShapeInfo).initCapacity(allocator, map.count());
+    defer list.deinit();
     var iterator = map.iterator();
     while (iterator.next()) |kv| {
         const id_info = try parseId(kv.key_ptr.*);
@@ -392,6 +424,7 @@ fn parseMembers(allocator: *std.mem.Allocator, shape: ?std.json.Value) SmithyPar
 
     const map = shape.?.Object;
     var list = std.ArrayList(TypeMember).initCapacity(allocator, map.count()) catch return SmithyParseError.OutOfMemory;
+    defer list.deinit();
     var iterator = map.iterator();
     while (iterator.next()) |kv| {
         try list.append(TypeMember{
@@ -406,6 +439,7 @@ fn parseMembers(allocator: *std.mem.Allocator, shape: ?std.json.Value) SmithyPar
 // ArrayList of std.Json.Value
 fn parseTargetList(allocator: *std.mem.Allocator, list: anytype) SmithyParseError![][]const u8 {
     var array_list = std.ArrayList([]const u8).initCapacity(allocator, list.items.len) catch return SmithyParseError.OutOfMemory;
+    defer array_list.deinit();
     for (list.items) |i| {
         try array_list.append(i.Object.get("target").?.String);
     }
@@ -424,6 +458,7 @@ fn parseTraits(allocator: *std.mem.Allocator, shape: ?std.json.Value) SmithyPars
 
     const map = shape.?.Object;
     var list = std.ArrayList(Trait).initCapacity(allocator, map.count()) catch return SmithyParseError.OutOfMemory;
+    defer list.deinit();
     var iterator = map.iterator();
     while (iterator.next()) |kv| {
         if (try getTrait(kv.key_ptr.*, kv.value_ptr.*)) |t|
@@ -622,6 +657,8 @@ fn read_file_to_string(allocator: *std.mem.Allocator, file_name: []const u8, max
     return file.readToEndAlloc(allocator, max_bytes);
 }
 var test_data: ?[]const u8 = null;
+const intrinsic_type_count: usize = 5; // 5 intrinsic types are added to every model
+
 fn getTestData(allocator: *std.mem.Allocator) []const u8 {
     if (test_data) |d| return d;
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -660,13 +697,14 @@ test "parse string" {
     const allocator = &gpa.allocator;
     const model = try parse(allocator, test_string);
     defer model.deinit();
-    expect(std.mem.eql(u8, model.version, "1.0"));
-    std.testing.expectEqual(@as(usize, 1), model.shapes.len);
-    std.testing.expectEqualStrings("com.amazonaws.sts#AWSSecurityTokenServiceV20110615", model.shapes[0].id);
-    std.testing.expectEqualStrings("com.amazonaws.sts", model.shapes[0].namespace);
-    std.testing.expectEqualStrings("AWSSecurityTokenServiceV20110615", model.shapes[0].name);
-    std.testing.expect(model.shapes[0].member == null);
-    std.testing.expectEqualStrings("2011-06-15", model.shapes[0].shape.service.version);
+    try expect(std.mem.eql(u8, model.version, "1.0"));
+
+    try std.testing.expectEqual(intrinsic_type_count + 1, model.shapes.len);
+    try std.testing.expectEqualStrings("com.amazonaws.sts#AWSSecurityTokenServiceV20110615", model.shapes[0].id);
+    try std.testing.expectEqualStrings("com.amazonaws.sts", model.shapes[0].namespace);
+    try std.testing.expectEqualStrings("AWSSecurityTokenServiceV20110615", model.shapes[0].name);
+    try std.testing.expect(model.shapes[0].member == null);
+    try std.testing.expectEqualStrings("2011-06-15", model.shapes[0].shape.service.version);
 }
 test "parse shape with member" {
     const test_string =
@@ -693,13 +731,13 @@ test "parse shape with member" {
     const allocator = &gpa.allocator;
     const model = try parse(allocator, test_string);
     defer model.deinit();
-    expect(std.mem.eql(u8, model.version, "1.0"));
-    std.testing.expectEqual(@as(usize, 1), model.shapes.len);
-    std.testing.expectEqualStrings("com.amazonaws.sts#AWSSecurityTokenServiceV20110615$member", model.shapes[0].id);
-    std.testing.expectEqualStrings("com.amazonaws.sts", model.shapes[0].namespace);
-    std.testing.expectEqualStrings("AWSSecurityTokenServiceV20110615", model.shapes[0].name);
-    std.testing.expectEqualStrings("2011-06-15", model.shapes[0].shape.service.version);
-    std.testing.expectEqualStrings("member", model.shapes[0].member.?);
+    try expect(std.mem.eql(u8, model.version, "1.0"));
+    try std.testing.expectEqual(intrinsic_type_count + 1, model.shapes.len);
+    try std.testing.expectEqualStrings("com.amazonaws.sts#AWSSecurityTokenServiceV20110615$member", model.shapes[0].id);
+    try std.testing.expectEqualStrings("com.amazonaws.sts", model.shapes[0].namespace);
+    try std.testing.expectEqualStrings("AWSSecurityTokenServiceV20110615", model.shapes[0].name);
+    try std.testing.expectEqualStrings("2011-06-15", model.shapes[0].shape.service.version);
+    try std.testing.expectEqualStrings("member", model.shapes[0].member.?);
 }
 test "parse file" {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -708,12 +746,12 @@ test "parse file" {
     const test_string = getTestData(allocator);
     const model = try parse(allocator, test_string);
     defer model.deinit();
-    std.testing.expectEqualStrings(model.version, "1.0");
+    try std.testing.expectEqualStrings(model.version, "1.0");
     // metadata expectations
     // try expect(std.mem.eql(u8, model.version, "version 1.0"));
 
     // shape expectations
-    std.testing.expectEqual(@as(usize, 81), model.shapes.len);
+    try std.testing.expectEqual(intrinsic_type_count + 81, model.shapes.len);
     var optsvc: ?ShapeInfo = null;
     for (model.shapes) |shape| {
         if (std.mem.eql(u8, shape.id, "com.amazonaws.sts#AWSSecurityTokenServiceV20110615")) {
@@ -721,13 +759,13 @@ test "parse file" {
             break;
         }
     }
-    std.testing.expect(optsvc != null);
+    try std.testing.expect(optsvc != null);
     const svc = optsvc.?;
-    std.testing.expectEqualStrings("com.amazonaws.sts#AWSSecurityTokenServiceV20110615", svc.id);
-    std.testing.expectEqualStrings("com.amazonaws.sts", svc.namespace);
-    std.testing.expectEqualStrings("AWSSecurityTokenServiceV20110615", svc.name);
-    std.testing.expectEqualStrings("2011-06-15", svc.shape.service.version);
+    try std.testing.expectEqualStrings("com.amazonaws.sts#AWSSecurityTokenServiceV20110615", svc.id);
+    try std.testing.expectEqualStrings("com.amazonaws.sts", svc.namespace);
+    try std.testing.expectEqualStrings("AWSSecurityTokenServiceV20110615", svc.name);
+    try std.testing.expectEqualStrings("2011-06-15", svc.shape.service.version);
     // Should be 6, but we don't handle title or xml namespace
-    std.testing.expectEqual(@as(usize, 4), svc.shape.service.traits.len);
-    std.testing.expectEqual(@as(usize, 8), svc.shape.service.operations.len);
+    try std.testing.expectEqual(@as(usize, 4), svc.shape.service.traits.len);
+    try std.testing.expectEqual(@as(usize, 8), svc.shape.service.operations.len);
 }
