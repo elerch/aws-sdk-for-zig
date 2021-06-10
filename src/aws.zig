@@ -11,7 +11,15 @@ pub const Options = struct {
     dualstack: bool = false,
 };
 
+/// Using this constant may blow up build times. Recommed using Services()
+/// function directly, e.g. const services = Services(.{.sts, .ec2, .s3, .ddb}){};
 pub const services = servicemodel.services;
+
+/// Get a service model by importing specific services only. As an example:
+/// const services = Services(.{.sts, .ec2, .s3, .ddb}){};
+///
+/// This will give you a constant with service data for sts, ec2, s3 and ddb only
+pub const Services = servicemodel.Services;
 
 pub const Aws = struct {
     allocator: *std.mem.Allocator,

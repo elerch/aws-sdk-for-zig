@@ -45,7 +45,8 @@ pub fn main() anyerror!void {
 
     var client = aws.Aws.init(allocator);
     defer client.deinit();
-    const resp = try client.call(aws.services.sts.get_caller_identity.Request{}, options);
+    const services = aws.Services(.{.sts}){};
+    const resp = try client.call(services.sts.get_caller_identity.Request{}, options);
     // TODO: This is a bit wonky. Root cause is lack of declarations in
     //       comptime-generated types
     defer resp.deinit();
@@ -56,7 +57,7 @@ pub fn main() anyerror!void {
 
         var client2 = aws.Aws.init(allocator);
         defer client2.deinit();
-        const resp2 = try client2.call(aws.services.sts.get_caller_identity.Request{}, options); // catch here and try alloc?
+        const resp2 = try client2.call(services.sts.get_caller_identity.Request{}, options); // catch here and try alloc?
         defer resp2.deinit();
     }
 
