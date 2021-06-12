@@ -61,6 +61,11 @@ pub const Aws = struct {
             },
         );
         defer response.deinit();
+        if (response.response_code != 200) {
+            log.err("call failed! return status: {d}", .{response.response_code});
+            log.err("{s}", .{response.body});
+            return error.HttpFailure;
+        }
         // TODO: Check status code for badness
         var stream = json.TokenStream.init(response.body);
 
