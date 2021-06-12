@@ -44,12 +44,29 @@ pub const Aws = struct {
         const service = meta_info.service;
         const action = meta_info.action;
         const R = Response(request);
-        const FullR = FullResponse(request);
 
-        log.debug("service endpoint {s}", .{service.endpoint_prefix});
-        log.debug("service sigv4 name {s}", .{service.sigv4_name});
-        log.debug("version {s}", .{service.version});
-        log.debug("action {s}", .{action.action_name});
+        log.debug("call: prefix {s}, sigv4 {s}, version {s}, action {s}", .{
+            service.endpoint_prefix,
+            service.sigv4_name,
+            service.version,
+            action.action_name,
+        });
+        log.debug("proto: {s}", .{service.aws_protocol});
+
+        switch (service.aws_protocol) {
+            .query => return self.callQuery(request, service, action, options),
+            .ec2_query => @compileError("EC2 Query protocol not yet supported"),
+            .rest_json_1 => @compileError("REST Json 1 protocol not yet supported"),
+            .json_1_0 => @compileError("Json 1.0 protocol not yet supported"),
+            .json_1_1 => @compileError("Json 1.1 protocol not yet supported"),
+            .rest_xml => @compileError("REST XML protocol not yet supported"),
+        }
+    }
+
+    // Call using query protocol. This is documented as an XML protocol, but
+    // throwing a JSON accept header seems to work
+    fn callQuery(self: Self, comptime request: anytype, service: anytype, action: anytype, options: Options) !FullResponse(request) {
+        const FullR = FullResponse(request);
         const response = try self.aws_http.callApi(
             service.endpoint_prefix,
             service.version,
