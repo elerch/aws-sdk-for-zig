@@ -2,6 +2,8 @@ const std = @import("std");
 
 const awshttp = @import("awshttp.zig");
 const json = @import("json.zig");
+const url = @import("url.zig");
+const case = @import("case.zig");
 const servicemodel = @import("servicemodel.zig");
 
 const log = std.log.scoped(.aws);
@@ -66,11 +68,30 @@ pub const Aws = struct {
     // Call using query protocol. This is documented as an XML protocol, but
     // throwing a JSON accept header seems to work
     fn callQuery(self: Self, comptime request: anytype, service: anytype, action: anytype, options: Options) !FullResponse(request) {
+        var buffer = std.ArrayList(u8).init(self.allocator);
+        defer buffer.deinit();
+        const writer = buffer.writer();
+        const transformer = struct {
+            allocator: *std.mem.Allocator,
+
+            const This = @This();
+
+            pub fn transform(this: This, name: []const u8) ![]const u8 {
+                return try case.snakeToPascal(this.allocator, name);
+            }
+            pub fn transform_deinit(this: This, name: []const u8) void {
+                this.allocator.free(name);
+            }
+        }{ .allocator = self.allocator };
+        try url.encode(request, writer, .{ .field_name_transformer = transformer });
+        const continuation = if (buffer.items.len > 0) "&" else "";
+
+        const body = try std.fmt.allocPrint(self.allocator, "Action={s}&Version={s}{s}{s}\n", .{ action.action_name, service.version, continuation, buffer.items });
+        defer self.allocator.free(body);
         const FullR = FullResponse(request);
         const response = try self.aws_http.callApi(
             service.endpoint_prefix,
-            service.version,
-            action.action_name,
+            body,
             .{
                 .region = options.region,
                 .dualstack = options.dualstack,
@@ -80,7 +101,7 @@ pub const Aws = struct {
         defer response.deinit();
         if (response.response_code != 200) {
             log.err("call failed! return status: {d}", .{response.response_code});
-            log.err("{s}", .{response.body});
+            log.err("Request:\n  |{s}\nResponse:\n  |{s}", .{ body, response.body });
             return error.HttpFailure;
         }
         // TODO: Check status code for badness

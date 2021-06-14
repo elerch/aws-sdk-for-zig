@@ -232,12 +232,11 @@ pub const AwsHttp = struct {
     /// It will calculate the appropriate endpoint and action parameters for the
     /// service called, and will set up the signing options. The return
     /// value is simply a raw HttpResult
-    pub fn callApi(self: Self, service: []const u8, version: []const u8, action: []const u8, options: Options) !HttpResult {
+    pub fn callApi(self: Self, service: []const u8, body: []const u8, options: Options) !HttpResult {
         const endpoint = try regionSubDomain(self.allocator, service, options.region, options.dualstack);
         defer endpoint.deinit();
-        const body = try std.fmt.allocPrint(self.allocator, "Action={s}&Version={s}\n", .{ action, version });
-        defer self.allocator.free(body);
-        httplog.debug("Calling {s}.{s}, endpoint {s}", .{ service, action, endpoint.uri });
+        httplog.debug("Calling endpoint {s}", .{endpoint.uri});
+        httplog.debug("Body\n====\n{s}\n====", .{body});
         const signing_options: SigningOptions = .{
             .region = options.region,
             .service = if (options.sigv4_service_name) |name| name else service,
