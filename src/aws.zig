@@ -55,22 +55,32 @@ pub const Aws = struct {
         });
         log.debug("proto: {s}", .{service.aws_protocol});
 
+        // It seems as though there are 3 major branches of the 6 protocols.
+        // 1. query/ec2_query, which are identical until you get to complex
+        //    structures. TBD if the shortcut we're taking for query to make
+        //    it return json will work on EC2, but my guess is yes.
+        // 2. *json*: These three appear identical for input (possible difference
+        //    for empty body serialization), but differ in error handling.
+        //    We're not doing a lot of error handling here, though.
+        // 3. rest_xml: This is a one-off for S3, never used since
         switch (service.aws_protocol) {
-            .query => return self.callQuery(request, service, action, options),
-            .ec2_query => @compileError("EC2 Query protocol not yet supported"),
-            .rest_json_1 => @compileError("REST Json 1 protocol not yet supported"),
-            .json_1_0 => @compileError("Json 1.0 protocol not yet supported"),
-            .json_1_1 => @compileError("Json 1.1 protocol not yet supported"),
+            .query, .ec2_query => return self.callQuery(request, service, action, options),
+            .rest_json_1, .json_1_0, .json_1_1 => @compileError("REST Json, Json 1.0/1.1 protocol not yet supported"),
             .rest_xml => @compileError("REST XML protocol not yet supported"),
         }
     }
 
     // Call using query protocol. This is documented as an XML protocol, but
-    // throwing a JSON accept header seems to work
+    // throwing a JSON accept header seems to work. EC2Query is very simliar to
+    // Query, so we'll handle both here. Realistically we probably don't effectively
+    // handle lists and maps properly anyway yet, so we'll go for it and see
+    // where it breaks. PRs and/or failing test cases appreciated.
     fn callQuery(self: Self, comptime request: anytype, service: anytype, action: anytype, options: Options) !FullResponse(request) {
         var buffer = std.ArrayList(u8).init(self.allocator);
         defer buffer.deinit();
         const writer = buffer.writer();
+        // TODO: transformation function should be refactored for operation
+        // with a Writer passed in so we don't have to allocate
         const transformer = struct {
             allocator: *std.mem.Allocator,
 
@@ -98,6 +108,7 @@ pub const Aws = struct {
                 .sigv4_service_name = service.sigv4_name,
             },
         );
+        // TODO: Can response handling be reused?
         defer response.deinit();
         if (response.response_code != 200) {
             log.err("call failed! return status: {d}", .{response.response_code});

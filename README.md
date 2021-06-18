@@ -95,15 +95,14 @@ TODO List:
 * ✓ Implement generic response body -> Response type handling (right now, this is hard-coded)
 * ✓ Implement codegen for services with xml structures (using Smithy models)
 * ✓ Implement codegen for others (using Smithy models)
-* Switch to aws-c-cal upsream once [PR for full static musl build support is merged](https://github.com/awslabs/aws-c-cal/pull/89) (see Dockerfile)
+* Switch to aws-c-cal upstream once [PR for full static musl build support is merged](https://github.com/awslabs/aws-c-cal/pull/89) (see Dockerfile)
 * Remove compiler 0.7.1 shims when 0.8.0 is released
 (new 2021-05-29. I will proceed in this order unless I get other requests)
-* Implement [AWS query protocol](https://awslabs.github.io/smithy/1.0/spec/aws/aws-query-protocol.html). This is the protocol in use by sts.getcalleridentity
-* Implement [AWS Json 1.0 protocol](https://awslabs.github.io/smithy/1.0/spec/aws/aws-json-1_0-protocol.html)
-* Implement [AWS Json 1.1 protocol](https://awslabs.github.io/smithy/1.0/spec/aws/aws-json-1_1-protocol.html)
-* Implement [AWS restXml protocol](https://awslabs.github.io/smithy/1.0/spec/aws/aws-restxml-protocol.html)
-* Implement [AWS EC2 query protocol](https://awslabs.github.io/smithy/1.0/spec/aws/aws-ec2-query-protocol.html)
-
+* ✓ Implement [AWS query protocol](https://awslabs.github.io/smithy/1.0/spec/aws/aws-query-protocol.html). This is the protocol in use by sts.getcalleridentity. Total service count 18
+* Implement [AWS Json 1.0 protocol](https://awslabs.github.io/smithy/1.0/spec/aws/aws-json-1_0-protocol.html). Includes dynamodb. Total service count 18
+* Implement [AWS Json 1.1 protocol](https://awslabs.github.io/smithy/1.0/spec/aws/aws-json-1_1-protocol.html). Includes ecs. Total service count 105
+* Implement [AWS restXml protocol](https://awslabs.github.io/smithy/1.0/spec/aws/aws-restxml-protocol.html). Includes S3. Total service count 4.
+* ✓ Implement [AWS EC2 query protocol](https://awslabs.github.io/smithy/1.0/spec/aws/aws-ec2-query-protocol.html). Includes EC2. Total service count 1.
 
 Compiler wishlist/watchlist:
 
