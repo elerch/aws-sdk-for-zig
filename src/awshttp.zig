@@ -263,6 +263,14 @@ pub const AwsHttp = struct {
     /// HttpResult currently contains the body only. The addition of Headers
     /// and return code would be a relatively minor change
     pub fn makeRequest(self: Self, endpoint: EndPoint, method: []const u8, path: []const u8, body: []const u8, signing_options: ?SigningOptions) !HttpResult {
+        // Since we're going to pass these into C-land, we need to make sure
+        // our inputs have sentinals
+        const method_z = try self.allocator.dupeZ(u8, method);
+        defer self.allocator.free(method_z);
+        const path_z = try self.allocator.dupeZ(u8, path);
+        defer self.allocator.free(path_z);
+        const body_z = try self.allocator.dupeZ(u8, body);
+        defer self.allocator.free(body_z);
         // TODO: Try to re-encapsulate this
         // var http_request = try createRequest(method, path, body);
 
@@ -270,14 +278,14 @@ pub const AwsHttp = struct {
         var http_request = c.aws_http_message_new_request(c_allocator);
         defer c.aws_http_message_release(http_request);
 
-        if (c.aws_http_message_set_request_method(http_request, c.aws_byte_cursor_from_c_str(@ptrCast([*c]const u8, method))) != c.AWS_OP_SUCCESS)
+        if (c.aws_http_message_set_request_method(http_request, c.aws_byte_cursor_from_c_str(@ptrCast([*c]const u8, method_z))) != c.AWS_OP_SUCCESS)
             return AwsError.SetRequestMethodError;
 
-        if (c.aws_http_message_set_request_path(http_request, c.aws_byte_cursor_from_c_str(@ptrCast([*c]const u8, path))) != c.AWS_OP_SUCCESS)
+        if (c.aws_http_message_set_request_path(http_request, c.aws_byte_cursor_from_c_str(@ptrCast([*c]const u8, path_z))) != c.AWS_OP_SUCCESS)
             return AwsError.SetRequestPathError;
 
         httplog.debug("body length: {d}", .{body.len});
-        const body_cursor = c.aws_byte_cursor_from_c_str(@ptrCast([*c]const u8, body));
+        const body_cursor = c.aws_byte_cursor_from_c_str(@ptrCast([*c]const u8, body_z));
         const request_body = c.aws_input_stream_new_from_cursor(c_allocator, &body_cursor);
         defer c.aws_input_stream_destroy(request_body);
         if (body.len > 0) {
@@ -291,7 +299,7 @@ pub const AwsHttp = struct {
             .allocator = self.allocator,
         };
         var tls_connection_options: ?*c.aws_tls_connection_options = null;
-        const host = try std.fmt.allocPrint(self.allocator, "{s}", .{endpoint.host});
+        const host = try self.allocator.dupeZ(u8, endpoint.host);
         defer self.allocator.free(host);
         try self.addHeaders(http_request.?, host, body);
         if (std.mem.eql(u8, endpoint.scheme, "https")) {
@@ -535,9 +543,9 @@ pub const AwsHttp = struct {
         }
         defer c.aws_signable_destroy(signable);
 
-        const signing_region = try std.fmt.allocPrint(self.allocator, "{s}", .{options.region});
+        const signing_region = try std.fmt.allocPrintZ(self.allocator, "{s}", .{options.region});
         defer self.allocator.free(signing_region);
-        const signing_service = try std.fmt.allocPrint(self.allocator, "{s}", .{options.service});
+        const signing_service = try std.fmt.allocPrintZ(self.allocator, "{s}", .{options.service});
         defer self.allocator.free(signing_service);
         const temp_signing_config = c.bitfield_workaround_aws_signing_config_aws{
             .algorithm = .AWS_SIGNING_ALGORITHM_V4,
@@ -647,7 +655,7 @@ pub const AwsHttp = struct {
             return AwsError.AddHeaderError;
 
         if (body.len > 0) {
-            const len = try std.fmt.allocPrint(self.allocator, "{d}", .{body.len});
+            const len = try std.fmt.allocPrintZ(self.allocator, "{d}", .{body.len});
             // This defer seems to work ok, but I'm a bit concerned about why
             defer self.allocator.free(len);
             const content_length_header = c.aws_http_header{
@@ -833,7 +841,7 @@ fn fullCast(comptime T: type, val: anytype) T {
 fn regionSubDomain(allocator: *std.mem.Allocator, service: []const u8, region: []const u8, useDualStack: bool) !EndPoint {
     const environment_override = std.os.getenv("AWS_ENDPOINT_URL");
     if (environment_override) |override| {
-        const uri = try std.fmt.allocPrint(allocator, "{s}", .{override});
+        const uri = try allocator.dupeZ(u8, override);
         return endPointFromUri(allocator, uri);
     }
     // Fallback to us-east-1 if global endpoint does not exist.
@@ -847,7 +855,7 @@ fn regionSubDomain(allocator: *std.mem.Allocator, service: []const u8, region: [
         else => "amazonaws.com",
     };
 
-    const uri = try std.fmt.allocPrint(allocator, "https://{s}{s}.{s}.{s}", .{ service, dualstack, realregion, domain });
+    const uri = try std.fmt.allocPrintZ(allocator, "https://{s}{s}.{s}.{s}", .{ service, dualstack, realregion, domain });
     const host = uri["https://".len..];
     httplog.debug("host: {s}, scheme: {s}, port: {}", .{ host, "https", 443 });
     return EndPoint{
@@ -941,7 +949,7 @@ const RequestContext = struct {
             self.body = null;
         }
         defer self.allocator.free(orig_body);
-        self.body = try std.fmt.allocPrint(self.allocator, "{s}{s}", .{ orig_body, fragment });
+        self.body = try std.fmt.allocPrintZ(self.allocator, "{s}{s}", .{ orig_body, fragment });
     }
 
     pub fn addHeader(self: *Self, name: []const u8, value: []const u8) !void {
