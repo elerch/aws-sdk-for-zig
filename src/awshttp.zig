@@ -77,7 +77,10 @@ const SigningOptions = struct {
 const HttpResult = struct {
     response_code: u16, // actually 3 digits can fit in u10
     body: []const u8,
+    allocator: *std.mem.Allocator,
+
     pub fn deinit(self: HttpResult) void {
+        self.allocator.free(self.body);
         httplog.debug("http result deinit complete", .{});
         return;
     }
@@ -298,6 +301,7 @@ pub const AwsHttp = struct {
         var context = RequestContext{
             .allocator = self.allocator,
         };
+        defer context.deinit();
         var tls_connection_options: ?*c.aws_tls_connection_options = null;
         const host = try self.allocator.dupeZ(u8, endpoint.host);
         defer self.allocator.free(host);
@@ -442,6 +446,7 @@ pub const AwsHttp = struct {
         const rc = HttpResult{
             .response_code = context.response_code.?,
             .body = final_body,
+            .allocator = self.allocator,
         };
         return rc;
     }
@@ -929,15 +934,16 @@ const RequestContext = struct {
     const Self = @This();
 
     pub fn deinit(self: Self) void {
-        self.allocator.free(self.body);
+        // We're going to leave it to the caller to free the body
+        // if (self.body) |b| self.allocator.free(b);
         if (self.headers) |hs| {
-            for (hs) |h| {
+            for (hs.items) |h| {
                 // deallocate the copied values
                 self.allocator.free(h.name);
                 self.allocator.free(h.value);
             }
             // deallocate the structure itself
-            h.deinit();
+            hs.deinit();
         }
     }
 
@@ -945,7 +951,7 @@ const RequestContext = struct {
         var orig_body: []const u8 = "";
         if (self.body) |b| {
             orig_body = try self.allocator.dupeZ(u8, b);
-            self.allocator.free(self.body.?);
+            self.allocator.free(b);
             self.body = null;
         }
         defer self.allocator.free(orig_body);
