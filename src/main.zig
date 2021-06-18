@@ -36,7 +36,13 @@ pub fn main() anyerror!void {
     const test_json = false;
     if (test_json) try jsonFun();
 
-    const allocator = std.heap.c_allocator;
+    const c_allocator = std.heap.c_allocator;
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){
+        .backing_allocator = c_allocator,
+    };
+    defer if (!gpa.deinit()) @panic("memory leak detected");
+    const allocator = &gpa.allocator;
+    // const allocator = std.heap.c_allocator;
 
     const options = aws.Options{
         .region = "us-west-2",
