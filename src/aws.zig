@@ -79,21 +79,10 @@ pub const Aws = struct {
         var buffer = std.ArrayList(u8).init(self.allocator);
         defer buffer.deinit();
         const writer = buffer.writer();
-        // TODO: transformation function should be refactored for operation
-        // with a Writer passed in so we don't have to allocate
-        const transformer = struct {
-            allocator: *std.mem.Allocator,
-
-            const This = @This();
-
-            pub fn transform(this: This, name: []const u8) ![]const u8 {
-                return try case.snakeToPascal(this.allocator, name);
-            }
-            pub fn transform_deinit(this: This, name: []const u8) void {
-                this.allocator.free(name);
-            }
-        }{ .allocator = self.allocator };
-        try url.encode(request, writer, .{ .field_name_transformer = transformer });
+        try url.encode(request, writer, .{
+            .field_name_transformer = &queryFieldTransformer,
+            .allocator = self.allocator,
+        });
         const continuation = if (buffer.items.len > 0) "&" else "";
 
         const body = try std.fmt.allocPrint(self.allocator, "Action={s}&Version={s}{s}{s}\n", .{ action.action_name, service.version, continuation, buffer.items });
@@ -123,6 +112,7 @@ pub const Aws = struct {
             .allow_camel_case_conversion = true, // new option
             .allow_snake_case_conversion = true, // new option
             .allow_unknown_fields = true, // new option. Cannot yet handle non-struct fields though
+            .allow_missing_fields = false, // new option. Cannot yet handle non-struct fields though
         };
         const SResponse = ServerResponse(request);
         const parsed_response = try json.parse(SResponse, &stream, parser_options);
@@ -215,3 +205,29 @@ fn FullResponse(comptime request: anytype) type {
 fn Response(comptime request: anytype) type {
     return request.metaInfo().action.Response;
 }
+fn queryFieldTransformer(field_name: []const u8, encoding_options: url.EncodingOptions) anyerror![]const u8 {
+    return try case.snakeToPascal(encoding_options.allocator.?, field_name);
+}
+
+// Use for debugging json responses of specific requests
+// test "dummy request" {
+//     const allocator = std.testing.allocator;
+//     const svs = Services(.{.sts}){};
+//     const request = svs.sts.get_session_token.Request{
+//         .duration_seconds = 900,
+//     };
+//     const FullR = FullResponse(request);
+//     const response =
+//     var stream = json.TokenStream.init(response);
+//
+//     const parser_options = json.ParseOptions{
+//         .allocator = allocator,
+//         .allow_camel_case_conversion = true, // new option
+//         .allow_snake_case_conversion = true, // new option
+//         .allow_unknown_fields = true, // new option. Cannot yet handle non-struct fields though
+//         .allow_missing_fields = false, // new option. Cannot yet handle non-struct fields though
+//     };
+//     const SResponse = ServerResponse(request);
+//     const r = try json.parse(SResponse, &stream, parser_options);
+//     json.parseFree(SResponse, r, parser_options);
+// }
