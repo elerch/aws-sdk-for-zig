@@ -1,29 +1,81 @@
 const std = @import("std");
 
-pub fn encode(obj: anytype, writer: anytype, options: anytype) !void {
-    try encodeStruct("", obj, writer, options);
+fn defaultTransformer(field_name: []const u8, options: EncodingOptions) anyerror![]const u8 {
+    return field_name;
 }
 
-fn encodeStruct(parent: []const u8, obj: anytype, writer: anytype, options: anytype) !void {
-    var first = true;
+pub const FieldNameTransformer = fn ([]const u8, EncodingOptions) anyerror![]const u8;
+
+pub const EncodingOptions = struct {
+    allocator: ?*std.mem.Allocator = null,
+    field_name_transformer: *const FieldNameTransformer = &defaultTransformer,
+};
+
+pub fn encode(obj: anytype, writer: anytype, options: EncodingOptions) !void {
+    _ = try encodeInternal("", "", true, obj, writer, options);
+}
+
+fn encodeStruct(parent: []const u8, first: bool, obj: anytype, writer: anytype, options: EncodingOptions) !bool {
+    var rc = first;
     inline for (@typeInfo(@TypeOf(obj)).Struct.fields) |field| {
-        const field_name = if (@hasField(@TypeOf(options), "field_name_transformer")) try options.field_name_transformer.transform(field.name) else field.name;
-        defer {
-            if (@hasField(@TypeOf(options), "field_name_transformer"))
-                options.field_name_transformer.transform_deinit(field_name);
-        }
-        if (!first) _ = try writer.write("&");
-        switch (@typeInfo(field.field_type)) {
-            .Struct => {
-                try encodeStruct(field_name ++ ".", @field(obj, field.name), writer);
-            },
-            else => try writer.print("{s}{s}={s}", .{ parent, field_name, @field(obj, field.name) }),
-        }
-        first = false;
+        const field_name = try options.field_name_transformer.*(field.name, options);
+        defer if (options.field_name_transformer.* != defaultTransformer)
+            if (options.allocator) |a| a.free(field_name);
+        // @compileLog(@typeInfo(field.field_type).Pointer);
+        rc = try encodeInternal(parent, field_name, rc, @field(obj, field.name), writer, options);
     }
+    return rc;
 }
 
-fn testencode(expected: []const u8, value: anytype, options: anytype) !void {
+pub fn encodeInternal(parent: []const u8, field_name: []const u8, first: bool, obj: anytype, writer: anytype, options: EncodingOptions) !bool {
+    // @compileLog(@typeInfo(@TypeOf(obj)));
+    var rc = first;
+    switch (@typeInfo(@TypeOf(obj))) {
+        .Optional => if (obj) |o| {
+            rc = try encodeInternal(parent, field_name, first, o, writer, options);
+        },
+        .Pointer => |ti| if (ti.size == .One) {
+            rc = try encodeInternal(parent, field_name, first, obj.*, writer, options);
+        } else {
+            if (!first) _ = try writer.write("&");
+            try writer.print("{s}{s}={s}", .{ parent, field_name, obj });
+            rc = false;
+        },
+        .Struct => if (std.mem.eql(u8, "", field_name)) {
+            rc = try encodeStruct(parent, first, obj, writer, options);
+        } else {
+            // TODO: It would be lovely if we could concat at compile time or allocPrint at runtime
+            // XOR have compile time allocator support. Alas, neither are possible:
+            // https://github.com/ziglang/zig/issues/868: Comptime detection (feels like foot gun)
+            // https://github.com/ziglang/zig/issues/1291: Comptime allocator
+            const allocator = options.allocator orelse return error.AllocatorRequired;
+            const new_parent = try std.fmt.allocPrint(allocator, "{s}{s}.", .{ parent, field_name });
+            defer allocator.free(new_parent);
+            rc = try encodeStruct(new_parent, first, obj, writer, options);
+            // try encodeStruct(parent ++ field_name ++ ".", first, obj,  writer, options);
+        },
+        .Array => {
+            if (!first) _ = try writer.write("&");
+            try writer.print("{s}{s}={s}", .{ parent, field_name, obj });
+            rc = false;
+        },
+        .Int, .ComptimeInt, .Float, .ComptimeFloat => {
+            if (!first) _ = try writer.write("&");
+            try writer.print("{s}{s}={d}", .{ parent, field_name, obj });
+            rc = false;
+        },
+        // BUGS! any doesn't work - a lot. Check this out:
+        // https://github.com/ziglang/zig/blob/master/lib/std/fmt.zig#L424
+        else => {
+            if (!first) _ = try writer.write("&");
+            try writer.print("{s}{s}={any}", .{ parent, field_name, obj });
+            rc = false;
+        },
+    }
+    return rc;
+}
+
+fn testencode(expected: []const u8, value: anytype, options: EncodingOptions) !void {
     const ValidationWriter = struct {
         const Self = @This();
         pub const Writer = std.io.Writer(*Self, Error, write);
@@ -43,7 +95,7 @@ fn testencode(expected: []const u8, value: anytype, options: anytype) !void {
         }
 
         fn write(self: *Self, bytes: []const u8) Error!usize {
-            // std.debug.print("{s}", .{bytes});
+            // std.debug.print("{s}\n", .{bytes});
             if (self.expected_remaining.len < bytes.len) {
                 std.debug.warn(
                     \\====== expected this output: =========
@@ -80,17 +132,46 @@ fn testencode(expected: []const u8, value: anytype, options: anytype) !void {
     if (vos.expected_remaining.len > 0) return error.NotEnoughData;
 }
 
-test "can url encode an object" {
+test "can urlencode an object" {
     try testencode(
         "Action=GetCallerIdentity&Version=2021-01-01",
         .{ .Action = "GetCallerIdentity", .Version = "2021-01-01" },
         .{},
     );
 }
-test "can url encode a complex object" {
+test "can urlencode an object with integer" {
+    try testencode(
+        "Action=GetCallerIdentity&Duration=32",
+        .{ .Action = "GetCallerIdentity", .Duration = 32 },
+        .{},
+    );
+}
+const UnsetValues = struct {
+    action: ?[]const u8 = null,
+    duration: ?i64 = null,
+    val1: ?i64 = null,
+    val2: ?[]const u8 = null,
+};
+test "can urlencode an object with unset values" {
+    // var buffer = std.ArrayList(u8).init(std.testing.allocator);
+    // defer buffer.deinit();
+    // const writer = buffer.writer();
+    // try encode(
+    //     UnsetValues{ .action = "GetCallerIdentity", .duration = 32 },
+    //     writer,
+    //     .{ .allocator = std.testing.allocator },
+    // );
+    // std.debug.print("{s}", .{buffer.items});
+    try testencode(
+        "action=GetCallerIdentity&duration=32",
+        UnsetValues{ .action = "GetCallerIdentity", .duration = 32 },
+        .{},
+    );
+}
+test "can urlencode a complex object" {
     try testencode(
         "Action=GetCallerIdentity&Version=2021-01-01&complex.innermember=foo",
         .{ .Action = "GetCallerIdentity", .Version = "2021-01-01", .complex = .{ .innermember = "foo" } },
-        .{},
+        .{ .allocator = std.testing.allocator },
     );
 }
