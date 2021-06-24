@@ -1472,6 +1472,17 @@ fn camelCaseComp(field: []const u8, key: []const u8, options: ParseOptions) !boo
     }
     return std.mem.eql(u8, field, key);
 }
+
+test "snake" {
+    const allocator = testing.allocator;
+    const options = ParseOptions{
+        .allocator = allocator,
+        .allow_camel_case_conversion = true,
+        .allow_snake_case_conversion = true,
+        .allow_unknown_fields = true,
+    };
+    try std.testing.expect(try snakeCaseComp("access_key_id", "AccessKeyId", options));
+}
 fn snakeCaseComp(field: []const u8, key: []const u8, options: ParseOptions) !bool {
     // snake case is much more intricate. Input:
     // Field: user_id
