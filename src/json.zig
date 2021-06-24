@@ -1480,10 +1480,8 @@ fn snakeCaseComp(field: []const u8, key: []const u8, options: ParseOptions) !boo
     // Then compare
     var found: u32 = 0;
     for (field) |ch| {
-        if (ch == '_') {
+        if (ch == '_')
             found = found + 1;
-            break;
-        }
     }
     if (found == 0)
         return std.mem.eql(u8, field, key);
@@ -1515,6 +1513,11 @@ fn snakeCaseComp(field: []const u8, key: []const u8, options: ParseOptions) !boo
         }
         inx = inx + 1;
     }
+    // std.debug.print("comp_field, len {d}: {s}\n", .{ comp_field.len, comp_field });
+    // std.debug.print("normalized_key, len {d}: {s}\n", .{ normalized_key.len, normalized_key });
+    // std.debug.print("comp_field, last: {d}\n", .{comp_field[comp_field.len - 1]});
+    // std.debug.print("normalized_key, last: {d}\n", .{normalized_key[normalized_key.len - 1]});
+
     return std.mem.eql(u8, comp_field, normalized_key);
 }
 
