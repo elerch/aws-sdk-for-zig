@@ -1454,6 +1454,7 @@ pub const ParseOptions = struct {
     allow_camel_case_conversion: bool = false,
     allow_snake_case_conversion: bool = false,
     allow_unknown_fields: bool = false,
+    allow_missing_fields: bool = false,
 };
 
 fn camelCaseComp(field: []const u8, key: []const u8, options: ParseOptions) !bool {
@@ -1682,7 +1683,8 @@ fn parseInternal(comptime T: type, token: Token, tokens: *TokenStream, options: 
                             @field(r, field.name) = default;
                         }
                     } else {
-                        return error.MissingField;
+                        if (!options.allow_missing_fields)
+                            return error.MissingField;
                     }
                 }
             }
