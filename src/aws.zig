@@ -104,6 +104,7 @@ pub const Aws = struct {
             log.err("Request:\n  |{s}\nResponse:\n  |{s}", .{ body, response.body });
             return error.HttpFailure;
         }
+        // log.debug("Successful return from server:\n  |{s}", .{response.body});
         // TODO: Check status code for badness
         var stream = json.TokenStream.init(response.body);
 
@@ -115,7 +116,17 @@ pub const Aws = struct {
             .allow_missing_fields = false, // new option. Cannot yet handle non-struct fields though
         };
         const SResponse = ServerResponse(request);
-        const parsed_response = try json.parse(SResponse, &stream, parser_options);
+        const parsed_response = json.parse(SResponse, &stream, parser_options) catch |e| {
+            log.err(
+                \\Call successful, but unexpected response from service.
+                \\This could be the result of a bug or a stale set of code generated
+                \\service models. Response from server:
+                \\
+                \\{s}
+                \\
+            , .{response.body});
+            return e;
+        };
 
         // Grab the first (and only) object from the server. Server shape expected to be:
         // { ActionResponse: {ActionResult: {...}, ResponseMetadata: {...} } }
