@@ -1543,8 +1543,13 @@ fn parseInternal(comptime T: type, token: Token, tokens: *TokenStream, options: 
                 .Number => |n| n,
                 else => return error.UnexpectedToken,
             };
-            if (!numberToken.is_integer) return error.UnexpectedToken;
-            return try std.fmt.parseInt(T, numberToken.slice(tokens.slice, tokens.i - 1), 10);
+            // This is a bug. you can still potentially have an integer that has exponents
+            // if (!numberToken.is_integer) return error.UnexpectedToken;
+            if (numberToken.is_integer)
+                return try std.fmt.parseInt(T, numberToken.slice(tokens.slice, tokens.i - 1), 10);
+            const float = try std.fmt.parseFloat(f128, numberToken.slice(tokens.slice, tokens.i - 1));
+            if (std.math.round(float) != float) return error.InvalidNumber;
+            return @floatToInt(T, float);
         },
         .Optional => |optionalInfo| {
             if (token == .Null) {
@@ -2001,6 +2006,11 @@ test "parse with comptime field" {
 test "parse into struct with no fields" {
     const T = struct {};
     try testing.expectEqual(T{}, try parse(T, &TokenStream.init("{}"), ParseOptions{}));
+}
+test "parse exponential into int" {
+    const T = struct { int: i64 };
+    const r = try parse(T, &TokenStream.init("{ \"int\": 4.2e2 }"), ParseOptions{});
+    try testing.expectEqual(@as(i64, 420), r.int);
 }
 
 test "parse into struct with misc fields" {
