@@ -116,7 +116,7 @@ fn generateServices(allocator: *std.mem.Allocator, comptime terminator: []const 
         try writer.print("pub const {s}: struct ", .{constant_name});
         _ = try writer.write("{\n");
 
-        try writer.print("    version: []const u8 = \"{s}\",\n", .{service.shape.service.version});
+        try writer.print("    version: []const u8 = \"{s}\",\n", .{version});
         try writer.print("    sdk_id: []const u8 = \"{s}\",\n", .{sdk_id});
         try writer.print("    arn_namespace: []const u8 = \"{s}\",\n", .{arn_namespace});
         try writer.print("    endpoint_prefix: []const u8 = \"{s}\",\n", .{endpoint_prefix});
@@ -138,7 +138,7 @@ fn generateOperation(allocator: *std.mem.Allocator, operation: smithy.ShapeInfo,
     const snake_case_name = try snake.fromPascalCase(allocator, operation.name);
     defer allocator.free(snake_case_name);
 
-    comptime const prefix = "        ";
+    const prefix = "        ";
     var type_stack = std.ArrayList(*const smithy.ShapeInfo).init(allocator);
     defer type_stack.deinit();
     // indent should start at 4 spaces here
@@ -242,7 +242,7 @@ fn generateTypeFor(allocator: *std.mem.Allocator, shape_id: []const u8, shapes: 
     }
     try type_stack.append(&shape_info);
     switch (shape) {
-        .structure => |s| {
+        .structure => {
             try generateComplexTypeFor(allocator, shape.structure.members, "struct", shapes, writer, prefix, all_required, type_stack);
             if (end_structure) {
                 // epilog
@@ -250,7 +250,7 @@ fn generateTypeFor(allocator: *std.mem.Allocator, shape_id: []const u8, shapes: 
                 _ = try writer.write("}");
             }
         },
-        .uniontype => |s| {
+        .uniontype => {
             try generateComplexTypeFor(allocator, shape.uniontype.members, "union", shapes, writer, prefix, all_required, type_stack);
             // epilog
             try writer.print("{s}", .{prefix});
@@ -258,11 +258,11 @@ fn generateTypeFor(allocator: *std.mem.Allocator, shape_id: []const u8, shapes: 
         },
         .string => |s| try generateSimpleTypeFor(s, "[]const u8", writer, all_required),
         .integer => |s| try generateSimpleTypeFor(s, "i64", writer, all_required),
-        .list => |s| {
+        .list => {
             _ = try writer.write("[]");
             try generateTypeFor(allocator, shape.list.member_target, shapes, writer, prefix, all_required, type_stack, true);
         },
-        .set => |s| {
+        .set => {
             _ = try writer.write("[]");
             try generateTypeFor(allocator, shape.set.member_target, shapes, writer, prefix, all_required, type_stack, true);
         },
@@ -298,8 +298,13 @@ fn generateTypeFor(allocator: *std.mem.Allocator, shape_id: []const u8, shapes: 
     _ = type_stack.pop();
 }
 
-fn generateSimpleTypeFor(shape: anytype, type_name: []const u8, writer: anytype, all_required: bool) !void {
-    _ = try writer.write(type_name); // This had required stuff but the problem was elsewhere. Better to leave as function just in case
+// fn generateSimpleTypeFor(shape: anytype, type_name: []const u8, writer: anytype, _: bool) !void {
+fn generateSimpleTypeFor(_: anytype, type_name: []const u8, writer: anytype, all_required: bool) !void {
+    // current compiler checks unused variables, but can't handle multiple unused
+    // function parameters. We don't want to change the signature in case we need to work with
+    // these in the future, so this stupid code is only here to trick the compiler
+    if (all_required or !all_required)
+        _ = try writer.write(type_name); // This had required stuff but the problem was elsewhere. Better to leave as function just in case
 }
 
 fn generateComplexTypeFor(allocator: *std.mem.Allocator, members: []smithy.TypeMember, type_type_name: []const u8, shapes: anytype, writer: anytype, prefix: []const u8, all_required: bool, type_stack: anytype) anyerror!void {
