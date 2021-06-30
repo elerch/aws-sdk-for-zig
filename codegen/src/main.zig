@@ -12,9 +12,7 @@ pub fn main() anyerror!void {
     const stdout = std.io.getStdOut().writer();
     const manifest_file = try std.fs.cwd().createFile("service_manifest.zig", .{});
     defer manifest_file.close();
-    errdefer manifest_file.close();
     const manifest = manifest_file.writer();
-    _ = try manifest.write("pub const services = [_]struct { name: []const u8, file_name: []const u8, export_name: []const u8 }{\n");
     var inx: u32 = 0;
     for (args) |arg| {
         if (inx == 0) {
@@ -27,7 +25,6 @@ pub fn main() anyerror!void {
 
     if (args.len == 0)
         _ = try generateServices(allocator, ";", std.io.getStdIn(), stdout);
-    _ = try manifest.write("};\n");
 }
 
 fn processFile(arg: []const u8, stdout: anytype, manifest: anytype) !void {
@@ -57,9 +54,7 @@ fn processFile(arg: []const u8, stdout: anytype, manifest: anytype) !void {
     }
     file.close();
     for (service_names) |name| {
-        _ = try manifest.write("    .{");
-        try manifest.print(" .name = \"{s}\", .file_name = \"{s}\", .export_name = \"{s}\"", .{ name, std.fs.path.basename(filename), name });
-        _ = try manifest.write(" },\n");
+        try manifest.print("pub const {s} = @import(\"{s}\");\n", .{ name, std.fs.path.basename(filename) });
     }
 }
 
