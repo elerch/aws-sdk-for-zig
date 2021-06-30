@@ -45,7 +45,7 @@ fn processFile(arg: []const u8, stdout: anytype, manifest: anytype) !void {
     file = try std.fs.cwd().createFile(filename, .{ .truncate = true });
     errdefer file.close();
     writer = &file.writer();
-    _ = try writer.write("const smithy = @import(\"smithy.zig\");\n\n");
+    _ = try writer.write("const smithy = @import(\"smithy\");\n\n");
     std.log.info("Processing file: {s}", .{arg});
     const service_names = generateServicesForFilePath(allocator, ";", arg, writer) catch |err| {
         std.log.crit("Error processing file: {s}", .{arg});
