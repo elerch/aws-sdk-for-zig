@@ -1,0 +1,37 @@
+kind: pipeline
+type: docker
+name: default
+
+steps:
+- name: make
+  image: r.lerch.org/aws-zig-build:1
+  environment:
+    USERNAME:
+      from_secret: docker_username
+    PASSWORD:
+      from_secret: docker_password
+    REGISTRY:
+      from_secret: docker_registry
+  commands:
+  - wget https://ziglang.org/builds/zig-linux-x86_64-0.9.0-dev.321+15a030ef3.tar.xz
+  - tar x -C /usr/local -f zig-linux-x86_64-0.9.0-dev.321+15a030ef3.tar.xz
+  - rm /usr/local/bin/zig
+  - ln -s /usr/local/zig-linux-x86_64-0.9.0-dev.321+15a030ef3/zig /usr/local/bin/zig
+  - (cd codegen && zig build test)
+  - zig build test
+  - zig build
+- name: notify
+  image: plugins/matrix
+  when:
+    status:
+    - success
+    - failure
+  settings:
+    homeserver:
+      from_secret: matrix-homeserver
+    roomid:
+      from_secret: matrix-room-id
+    userid:
+      from_secret: matrix-user-id
+    accesstoken:
+      from_secret: matrix-access-token
