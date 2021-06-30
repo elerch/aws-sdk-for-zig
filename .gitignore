@@ -1,7 +1,7 @@
 .cache
 zig-cache
-src/codegen/models/*.zig
-src/codegen/codegen
+codegen/models/*.zig
+codegen/codegen
 *.tgz
 service_manifest.zig
 demo
