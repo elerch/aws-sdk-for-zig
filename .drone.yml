@@ -18,8 +18,8 @@ steps:
   - rm /usr/local/bin/zig
   - ln -s /usr/local/zig-linux-x86_64-0.9.0-dev.321+15a030ef3/zig /usr/local/bin/zig
   - (cd codegen && zig build test)
+  - zig build # implicitly does a codegen
   - zig build test
-  - zig build
 - name: notify
   image: plugins/matrix
   when:

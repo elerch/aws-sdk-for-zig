@@ -17,20 +17,6 @@ pub fn build(b: *Builder) !void {
     // https://github.com/ziglang/zig/issues/855
     exe.addPackagePath("smithy", "smithy/src/smithy.zig");
 
-    // TODO: Support > linux
-    // TODO: Get a better cache in place
-    if (std.builtin.os.tag == .linux) {
-        const codegen = b.step("gen", "Generate zig service code from smithy models");
-        codegen.dependOn(&b.addSystemCommand(&.{ "/bin/sh", "-c", "cd codegen && zig build" }).step);
-        codegen.dependOn(&b.addSystemCommand(&.{
-            "/bin/sh", "-c",
-            \\ mkdir -p src/models/ && \
-            \\ [ -f src/models/service_manifest.zig ] || \
-            \\ ( cd codegen/models && ../codegen *.json && mv *.zig ../../src/models )
-        }).step);
-        b.getInstallStep().dependOn(codegen);
-    }
-
     exe.addCSourceFile("src/bitfield-workaround.c", &[_][]const u8{"-std=c99"});
     const c_include_dirs = .{
         "./src/",
@@ -95,5 +81,20 @@ pub fn build(b: *Builder) !void {
             t.setBuildMode(mode);
             test_step.dependOn(&t.step);
         }
+    }
+
+    // TODO: Support > linux
+    // TODO: Get a better cache in place
+    if (std.builtin.os.tag == .linux) {
+        const codegen = b.step("gen", "Generate zig service code from smithy models");
+        codegen.dependOn(&b.addSystemCommand(&.{ "/bin/sh", "-c", "cd codegen && zig build" }).step);
+        codegen.dependOn(&b.addSystemCommand(&.{
+            "/bin/sh", "-c",
+            \\ mkdir -p src/models/ && \
+            \\ [ -f src/models/service_manifest.zig ] || \
+            \\ ( cd codegen/models && ../codegen *.json && mv *.zig ../../src/models )
+        }).step);
+        b.getInstallStep().dependOn(codegen);
+        test_step.dependOn(codegen);
     }
 }
