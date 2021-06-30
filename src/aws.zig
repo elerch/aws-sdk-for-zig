@@ -43,16 +43,16 @@ pub const Aws = struct {
         // every codegenned request object includes a metaInfo function to get
         // pointers to service and action
         const meta_info = request.metaInfo();
-        const service = meta_info.service;
+        const service_meta = meta_info.service_metadata;
         const action = meta_info.action;
 
         log.debug("call: prefix {s}, sigv4 {s}, version {s}, action {s}", .{
-            service.endpoint_prefix,
-            service.sigv4_name,
-            service.version,
+            service_meta.endpoint_prefix,
+            service_meta.sigv4_name,
+            service_meta.version,
             action.action_name,
         });
-        log.debug("proto: {s}", .{service.aws_protocol});
+        log.debug("proto: {s}", .{service_meta.aws_protocol});
 
         // It seems as though there are 3 major branches of the 6 protocols.
         // 1. query/ec2_query, which are identical until you get to complex
@@ -62,8 +62,8 @@ pub const Aws = struct {
         //    for empty body serialization), but differ in error handling.
         //    We're not doing a lot of error handling here, though.
         // 3. rest_xml: This is a one-off for S3, never used since
-        switch (service.aws_protocol) {
-            .query, .ec2_query => return self.callQuery(request, service, action, options),
+        switch (service_meta.aws_protocol) {
+            .query, .ec2_query => return self.callQuery(request, service_meta, action, options),
             .rest_json_1, .json_1_0, .json_1_1 => @compileError("REST Json, Json 1.0/1.1 protocol not yet supported"),
             .rest_xml => @compileError("REST XML protocol not yet supported"),
         }
@@ -74,7 +74,7 @@ pub const Aws = struct {
     // Query, so we'll handle both here. Realistically we probably don't effectively
     // handle lists and maps properly anyway yet, so we'll go for it and see
     // where it breaks. PRs and/or failing test cases appreciated.
-    fn callQuery(self: Self, comptime request: anytype, service: anytype, action: anytype, options: Options) !FullResponse(request) {
+    fn callQuery(self: Self, comptime request: anytype, service_meta: anytype, action: anytype, options: Options) !FullResponse(request) {
         var buffer = std.ArrayList(u8).init(self.allocator);
         defer buffer.deinit();
         const writer = buffer.writer();
@@ -84,16 +84,16 @@ pub const Aws = struct {
         });
         const continuation = if (buffer.items.len > 0) "&" else "";
 
-        const body = try std.fmt.allocPrint(self.allocator, "Action={s}&Version={s}{s}{s}\n", .{ action.action_name, service.version, continuation, buffer.items });
+        const body = try std.fmt.allocPrint(self.allocator, "Action={s}&Version={s}{s}{s}\n", .{ action.action_name, service_meta.version, continuation, buffer.items });
         defer self.allocator.free(body);
         const FullR = FullResponse(request);
         const response = try self.aws_http.callApi(
-            service.endpoint_prefix,
+            service_meta.endpoint_prefix,
             body,
             .{
                 .region = options.region,
                 .dualstack = options.dualstack,
-                .sigv4_service_name = service.sigv4_name,
+                .sigv4_service_name = service_meta.sigv4_name,
             },
         );
         // TODO: Can response handling be reused?

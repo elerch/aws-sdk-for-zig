@@ -63,7 +63,7 @@ fn generateServicesForFilePath(allocator: *std.mem.Allocator, comptime terminato
     defer file.close();
     return try generateServices(allocator, terminator, file, writer);
 }
-fn generateServices(allocator: *std.mem.Allocator, comptime terminator: []const u8, file: std.fs.File, writer: anytype) ![][]const u8 {
+fn generateServices(allocator: *std.mem.Allocator, comptime _: []const u8, file: std.fs.File, writer: anytype) ![][]const u8 {
     const json = try file.readToEndAlloc(allocator, 1024 * 1024 * 1024);
     defer allocator.free(json);
     const model = try smithy.parse(allocator, json);
@@ -108,9 +108,15 @@ fn generateServices(allocator: *std.mem.Allocator, comptime terminator: []const 
         // sdk_id. Not sure this will simple...
         const constant_name = try snake.fromPascalCase(allocator, sdk_id);
         try constant_names.append(constant_name);
-        try writer.print("pub const {s}: struct ", .{constant_name});
-        _ = try writer.write("{\n");
-
+        try writer.print("const Self = @This();\n", .{});
+        try writer.print("pub const version: []const u8 = \"{s}\";\n", .{version});
+        try writer.print("pub const sdk_id: []const u8 = \"{s}\";\n", .{sdk_id});
+        try writer.print("pub const arn_namespace: []const u8 = \"{s}\";\n", .{arn_namespace});
+        try writer.print("pub const endpoint_prefix: []const u8 = \"{s}\";\n", .{endpoint_prefix});
+        try writer.print("pub const sigv4_name: []const u8 = \"{s}\";\n", .{sigv4_name});
+        // TODO: This really should just be ".whatevs". We're fully qualifying here, which isn't typical
+        try writer.print("pub const aws_protocol: smithy.AwsProtocol = smithy.{s};\n\n", .{aws_protocol});
+        _ = try writer.write("pub const service_metadata : struct {\n");
         try writer.print("    version: []const u8 = \"{s}\",\n", .{version});
         try writer.print("    sdk_id: []const u8 = \"{s}\",\n", .{sdk_id});
         try writer.print("    arn_namespace: []const u8 = \"{s}\",\n", .{arn_namespace});
@@ -118,14 +124,11 @@ fn generateServices(allocator: *std.mem.Allocator, comptime terminator: []const 
         try writer.print("    sigv4_name: []const u8 = \"{s}\",\n", .{sigv4_name});
         // TODO: This really should just be ".whatevs". We're fully qualifying here, which isn't typical
         try writer.print("    aws_protocol: smithy.AwsProtocol = smithy.{s},\n", .{aws_protocol});
+        _ = try writer.write("} = .{};\n");
 
         // Operations
         for (service.shape.service.operations) |op|
             try generateOperation(allocator, shapes.get(op).?, shapes, writer, constant_name);
-
-        // End service
-        _ = try writer.write("} = .{}" ++ terminator ++ " // end of service: ");
-        try writer.print("{s}\n", .{arn_namespace}); // this var needs to match above
     }
     return constant_names.toOwnedSlice();
 }
@@ -133,15 +136,15 @@ fn generateOperation(allocator: *std.mem.Allocator, operation: smithy.ShapeInfo,
     const snake_case_name = try snake.fromPascalCase(allocator, operation.name);
     defer allocator.free(snake_case_name);
 
-    const prefix = "        ";
+    const prefix = "    ";
     var type_stack = std.ArrayList(*const smithy.ShapeInfo).init(allocator);
     defer type_stack.deinit();
     // indent should start at 4 spaces here
     const operation_name = avoidReserved(snake_case_name);
-    try writer.print("    {s}: struct ", .{operation_name});
+    try writer.print("pub const {s}: struct ", .{operation_name});
     _ = try writer.write("{\n");
-    try writer.print("        action_name: []const u8 = \"{s}\",\n", .{operation.name});
-    _ = try writer.write("        Request: type = ");
+    try writer.print("    action_name: []const u8 = \"{s}\",\n", .{operation.name});
+    _ = try writer.write("    Request: type = ");
     if (operation.shape.operation.input) |member| {
         try generateTypeFor(allocator, member, shapes, writer, prefix, false, &type_stack, false);
         _ = try writer.write("\n");
@@ -151,24 +154,24 @@ fn generateOperation(allocator: *std.mem.Allocator, operation: smithy.ShapeInfo,
         try generateMetadataFunction(service, operation_name, prefix, writer);
     }
     _ = try writer.write(",\n");
-    _ = try writer.write("        Response: type = ");
+    _ = try writer.write("    Response: type = ");
     if (operation.shape.operation.output) |member| {
-        try generateTypeFor(allocator, member, shapes, writer, "        ", true, &type_stack, true);
+        try generateTypeFor(allocator, member, shapes, writer, "    ", true, &type_stack, true);
     } else _ = try writer.write("struct {}"); // we want to maintain consistency with other ops
     _ = try writer.write(",\n");
 
     if (operation.shape.operation.errors) |errors| {
-        _ = try writer.write("        ServiceError: type = error{\n");
+        _ = try writer.write("    ServiceError: type = error{\n");
         for (errors) |err| {
             const err_name = getErrorName(shapes.get(err).?.name); // need to remove "exception"
-            try writer.print("            {s},\n", .{err_name});
+            try writer.print("        {s},\n", .{err_name});
         }
-        _ = try writer.write("        },\n");
+        _ = try writer.write("    },\n");
     }
-    _ = try writer.write("    } = .{},\n");
+    _ = try writer.write("} = .{};\n");
 }
 
-fn generateMetadataFunction(service: []const u8, operation_name: []const u8, comptime prefix: []const u8, writer: anytype) !void {
+fn generateMetadataFunction(_: []const u8, operation_name: []const u8, comptime prefix: []const u8, writer: anytype) !void {
     // TODO: Shove these lines in here, and also the else portion
     // pub fn metaInfo(self: @This()) struct { service: @TypeOf(sts), action: @TypeOf(sts.get_caller_identity) } {
     //     return .{ .service = sts, .action = sts.get_caller_identity };
@@ -176,9 +179,9 @@ fn generateMetadataFunction(service: []const u8, operation_name: []const u8, com
     // We want to add a short "get my parents" function into the response
     try writer.print("{s}    ", .{prefix});
     _ = try writer.write("pub fn metaInfo(_: @This()) struct { ");
-    try writer.print("service: @TypeOf({s}), action: @TypeOf({s}.{s})", .{ service, service, operation_name });
-    _ = try writer.write(" } {\n" ++ prefix ++ "        return .{ ");
-    try writer.print(".service = {s}, .action = {s}.{s}", .{ service, service, operation_name });
+    try writer.print("service_metadata: @TypeOf(service_metadata), action: @TypeOf({s})", .{operation_name});
+    _ = try writer.write(" } {\n" ++ prefix ++ "        return .{ .service_metadata = service_metadata, ");
+    try writer.print(".action = {s}", .{operation_name});
     _ = try writer.write(" };\n" ++ prefix ++ "    }\n" ++ prefix ++ "}");
 }
 fn getErrorName(err_name: []const u8) []const u8 {
