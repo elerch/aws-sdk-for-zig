@@ -55,7 +55,7 @@ pub fn build(b: *Builder) !void {
     exe.linkage = .static;
 
     const is_strip = b.option(bool, "strip", "strip exe") orelse true;
-    exe.strip = !is_strip;
+    exe.strip = is_strip;
 
     const run_cmd = exe.run();
     run_cmd.step.dependOn(b.getInstallStep());

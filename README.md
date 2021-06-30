@@ -12,8 +12,10 @@ This is my first serious zig effort, so please issue a PR if the code isn't
 
 This is designed to be built statically using the `aws_c_*` libraries, so
 we inherit a lot of the goodness of the work going on there. Current
-executable size is 10.3M, about half of which is due to the SSL library.
-This is for x86_linux (which is all that's tested at the moment).
+executable size is 9.7M, about half of which is due to the SSL library.
+Running strip on the executable after compilation (it seems zig strip
+only goes so far), reduces this to 4.3M. This is for x86_linux,
+(which is all that's tested at the moment).
 
 ## Building
 
