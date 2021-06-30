@@ -56,7 +56,6 @@ pub fn build(b: *Builder) !void {
 
     const is_strip = b.option(bool, "strip", "strip exe") orelse true;
     exe.strip = !is_strip;
-    exe.install();
 
     const run_cmd = exe.run();
     run_cmd.step.dependOn(b.getInstallStep());
@@ -97,4 +96,6 @@ pub fn build(b: *Builder) !void {
         b.getInstallStep().dependOn(codegen);
         test_step.dependOn(codegen);
     }
+
+    exe.install();
 }
