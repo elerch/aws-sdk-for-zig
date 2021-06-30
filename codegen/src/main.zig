@@ -175,7 +175,7 @@ fn generateMetadataFunction(service: []const u8, operation_name: []const u8, com
     // }
     // We want to add a short "get my parents" function into the response
     try writer.print("{s}    ", .{prefix});
-    _ = try writer.write("pub fn metaInfo(self: @This()) struct { ");
+    _ = try writer.write("pub fn metaInfo(_: @This()) struct { ");
     try writer.print("service: @TypeOf({s}), action: @TypeOf({s}.{s})", .{ service, service, operation_name });
     _ = try writer.write(" } {\n" ++ prefix ++ "        return .{ ");
     try writer.print(".service = {s}, .action = {s}.{s}", .{ service, service, operation_name });

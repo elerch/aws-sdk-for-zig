@@ -1,0 +1,213 @@
+const smithy = @import("smithy.zig");
+
+pub const sts: struct {
+    version: []const u8 = "2011-06-15",
+    sdk_id: []const u8 = "STS",
+    arn_namespace: []const u8 = "sts",
+    endpoint_prefix: []const u8 = "sts",
+    sigv4_name: []const u8 = "sts",
+    aws_protocol: smithy.AwsProtocol = smithy.AwsProtocol.query,
+    assume_role: struct {
+        action_name: []const u8 = "AssumeRole",
+        Request: type = struct {
+            role_session_name: []const u8,
+            transitive_tag_keys: ?[][]const u8 = null,
+            serial_number: ?[]const u8 = null,
+            token_code: ?[]const u8 = null,
+            tags: ?[]struct {
+                value: []const u8,
+                key: []const u8,
+            } = null,
+            policy_arns: ?[]struct {
+                arn: ?[]const u8 = null,
+            } = null,
+            role_arn: []const u8,
+            source_identity: ?[]const u8 = null,
+            duration_seconds: ?i64 = null,
+            policy: ?[]const u8 = null,
+            external_id: ?[]const u8 = null,
+        },
+        Response: type = struct {
+            credentials: struct {
+                access_key_id: []const u8,
+                secret_access_key: []const u8,
+                session_token: []const u8,
+                expiration: i64,
+            },
+            source_identity: []const u8,
+            assumed_role_user: struct {
+                assumed_role_id: []const u8,
+                arn: []const u8,
+            },
+            packed_policy_size: i64,
+        },
+        ServiceError: type = error{
+            ExpiredToken,
+            MalformedPolicyDocument,
+            PackedPolicyTooLarge,
+            RegionDisabled,
+        },
+    } = .{},
+    assume_role_with_saml: struct {
+        action_name: []const u8 = "AssumeRoleWithSAML",
+        Request: type = struct {
+            policy_arns: ?[]struct {
+                arn: ?[]const u8 = null,
+            } = null,
+            role_arn: []const u8,
+            principal_arn: []const u8,
+            saml_assertion: []const u8,
+            duration_seconds: ?i64 = null,
+            policy: ?[]const u8 = null,
+        },
+        Response: type = struct {
+            credentials: struct {
+                access_key_id: []const u8,
+                secret_access_key: []const u8,
+                session_token: []const u8,
+                expiration: i64,
+            },
+            packed_policy_size: i64,
+            subject_type: []const u8,
+            name_qualifier: []const u8,
+            source_identity: []const u8,
+            assumed_role_user: struct {
+                assumed_role_id: []const u8,
+                arn: []const u8,
+            },
+            issuer: []const u8,
+            audience: []const u8,
+            subject: []const u8,
+        },
+        ServiceError: type = error{
+            ExpiredToken,
+            IDPRejectedClaim,
+            InvalidIdentityToken,
+            MalformedPolicyDocument,
+            PackedPolicyTooLarge,
+            RegionDisabled,
+        },
+    } = .{},
+    assume_role_with_web_identity: struct {
+        action_name: []const u8 = "AssumeRoleWithWebIdentity",
+        Request: type = struct {
+            role_session_name: []const u8,
+            duration_seconds: ?i64 = null,
+            policy_arns: ?[]struct {
+                arn: ?[]const u8 = null,
+            } = null,
+            role_arn: []const u8,
+            provider_id: ?[]const u8 = null,
+            web_identity_token: []const u8,
+            policy: ?[]const u8 = null,
+        },
+        Response: type = struct {
+            subject_from_web_identity_token: []const u8,
+            credentials: struct {
+                access_key_id: []const u8,
+                secret_access_key: []const u8,
+                session_token: []const u8,
+                expiration: i64,
+            },
+            provider: []const u8,
+            packed_policy_size: i64,
+            source_identity: []const u8,
+            assumed_role_user: struct {
+                assumed_role_id: []const u8,
+                arn: []const u8,
+            },
+            audience: []const u8,
+        },
+        ServiceError: type = error{
+            ExpiredToken,
+            IDPCommunicationError,
+            IDPRejectedClaim,
+            InvalidIdentityToken,
+            MalformedPolicyDocument,
+            PackedPolicyTooLarge,
+            RegionDisabled,
+        },
+    } = .{},
+    decode_authorization_message: struct {
+        action_name: []const u8 = "DecodeAuthorizationMessage",
+        Request: type = struct {
+            encoded_message: []const u8,
+        },
+        Response: type = struct {
+            decoded_message: []const u8,
+        },
+        ServiceError: type = error{InvalidAuthorizationMessage},
+    } = .{},
+    get_access_key_info: struct {
+        action_name: []const u8 = "GetAccessKeyInfo",
+        Request: type = struct {
+            access_key_id: []const u8,
+        },
+        Response: type = struct {
+            account: []const u8,
+        },
+    } = .{},
+    get_caller_identity: struct {
+        action_name: []const u8 = "GetCallerIdentity",
+        Request: type = struct {
+            pub fn metaInfo(self: @This()) struct { service: @TypeOf(sts), action: @TypeOf(sts.get_caller_identity) } {
+                return .{ .service = sts, .action = sts.get_caller_identity };
+            }
+        },
+        Response: type = struct {
+            user_id: []const u8,
+            arn: []const u8,
+            account: []const u8,
+        },
+    } = .{},
+    get_federation_token: struct {
+        action_name: []const u8 = "GetFederationToken",
+        Request: type = struct {
+            policy_arns: ?[]struct {
+                arn: ?[]const u8 = null,
+            } = null,
+            name: []const u8,
+            tags: ?[]struct {
+                value: []const u8,
+                key: []const u8,
+            } = null,
+            duration_seconds: ?i64 = null,
+            policy: ?[]const u8 = null,
+        },
+        Response: type = struct {
+            credentials: struct {
+                access_key_id: []const u8,
+                secret_access_key: []const u8,
+                session_token: []const u8,
+                expiration: i64,
+            },
+            federated_user: struct {
+                arn: []const u8,
+                federated_user_id: []const u8,
+            },
+            packed_policy_size: i64,
+        },
+        ServiceError: type = error{
+            MalformedPolicyDocument,
+            PackedPolicyTooLarge,
+            RegionDisabled,
+        },
+    } = .{},
+    get_session_token: struct {
+        action_name: []const u8 = "GetSessionToken",
+        Request: type = struct {
+            duration_seconds: ?i64 = null,
+            serial_number: ?[]const u8 = null,
+            token_code: ?[]const u8 = null,
+        },
+        Response: type = struct {
+            credentials: struct {
+                access_key_id: []const u8,
+                secret_access_key: []const u8,
+                session_token: []const u8,
+                expiration: i64,
+            },
+        },
+        ServiceError: type = error{RegionDisabled},
+    } = .{},
+} = .{}; // end of service: sts
