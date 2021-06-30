@@ -1,5 +1,7 @@
 # AWS SDK for Zig
 
+[![Build Status](https://drone.lerch.org/api/badges/lobo/aws-sdk-for-zig/status.svg)](https://drone.lerch.org/lobo/aws-sdk-for-zig)
+
 Ok, so it's not actually an SDK (yet). Right now the SDK should support
 any "query-based" operation and probably EC2, though this isn't tested yet.
 Total service count should be around 18 services supported. If you use an
