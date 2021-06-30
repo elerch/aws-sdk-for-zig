@@ -1,23 +1,17 @@
 # AWS SDK for Zig
 
-Ok, so it's not actually an SDK (yet). Right now this is SDK supports sts
-get-caller-identity action only. Why? Because it's one of the easiest to
-support, so I started there. From here, the next major step is to codegen
-the types necessary to support the various services. Currently this code is
-dynamically generating the sts types so we are somewhat codegen ready, but
-current comptime limitations might trip us up. The advantage of comptime is
-that only types actually used would be generated vs the whole surface area
-of AWS. That said, with most of the heavy lifting now coded, the addition
-of the request/response types, even if all of them are added, should not
-balloon the size beyond "reasonable". Of course this still needs to be be seen.
+Ok, so it's not actually an SDK (yet). Right now the SDK should support
+any "query-based" operation and probably EC2, though this isn't tested yet.
+Total service count should be around 18 services supported. If you use an
+unsupported service, you'll get a compile error.
 
 This is my first serious zig effort, so please issue a PR if the code isn't
 "ziggy" or if there's a better way.
 
 This is designed to be built statically using the `aws_c_*` libraries, so
-we inherit a lot of the goodness of the work going on there. Implementing
-get-caller-identity with all dependencies statically linked gives us a stripped
-executable size of 5.3M for x86_linux (which is all that's tested at the moment).
+we inherit a lot of the goodness of the work going on there. Current
+executable size is 10.3M, about half of which is due to the SSL library.
+This is for x86_linux (which is all that's tested at the moment).
 
 ## Building
 
@@ -31,12 +25,15 @@ I'm also hoping/expecting AWS to factor out that library sometime in
 the future.
 
 Once that's done, you'll have an alpine image with all dependencies ready
-to go and zig 0.7.1 installed. The build.zig currently relies on
-[this PR to allow stripping -static](https://github.com/ziglang/zig/pull/8248),
-so either:
+to go and zig master installed. There are some build-related things still
+broken in 0.8.0 and hopefully 0.8.1 will address those and we can be on
+a standard release.
 
-* Modify build.zig, then strip (or not) after the fact
-* Install make and use the included Makefile
+* `zig build` should work. It will build the code generation project, run
+  the code generation, then build the main project with the generated code.
+* Install make and use the included Makefile. Going this path should be fine
+  with zig 0.8.0 release, but code generation has not been added to the
+  Makefile yet (ever?), so you'll be on your own for that.
 
 ## Running
 
@@ -96,7 +93,7 @@ TODO List:
 * ✓ Implement codegen for services with xml structures (using Smithy models)
 * ✓ Implement codegen for others (using Smithy models)
 * Switch to aws-c-cal upstream once [PR for full static musl build support is merged](https://github.com/awslabs/aws-c-cal/pull/89) (see Dockerfile)
-* Remove compiler 0.7.1 shims when 0.8.0 is released
+* Move to compiler on tagged release (hopefully 0.8.1)
 (new 2021-05-29. I will proceed in this order unless I get other requests)
 * ✓ Implement [AWS query protocol](https://awslabs.github.io/smithy/1.0/spec/aws/aws-query-protocol.html). This is the protocol in use by sts.getcalleridentity. Total service count 18
 * Implement [AWS Json 1.0 protocol](https://awslabs.github.io/smithy/1.0/spec/aws/aws-json-1_0-protocol.html). Includes dynamodb. Total service count 18
@@ -106,7 +103,6 @@ TODO List:
 
 Compiler wishlist/watchlist:
 
-* Fix the weirdness we see with comptime type generation (see aws.zig around line 135)
 * ~~[Allow declarations for comptime type generation](https://github.com/ziglang/zig/issues/6709)~~
 
 This is no longer as important. The primary issue was in the return value, but
