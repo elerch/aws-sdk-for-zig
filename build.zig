@@ -77,6 +77,7 @@ pub fn build(b: *Builder) !void {
             const name = try std.fmt.allocPrint(b.allocator, "src/{s}", .{entry.name});
             defer b.allocator.free(name);
             const t = b.addTest(name);
+            t.addPackagePath("smithy", "smithy/src/smithy.zig");
             t.setBuildMode(mode);
             test_step.dependOn(&t.step);
         }
