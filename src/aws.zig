@@ -45,7 +45,6 @@ pub const Aws = struct {
         const meta_info = request.metaInfo();
         const service = meta_info.service;
         const action = meta_info.action;
-        const R = Response(request);
 
         log.debug("call: prefix {s}, sigv4 {s}, version {s}, action {s}", .{
             service.endpoint_prefix,

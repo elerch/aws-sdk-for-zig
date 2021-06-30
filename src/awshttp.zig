@@ -103,7 +103,7 @@ const EndPoint = struct {
     }
 };
 
-fn cInit(allocator: *std.mem.Allocator) void {
+fn cInit(_: *std.mem.Allocator) void {
     // TODO: what happens if we actually get an allocator?
     httplog.debug("auth init", .{});
     c_allocator = c.aws_default_allocator();
@@ -121,7 +121,7 @@ fn cInit(allocator: *std.mem.Allocator) void {
         // .level = .AWS_LL_INFO,
         // .level = .AWS_LL_DEBUG,
         // .level = .AWS_LL_TRACE,
-        .level = .AWS_LL_FATAL,
+        .level = 1, //.AWS_LL_FATAL, // https://github.com/awslabs/aws-c-common/blob/057746b2e094f4b7a31743d8ba5a9fd0155f69f3/include/aws/common/logging.h#L33
         .file = c.get_std_err(),
         .filename = null,
     };
@@ -143,7 +143,7 @@ fn cDeinit() void { // probably the wrong name
         c.aws_tls_ctx_release(ctx);
         httplog.debug("tls_ctx deinit end", .{});
     }
-    if (tls_ctx_options) |opts| {
+    if (tls_ctx_options != null) {
         // See:
         // https://github.com/awslabs/aws-c-io/blob/6c7bae503961545c5e99c6c836c4b37749cfc4ad/source/tls_channel_handler.c#L25
         //
@@ -311,10 +311,13 @@ pub const AwsHttp = struct {
             // tls_connection_options = try self.setupTls(host);
             if (tls_ctx_options == null) {
                 httplog.debug("Setting up tls options", .{});
+                // Language change - translate_c no longer translates c enums
+                // to zig enums as there were too many edge cases:
+                // https://github.com/ziglang/zig/issues/2115#issuecomment-827968279
                 var opts: c.aws_tls_ctx_options = .{
                     .allocator = c_allocator,
-                    .minimum_tls_version = @intToEnum(c.aws_tls_versions, c.AWS_IO_TLS_VER_SYS_DEFAULTS),
-                    .cipher_pref = @intToEnum(c.aws_tls_cipher_pref, c.AWS_IO_TLS_CIPHER_PREF_SYSTEM_DEFAULT),
+                    .minimum_tls_version = 128, // @intToEnum(c.aws_tls_versions, c.AWS_IO_TLS_VER_SYS_DEFAULTS), // https://github.com/awslabs/aws-c-io/blob/6c7bae503961545c5e99c6c836c4b37749cfc4ad/include/aws/io/tls_channel_handler.h#L21
+                    .cipher_pref = 0, // @intToEnum(c.aws_tls_cipher_pref, c.AWS_IO_TLS_CIPHER_PREF_SYSTEM_DEFAULT), // https://github.com/awslabs/aws-c-io/blob/6c7bae503961545c5e99c6c836c4b37749cfc4ad/include/aws/io/tls_channel_handler.h#L25
                     .ca_file = c.aws_byte_buf_from_c_str(""),
                     .ca_path = c.aws_string_new_from_c_str(c_allocator, ""),
                     .alpn_list = null,
@@ -361,8 +364,8 @@ pub const AwsHttp = struct {
         }
         if (signing_options) |opts| try self.signRequest(http_request.?, opts);
         const socket_options = c.aws_socket_options{
-            .type = @intToEnum(c.aws_socket_type, c.AWS_SOCKET_STREAM),
-            .domain = @intToEnum(c.aws_socket_domain, c.AWS_SOCKET_IPV4),
+            .type = 0, // @intToEnum(c.aws_socket_type, c.AWS_SOCKET_STREAM), // https://github.com/awslabs/aws-c-io/blob/6c7bae503961545c5e99c6c836c4b37749cfc4ad/include/aws/io/socket.h#L24
+            .domain = 0, // @intToEnum(c.aws_socket_domain, c.AWS_SOCKET_IPV4), // https://github.com/awslabs/aws-c-io/blob/6c7bae503961545c5e99c6c836c4b37749cfc4ad/include/aws/io/socket.h#L12
             .connect_timeout_ms = 3000, // TODO: change hardcoded 3s value
             .keep_alive_timeout_sec = 0,
             .keepalive = false,
@@ -472,13 +475,13 @@ pub const AwsHttp = struct {
 
     // TODO: Re-encapsulate or delete this function. It is not currently
     // used and will not be touched by the compiler
-    fn setupTls(self: Self, host: []const u8) !*c.aws_tls_connection_options {
+    fn setupTls(_: Self, host: []const u8) !*c.aws_tls_connection_options {
         if (tls_ctx_options == null) {
             httplog.debug("Setting up tls options", .{});
             var opts: c.aws_tls_ctx_options = .{
                 .allocator = c_allocator,
-                .minimum_tls_version = @intToEnum(c.aws_tls_versions, c.AWS_IO_TLS_VER_SYS_DEFAULTS),
-                .cipher_pref = @intToEnum(c.aws_tls_cipher_pref, c.AWS_IO_TLS_CIPHER_PREF_SYSTEM_DEFAULT),
+                .minimum_tls_version = 128, // @intToEnum(c.aws_tls_versions, c.AWS_IO_TLS_VER_SYS_DEFAULTS), // https://github.com/awslabs/aws-c-io/blob/6c7bae503961545c5e99c6c836c4b37749cfc4ad/include/aws/io/tls_channel_handler.h#L21
+                .cipher_pref = 0, // @intToEnum(c.aws_tls_cipher_pref, c.AWS_IO_TLS_CIPHER_PREF_SYSTEM_DEFAULT), // https://github.com/awslabs/aws-c-io/blob/6c7bae503961545c5e99c6c836c4b37749cfc4ad/include/aws/io/tls_channel_handler.h#L25
                 .ca_file = c.aws_byte_buf_from_c_str(""),
                 .ca_path = c.aws_string_new_from_c_str(c_allocator, ""),
                 .alpn_list = null,
@@ -553,9 +556,9 @@ pub const AwsHttp = struct {
         const signing_service = try std.fmt.allocPrintZ(self.allocator, "{s}", .{options.service});
         defer self.allocator.free(signing_service);
         const temp_signing_config = c.bitfield_workaround_aws_signing_config_aws{
-            .algorithm = .AWS_SIGNING_ALGORITHM_V4,
-            .config_type = .AWS_SIGNING_CONFIG_AWS,
-            .signature_type = .AWS_ST_HTTP_REQUEST_HEADERS,
+            .algorithm = 0, // .AWS_SIGNING_ALGORITHM_V4, // https://github.com/awslabs/aws-c-auth/blob/ace1311f8ef6ea890b26dd376031bed2721648eb/include/aws/auth/signing_config.h#L38
+            .config_type = 1, // .AWS_SIGNING_CONFIG_AWS, // https://github.com/awslabs/aws-c-auth/blob/ace1311f8ef6ea890b26dd376031bed2721648eb/include/aws/auth/signing_config.h#L24
+            .signature_type = 0, // .AWS_ST_HTTP_REQUEST_HEADERS, // https://github.com/awslabs/aws-c-auth/blob/ace1311f8ef6ea890b26dd376031bed2721648eb/include/aws/auth/signing_config.h#L49
             .region = c.aws_byte_cursor_from_c_str(@ptrCast([*c]const u8, signing_region)),
             .service = c.aws_byte_cursor_from_c_str(@ptrCast([*c]const u8, signing_service)),
             .should_sign_header = null,
@@ -566,7 +569,7 @@ pub const AwsHttp = struct {
                 .omit_session_token = 1,
             },
             .signed_body_value = c.aws_byte_cursor_from_c_str(""),
-            .signed_body_header = .AWS_SBHT_X_AMZ_CONTENT_SHA256, //or AWS_SBHT_NONE
+            .signed_body_header = 1, // .AWS_SBHT_X_AMZ_CONTENT_SHA256, //or 0 = AWS_SBHT_NONE // https://github.com/awslabs/aws-c-auth/blob/ace1311f8ef6ea890b26dd376031bed2721648eb/include/aws/auth/signing_config.h#L131
             .credentials = creds,
             .credentials_provider = self.credentialsProvider,
             .expiration_in_seconds = 0,
@@ -601,7 +604,7 @@ pub const AwsHttp = struct {
         async_result.count += 1;
         async_result.result.error_code = error_code;
 
-        if (result) |res| {
+        if (result != null) {
             if (c.aws_apply_signing_result_to_http_request(http_request, c_allocator, result) != c.AWS_OP_SUCCESS) {
                 httplog.alert("Could not apply signing request to http request: {s}", .{c.aws_error_debug_str(c.aws_last_error())});
             }
@@ -616,7 +619,7 @@ pub const AwsHttp = struct {
         const accept_header = c.aws_http_header{
             .name = c.aws_byte_cursor_from_c_str("Accept"),
             .value = c.aws_byte_cursor_from_c_str("application/json"),
-            .compression = .AWS_HTTP_HEADER_COMPRESSION_USE_CACHE,
+            .compression = 0, // .AWS_HTTP_HEADER_COMPRESSION_USE_CACHE, // https://github.com/awslabs/aws-c-http/blob/ec42882310900f2b414b279fc24636ba4653f285/include/aws/http/request_response.h#L37
         };
         if (c.aws_http_message_add_header(request, accept_header) != c.AWS_OP_SUCCESS)
             return AwsError.AddHeaderError;
@@ -624,7 +627,7 @@ pub const AwsHttp = struct {
         const host_header = c.aws_http_header{
             .name = c.aws_byte_cursor_from_c_str("Host"),
             .value = c.aws_byte_cursor_from_c_str(@ptrCast([*c]const u8, host)),
-            .compression = .AWS_HTTP_HEADER_COMPRESSION_USE_CACHE,
+            .compression = 0, // .AWS_HTTP_HEADER_COMPRESSION_USE_CACHE,
         };
         if (c.aws_http_message_add_header(request, host_header) != c.AWS_OP_SUCCESS)
             return AwsError.AddHeaderError;
@@ -632,7 +635,7 @@ pub const AwsHttp = struct {
         const user_agent_header = c.aws_http_header{
             .name = c.aws_byte_cursor_from_c_str("User-Agent"),
             .value = c.aws_byte_cursor_from_c_str("zig-aws 1.0, Powered by the AWS Common Runtime."),
-            .compression = .AWS_HTTP_HEADER_COMPRESSION_USE_CACHE,
+            .compression = 0, // .AWS_HTTP_HEADER_COMPRESSION_USE_CACHE,
         };
         if (c.aws_http_message_add_header(request, user_agent_header) != c.AWS_OP_SUCCESS)
             return AwsError.AddHeaderError;
@@ -654,7 +657,7 @@ pub const AwsHttp = struct {
         const content_type_header = c.aws_http_header{
             .name = c.aws_byte_cursor_from_c_str("Content-Type"),
             .value = c.aws_byte_cursor_from_c_str("application/x-www-form-urlencoded"),
-            .compression = .AWS_HTTP_HEADER_COMPRESSION_USE_CACHE,
+            .compression = 0, // .AWS_HTTP_HEADER_COMPRESSION_USE_CACHE,
         };
         if (c.aws_http_message_add_header(request, content_type_header) != c.AWS_OP_SUCCESS)
             return AwsError.AddHeaderError;
@@ -666,7 +669,7 @@ pub const AwsHttp = struct {
             const content_length_header = c.aws_http_header{
                 .name = c.aws_byte_cursor_from_c_str("Content-Length"),
                 .value = c.aws_byte_cursor_from_c_str(@ptrCast([*c]const u8, len)),
-                .compression = .AWS_HTTP_HEADER_COMPRESSION_USE_CACHE,
+                .compression = 0, // .AWS_HTTP_HEADER_COMPRESSION_USE_CACHE,
             };
             if (c.aws_http_message_add_header(request, content_length_header) != c.AWS_OP_SUCCESS)
                 return AwsError.AddHeaderError;
@@ -685,12 +688,13 @@ pub const AwsHttp = struct {
         httplog.debug("connection setup callback end", .{});
     }
 
-    fn connectionShutdownCallback(connection: ?*c.aws_http_connection, error_code: c_int, user_data: ?*c_void) callconv(.C) void {
-        httplog.debug("connection shutdown callback start", .{});
+    fn connectionShutdownCallback(connection: ?*c.aws_http_connection, error_code: c_int, _: ?*c_void) callconv(.C) void {
+        //                                                             ^^ error_code ^^ user_data
+        httplog.debug("connection shutdown callback start ({*}). error_code: {d}", .{ connection, error_code });
         httplog.debug("connection shutdown callback end", .{});
     }
 
-    fn incomingHeadersCallback(stream: ?*c.aws_http_stream, header_block: c.aws_http_header_block, headers: [*c]const c.aws_http_header, num_headers: usize, user_data: ?*c_void) callconv(.C) c_int {
+    fn incomingHeadersCallback(stream: ?*c.aws_http_stream, _: c.aws_http_header_block, headers: [*c]const c.aws_http_header, num_headers: usize, user_data: ?*c_void) callconv(.C) c_int {
         var context = userDataTo(RequestContext, user_data);
 
         if (context.response_code == null) {
@@ -712,7 +716,7 @@ pub const AwsHttp = struct {
         }
         return c.AWS_OP_SUCCESS;
     }
-    fn incomingBodyCallback(stream: ?*c.aws_http_stream, data: [*c]const c.aws_byte_cursor, user_data: ?*c_void) callconv(.C) c_int {
+    fn incomingBodyCallback(_: ?*c.aws_http_stream, data: [*c]const c.aws_byte_cursor, user_data: ?*c_void) callconv(.C) c_int {
         var context = userDataTo(RequestContext, user_data);
 
         httplog.debug("inbound body, len {d}", .{data.*.len});
@@ -723,7 +727,8 @@ pub const AwsHttp = struct {
             httplog.alert("could not append to body!", .{});
         return c.AWS_OP_SUCCESS;
     }
-    fn requestCompleteCallback(stream: ?*c.aws_http_stream, error_code: c_int, user_data: ?*c_void) callconv(.C) void {
+    fn requestCompleteCallback(stream: ?*c.aws_http_stream, _: c_int, user_data: ?*c_void) callconv(.C) void {
+        //                                                      ^^ error_code
         var context = userDataTo(RequestContext, user_data);
         context.request_complete.store(true, .SeqCst);
         c.aws_http_stream_release(stream);
@@ -735,8 +740,9 @@ pub const AwsHttp = struct {
         var callback_results = AsyncResult(AwsAsyncCallbackResult(c.aws_credentials)){ .result = &credential_result };
 
         const callback = awsAsyncCallbackResult(c.aws_credentials, "got credentials", assignCredentialsOnCallback);
-        const get_async_result =
-            c.aws_credentials_provider_get_credentials(self.credentialsProvider, callback, &callback_results);
+        // const get_async_result =
+        _ = c.aws_credentials_provider_get_credentials(self.credentialsProvider, callback, &callback_results);
+        // TODO: do we care about the return value from get_creds?
 
         waitOnCallback(c.aws_credentials, &callback_results);
         if (credential_result.error_code != c.AWS_ERROR_SUCCESS) {

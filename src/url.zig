@@ -1,6 +1,6 @@
 const std = @import("std");
 
-fn defaultTransformer(field_name: []const u8, options: EncodingOptions) anyerror![]const u8 {
+fn defaultTransformer(field_name: []const u8, _: EncodingOptions) anyerror![]const u8 {
     return field_name;
 }
 
