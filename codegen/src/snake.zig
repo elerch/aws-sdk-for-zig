@@ -15,6 +15,7 @@ pub fn fromPascalCase(allocator: *std.mem.Allocator, name: []const u8) ![]u8 {
         if (codepoint > 0xff) return error{UnicodeNotSupported}.UnicodeNotSupported;
         if (next_codepoint > 0xff) return error{UnicodeNotSupported}.UnicodeNotSupported;
         const ascii_char = @truncate(u8, codepoint);
+        if (next_codepoint == ' ') continue; // ignore all spaces in name
         if (ascii_char >= 'A' and ascii_char < 'Z') {
             const lowercase_char = ascii_char + ('a' - 'A');
             if (previous_codepoint == null) {
@@ -32,11 +33,11 @@ pub fn fromPascalCase(allocator: *std.mem.Allocator, name: []const u8) ![]u8 {
                 }
             }
         } else {
-            if (ascii_char == ' ') {
-                rc[target_inx] = '_';
-            } else {
-                rc[target_inx] = ascii_char;
-            }
+            // if (ascii_char == ' ') {
+            //     rc[target_inx] = '_';
+            // } else {
+            rc[target_inx] = ascii_char;
+            // }
             target_inx = target_inx + 1;
         }
         previous_codepoint = codepoint;
@@ -58,11 +59,17 @@ test "converts from PascalCase to snake_case" {
     const allocator = std.testing.allocator;
     const snake_case = try fromPascalCase(allocator, "MyPascalCaseThing");
     defer allocator.free(snake_case);
-    expectEqualStrings("my_pascal_case_thing", snake_case);
+    try expectEqualStrings("my_pascal_case_thing", snake_case);
 }
 test "handles from PascalCase acronyms to snake_case" {
     const allocator = std.testing.allocator;
     const snake_case = try fromPascalCase(allocator, "SAMLMySAMLAcronymThing");
     defer allocator.free(snake_case);
-    expectEqualStrings("saml_my_saml_acronym_thing", snake_case);
+    try expectEqualStrings("saml_my_saml_acronym_thing", snake_case);
+}
+test "spaces in the name" {
+    const allocator = std.testing.allocator;
+    const snake_case = try fromPascalCase(allocator, "API Gateway");
+    defer allocator.free(snake_case);
+    try expectEqualStrings("api_gateway", snake_case);
 }
