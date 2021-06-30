@@ -659,7 +659,7 @@ fn read_file_to_string(allocator: *std.mem.Allocator, file_name: []const u8, max
 var test_data: ?[]const u8 = null;
 const intrinsic_type_count: usize = 5; // 5 intrinsic types are added to every model
 
-fn getTestData(allocator: *std.mem.Allocator) []const u8 {
+fn getTestData(_: *std.mem.Allocator) []const u8 {
     if (test_data) |d| return d;
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     test_data = read_file_to_string(&gpa.allocator, "test.json", 150000) catch @panic("could not read test.json");
@@ -669,7 +669,7 @@ test "read file" {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer if (gpa.deinit()) @panic("leak");
     const allocator = &gpa.allocator;
-    const test_string = getTestData(allocator);
+    _ = getTestData(allocator);
     // test stuff
 }
 test "parse string" {

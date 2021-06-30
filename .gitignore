@@ -5,3 +5,5 @@ codegen/codegen
 *.tgz
 service_manifest.zig
 demo
+src/models/
+smithy/zig-out/

@@ -1,5 +1,5 @@
 const std = @import("std");
-const smithy = @import("smithy.zig");
+const smithy = @import("smithy");
 const snake = @import("snake.zig");
 
 pub fn main() anyerror!void {
