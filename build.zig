@@ -54,7 +54,10 @@ pub fn build(b: *Builder) !void {
     // https://ziglang.org/builds/zig-linux-x86_64-0.9.0-dev.321+15a030ef3.tar.xz
     exe.linkage = .static;
 
-    const is_strip = b.option(bool, "strip", "strip exe") orelse true;
+    // TODO: Strip doesn't actually fully strip the executable. If we're on
+    //       linux we can run strip on the result, probably at the expense
+    //       of busting cache logic
+    const is_strip = b.option(bool, "strip", "strip exe [true]") orelse true;
     exe.strip = is_strip;
 
     const run_cmd = exe.run();
