@@ -106,7 +106,7 @@ fn generateServices(allocator: *std.mem.Allocator, comptime _: []const u8, file:
         // Service struct
         // name of the field will be snake_case of whatever comes in from
         // sdk_id. Not sure this will simple...
-        const constant_name = try snake.fromPascalCase(allocator, sdk_id);
+        const constant_name = try constantName(allocator, sdk_id);
         try constant_names.append(constant_name);
         try writer.print("const Self = @This();\n", .{});
         try writer.print("pub const version: []const u8 = \"{s}\";\n", .{version});
@@ -131,6 +131,26 @@ fn generateServices(allocator: *std.mem.Allocator, comptime _: []const u8, file:
             try generateOperation(allocator, shapes.get(op).?, shapes, writer, constant_name);
     }
     return constant_names.toOwnedSlice();
+}
+fn constantName(allocator: *std.mem.Allocator, id: []const u8) ![]const u8 {
+    // There are some ids that don't follow consistent rules, so we'll
+    // look for the exceptions and, if not found, revert to the snake case
+    // algorithm
+
+    // This one might be a bug in snake, but it's the only example so HPDL
+    if (std.mem.eql(u8, id, "SESv2")) return try std.fmt.allocPrint(allocator, "ses_v2", .{});
+    // IoT is an acryonym, but snake wouldn't know that. Interestingly not all
+    // iot services are capitalizing that way.
+    if (std.mem.eql(u8, id, "IoTSiteWise")) return try std.fmt.allocPrint(allocator, "iot_site_wise", .{}); //sitewise?
+    if (std.mem.eql(u8, id, "IoTFleetHub")) return try std.fmt.allocPrint(allocator, "iot_fleet_hub", .{});
+    if (std.mem.eql(u8, id, "IoTSecureTunneling")) return try std.fmt.allocPrint(allocator, "iot_secure_tunneling", .{});
+    if (std.mem.eql(u8, id, "IoTThingsGraph")) return try std.fmt.allocPrint(allocator, "iot_things_graph", .{});
+    // snake turns this into dev_ops, which is a little weird
+    if (std.mem.eql(u8, id, "DevOps Guru")) return try std.fmt.allocPrint(allocator, "devops_guru", .{});
+    if (std.mem.eql(u8, id, "FSx")) return try std.fmt.allocPrint(allocator, "fsx", .{});
+
+    // Not a special case - just snake it
+    return try snake.fromPascalCase(allocator, id);
 }
 fn generateOperation(allocator: *std.mem.Allocator, operation: smithy.ShapeInfo, shapes: anytype, writer: anytype, service: []const u8) !void {
     const snake_case_name = try snake.fromPascalCase(allocator, operation.name);
