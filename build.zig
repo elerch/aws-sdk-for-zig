@@ -17,6 +17,12 @@ pub fn build(b: *Builder) !void {
     // https://github.com/ziglang/zig/issues/855
     exe.addPackagePath("smithy", "smithy/src/smithy.zig");
 
+    // This bitfield workaround will end up requiring a bunch of headers that
+    // currently mean building in the docker container is the best way to build
+    // TODO: Determine if it's a good idea to copy these files out of our
+    // docker container to the local fs so we can just build even outside
+    // the container. And maybe, just maybe these even get committed to
+    // source control?
     exe.addCSourceFile("src/bitfield-workaround.c", &[_][]const u8{"-std=c99"});
     const c_include_dirs = .{
         "./src/",
@@ -87,10 +93,19 @@ pub fn build(b: *Builder) !void {
     }
 
     // TODO: Support > linux
-    // TODO: Get a better cache in place
     if (std.builtin.os.tag == .linux) {
         const codegen = b.step("gen", "Generate zig service code from smithy models");
         codegen.dependOn(&b.addSystemCommand(&.{ "/bin/sh", "-c", "cd codegen && zig build" }).step);
+        // Since codegen binary is built every time, if it's newer than our
+        // service manifest we know it needs to be regenerated. So this step
+        // will remove the service manifest if codegen has been touched, thereby
+        // triggering the re-gen
+        codegen.dependOn(&b.addSystemCommand(&.{
+            "/bin/sh", "-c",
+            \\ [ ! -f src/models/service_manifest.zig ] || \
+            \\ [ src/models/service_manifest.zig -nt codegen/codegen ] || \
+            \\ rm src/models/service_manifest.zig
+        }).step);
         codegen.dependOn(&b.addSystemCommand(&.{
             "/bin/sh", "-c",
             \\ mkdir -p src/models/ && \
