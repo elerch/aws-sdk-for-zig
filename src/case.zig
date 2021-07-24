@@ -5,7 +5,8 @@ pub fn snakeToCamel(allocator: *std.mem.Allocator, name: []const u8) ![]u8 {
     var utf8_name = (std.unicode.Utf8View.init(name) catch unreachable).iterator();
     var target_inx: u64 = 0;
     var previous_ascii: u8 = 0;
-    const rc = try allocator.alloc(u8, name.len); // This is slightly overkill, will need <= number of input chars
+    // A single word will take the entire length plus our sentinel
+    const rc = try allocator.alloc(u8, name.len + 1);
     while (utf8_name.nextCodepoint()) |cp| {
         if (cp > 0xff) return error.UnicodeNotSupported;
         const ascii_char = @truncate(u8, cp);
@@ -37,4 +38,10 @@ test "converts from snake to camelCase" {
     const camel = try snakeToCamel(allocator, "access_key_id");
     defer allocator.free(camel);
     try expectEqualStrings("accessKeyId", camel);
+}
+test "single word" {
+    const allocator = std.testing.allocator;
+    const camel = try snakeToCamel(allocator, "word");
+    defer allocator.free(camel);
+    try expectEqualStrings("word", camel);
 }
