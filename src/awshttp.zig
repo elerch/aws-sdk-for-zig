@@ -84,10 +84,16 @@ const HttpRequest = struct {
 const HttpResult = struct {
     response_code: u16, // actually 3 digits can fit in u10
     body: []const u8,
+    headers: []Header,
     allocator: *std.mem.Allocator,
 
     pub fn deinit(self: HttpResult) void {
         self.allocator.free(self.body);
+        for (self.headers) |h| {
+            self.allocator.free(h.name);
+            self.allocator.free(h.value);
+        }
+        self.allocator.free(self.headers);
         httplog.debug("http result deinit complete", .{});
         return;
     }
@@ -458,6 +464,7 @@ pub const AwsHttp = struct {
         const rc = HttpResult{
             .response_code = context.response_code.?,
             .body = final_body,
+            .headers = context.headers.?.toOwnedSlice(),
             .allocator = self.allocator,
         };
         return rc;
