@@ -1625,6 +1625,8 @@ fn parseInternal(comptime T: type, token: Token, tokens: *TokenStream, options: 
             var r: T = undefined;
             var fields_seen = [_]bool{false} ** structInfo.fields.len;
             errdefer {
+                // TODO: why so high here? This was needed for ec2 describe instances
+                @setEvalBranchQuota(100000);
                 inline for (structInfo.fields) |field, i| {
                     if (fields_seen[i] and !field.is_comptime) {
                         parseFree(field.field_type, @field(r, field.name), options);
