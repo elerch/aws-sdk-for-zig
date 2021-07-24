@@ -84,7 +84,24 @@ pub const Aws = struct {
         });
         const continuation = if (buffer.items.len > 0) "&" else "";
 
-        const body = try std.fmt.allocPrint(self.allocator, "Action={s}&Version={s}{s}{s}\n", .{ action.action_name, service_meta.version, continuation, buffer.items });
+        const query = if (service_meta.aws_protocol == .query)
+            try std.fmt.allocPrint(self.allocator, "", .{})
+        else // EC2
+            try std.fmt.allocPrint(self.allocator, "?Action={s}&Version={s}", .{
+                action.action_name,
+                service_meta.version,
+            });
+        defer self.allocator.free(query);
+
+        const body = if (service_meta.aws_protocol == .query)
+            try std.fmt.allocPrint(self.allocator, "Action={s}&Version={s}{s}{s}", .{
+                action.action_name,
+                service_meta.version,
+                continuation,
+                buffer.items,
+            })
+        else // EC2
+            try std.fmt.allocPrint(self.allocator, "{s}", .{buffer.items});
         defer self.allocator.free(body);
 
         const FullR = FullResponse(request);
@@ -92,6 +109,7 @@ pub const Aws = struct {
             service_meta.endpoint_prefix,
             .{
                 .body = body,
+                .query = query,
             },
             .{
                 .region = options.region,
@@ -103,11 +121,36 @@ pub const Aws = struct {
         defer response.deinit();
         if (response.response_code != 200) {
             log.err("call failed! return status: {d}", .{response.response_code});
-            log.err("Request:\n  |{s}\nResponse:\n  |{s}", .{ body, response.body });
+            log.err("Request Query:\n  |{s}\n", .{query});
+            log.err("Request Body:\n  |{s}\n", .{body});
+
+            log.err("Response Headers:\n", .{});
+            for (response.headers) |h|
+                log.err("\t{s}:{s}\n", .{ h.name, h.value });
+            log.err("Response Body:\n  |{s}", .{response.body});
             return error.HttpFailure;
         }
-        // log.debug("Successful return from server:\n  |{s}", .{response.body});
-        // TODO: Check status code for badness
+        // EC2 ignores our accept type, but technically query protocol only
+        // returns XML as well. So, we'll ignore the protocol here and just
+        // look at the return type
+        var isJson: bool = undefined;
+        for (response.headers) |h| {
+            if (std.mem.eql(u8, "Content-Type", h.name)) {
+                if (std.mem.startsWith(u8, h.value, "application/json")) {
+                    isJson = true;
+                } else if (std.mem.startsWith(u8, h.value, "text/xml")) {
+                    isJson = false;
+                } else {
+                    log.err("Unexpected content type: {s}", .{h.value});
+                    return error.UnexpectedContentType;
+                }
+                break;
+            }
+        }
+
+        // TODO: Handle XML
+        if (!isJson) return error.XmlUnimplemented;
+
         var stream = json.TokenStream.init(response.body);
 
         const parser_options = json.ParseOptions{
