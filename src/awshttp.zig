@@ -74,6 +74,13 @@ const SigningOptions = struct {
     service: []const u8,
 };
 
+const HttpRequest = struct {
+    path: []const u8 = "/",
+    query: []const u8 = "",
+    body: []const u8 = "",
+    method: []const u8 = "POST",
+    // headers: []Header = .{},
+};
 const HttpResult = struct {
     response_code: u16, // actually 3 digits can fit in u10
     body: []const u8,
@@ -235,16 +242,15 @@ pub const AwsHttp = struct {
     /// It will calculate the appropriate endpoint and action parameters for the
     /// service called, and will set up the signing options. The return
     /// value is simply a raw HttpResult
-    pub fn callApi(self: Self, service: []const u8, body: []const u8, options: Options) !HttpResult {
+    pub fn callApi(self: Self, service: []const u8, request: HttpRequest, options: Options) !HttpResult {
         const endpoint = try regionSubDomain(self.allocator, service, options.region, options.dualstack);
         defer endpoint.deinit();
         httplog.debug("Calling endpoint {s}", .{endpoint.uri});
-        httplog.debug("Body\n====\n{s}\n====", .{body});
         const signing_options: SigningOptions = .{
             .region = options.region,
             .service = if (options.sigv4_service_name) |name| name else service,
         };
-        return try self.makeRequest(endpoint, "POST", "/", body, signing_options);
+        return try self.makeRequest(endpoint, request, signing_options);
     }
 
     /// makeRequest is a low level http/https function that can be used inside
@@ -265,15 +271,20 @@ pub const AwsHttp = struct {
     /// Return value is an HttpResult, which will need the caller to deinit().
     /// HttpResult currently contains the body only. The addition of Headers
     /// and return code would be a relatively minor change
-    pub fn makeRequest(self: Self, endpoint: EndPoint, method: []const u8, path: []const u8, body: []const u8, signing_options: ?SigningOptions) !HttpResult {
+    pub fn makeRequest(self: Self, endpoint: EndPoint, request: HttpRequest, signing_options: ?SigningOptions) !HttpResult {
         // Since we're going to pass these into C-land, we need to make sure
         // our inputs have sentinals
-        const method_z = try self.allocator.dupeZ(u8, method);
+        const method_z = try self.allocator.dupeZ(u8, request.method);
         defer self.allocator.free(method_z);
-        const path_z = try self.allocator.dupeZ(u8, path);
+        // Path contains both path and query
+        const path_z = try std.fmt.allocPrintZ(self.allocator, "{s}{s}", .{ request.path, request.query });
         defer self.allocator.free(path_z);
-        const body_z = try self.allocator.dupeZ(u8, body);
+        const body_z = try self.allocator.dupeZ(u8, request.body);
         defer self.allocator.free(body_z);
+        httplog.debug("Path: {s}", .{path_z});
+        httplog.debug("Method: {s}", .{request.method});
+        httplog.debug("body length: {d}", .{request.body.len});
+        httplog.debug("Body\n====\n{s}\n====", .{request.body});
         // TODO: Try to re-encapsulate this
         // var http_request = try createRequest(method, path, body);
 
@@ -287,13 +298,11 @@ pub const AwsHttp = struct {
         if (c.aws_http_message_set_request_path(http_request, c.aws_byte_cursor_from_c_str(@ptrCast([*c]const u8, path_z))) != c.AWS_OP_SUCCESS)
             return AwsError.SetRequestPathError;
 
-        httplog.debug("body length: {d}", .{body.len});
         const body_cursor = c.aws_byte_cursor_from_c_str(@ptrCast([*c]const u8, body_z));
         const request_body = c.aws_input_stream_new_from_cursor(c_allocator, &body_cursor);
         defer c.aws_input_stream_destroy(request_body);
-        if (body.len > 0) {
+        if (request.body.len > 0)
             c.aws_http_message_set_body_stream(http_request, request_body);
-        }
 
         // End CreateRequest. This should return a struct with a deinit function that can do
         // destroys, etc
@@ -305,7 +314,7 @@ pub const AwsHttp = struct {
         var tls_connection_options: ?*c.aws_tls_connection_options = null;
         const host = try self.allocator.dupeZ(u8, endpoint.host);
         defer self.allocator.free(host);
-        try self.addHeaders(http_request.?, host, body);
+        try self.addHeaders(http_request.?, host, request.body);
         if (std.mem.eql(u8, endpoint.scheme, "https")) {
             // TODO: Figure out why this needs to be inline vs function call
             // tls_connection_options = try self.setupTls(host);

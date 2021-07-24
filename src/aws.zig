@@ -86,10 +86,13 @@ pub const Aws = struct {
 
         const body = try std.fmt.allocPrint(self.allocator, "Action={s}&Version={s}{s}{s}\n", .{ action.action_name, service_meta.version, continuation, buffer.items });
         defer self.allocator.free(body);
+
         const FullR = FullResponse(request);
         const response = try self.aws_http.callApi(
             service_meta.endpoint_prefix,
-            body,
+            .{
+                .body = body,
+            },
             .{
                 .region = options.region,
                 .dualstack = options.dualstack,
