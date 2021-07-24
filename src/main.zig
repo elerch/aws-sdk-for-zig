@@ -65,7 +65,7 @@ pub fn main() anyerror!void {
     var client = aws.Aws.init(allocator);
     defer client.deinit();
 
-    const services = aws.Services(.{.sts}){};
+    const services = aws.Services(.{ .sts, .ec2 }){};
 
     for (tests.items) |t| {
         std.log.info("===== Start Test: {s} =====", .{@tagName(t)});
@@ -87,7 +87,9 @@ pub fn main() anyerror!void {
                 std.log.info("access key: {s}", .{access.response.credentials.access_key_id});
             },
             .ec2_query_no_input => {
-                // TODO: Find test
+                const instances = try client.call(services.ec2.describe_instances.Request{}, options);
+                defer instances.deinit();
+                std.log.info("reservation count: {d}", .{instances.response.reservations.len});
             },
         }
         std.log.info("===== End Test: {s} =====\n", .{@tagName(t)});
