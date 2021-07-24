@@ -972,12 +972,12 @@ const RequestContext = struct {
     pub fn appendToBody(self: *Self, fragment: []const u8) !void {
         var orig_body: []const u8 = "";
         if (self.body) |b| {
-            orig_body = try self.allocator.dupeZ(u8, b);
+            orig_body = try self.allocator.dupe(u8, b);
             self.allocator.free(b);
             self.body = null;
         }
         defer self.allocator.free(orig_body);
-        self.body = try std.fmt.allocPrintZ(self.allocator, "{s}{s}", .{ orig_body, fragment });
+        self.body = try std.fmt.allocPrint(self.allocator, "{s}{s}", .{ orig_body, fragment });
     }
 
     pub fn addHeader(self: *Self, name: []const u8, value: []const u8) !void {
