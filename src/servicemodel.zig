@@ -51,6 +51,6 @@ test "can get service and action name from request" {
     try expectEqualStrings("2011-06-15", metadata.service_metadata.version);
 }
 test "can filter services" {
-    const filtered_services = Services(.{ .sts, .waf_v2 }){};
+    const filtered_services = Services(.{ .sts, .wafv2 }){};
     try expectEqualStrings("2011-06-15", filtered_services.sts.version);
 }
