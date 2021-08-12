@@ -2,6 +2,7 @@ const std = @import("std");
 
 const awshttp = @import("awshttp.zig");
 const json = @import("json.zig");
+const xml_shaper = @import("xml_shaper.zig");
 const url = @import("url.zig");
 const case = @import("case.zig");
 const servicemodel = @import("servicemodel.zig");
@@ -265,25 +266,69 @@ fn queryFieldTransformer(field_name: []const u8, encoding_options: url.EncodingO
     return try case.snakeToPascal(encoding_options.allocator.?, field_name);
 }
 
-// Use for debugging json responses of specific requests
-// test "dummy request" {
+fn readFileToString(allocator: *std.mem.Allocator, file_name: []const u8, max_bytes: usize) ![]const u8 {
+    const file = try std.fs.cwd().openFile(file_name, std.fs.File.OpenFlags{});
+    defer file.close();
+    return file.readToEndAlloc(allocator, max_bytes);
+}
+var test_data: ?[]const u8 = null;
+
+fn getTestData(_: *std.mem.Allocator) []const u8 {
+    if (test_data) |d| return d;
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    test_data = readFileToString(&gpa.allocator, "describe_instances.xml", 150000) catch @panic("could not read describe_instances.xml");
+    return test_data.?;
+}
+test "read file" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer if (gpa.deinit()) @panic("leak");
+    const allocator = &gpa.allocator;
+    _ = getTestData(allocator);
+    // test stuff
+}
+// Running this breaks the compiler
+// broken LLVM module found: Operand is null...
+//   br i1 %100, label %ErrRetReturn12, <null operand!>, !dbg !7881
+// Operand is null
+//   br i1 %100, label %ErrRetReturn12, <null operand!>, !dbg !8012
+// test "parse xml request (runtime)" {
 //     const allocator = std.testing.allocator;
-//     const svs = Services(.{.sts}){};
-//     const request = svs.sts.get_session_token.Request{
-//         .duration_seconds = 900,
-//     };
-//     const FullR = FullResponse(request);
-//     const response =
-//     var stream = json.TokenStream.init(response);
-//
-//     const parser_options = json.ParseOptions{
-//         .allocator = allocator,
-//         .allow_camel_case_conversion = true, // new option
-//         .allow_snake_case_conversion = true, // new option
-//         .allow_unknown_fields = true, // new option. Cannot yet handle non-struct fields though
-//         .allow_missing_fields = false, // new option. Cannot yet handle non-struct fields though
-//     };
+//     const svs = Services(.{.ec2}){};
+//     const request = svs.ec2.describe_instances.Request{};
+//     const response = getTestData(allocator);
 //     const SResponse = ServerResponse(request);
-//     const r = try json.parse(SResponse, &stream, parser_options);
-//     json.parseFree(SResponse, r, parser_options);
+//     // const parser = xml_shaper.Parser(SResponse){};
+//     const r = try xml_shaper.Parser(SResponse).parse("", .{ .allocator = allocator, .match_predicate = xml_shaper.fuzzyEqual });
+//     // const r = parser.parse("", .{ .allocator = allocator, .match_predicate = xml_shaper});
+//     // const r = try xml_shaper.parse(SResponse, "", .{ .allocator = allocator, .match_predicate = xml_shaper.fuzzyEqual });
+//     // defer r.deinit();
+//     try std.testing.expectEqualStrings(
+//         "37f07eb3-4a90-4166-b36f-225f79b6a0fe",
+//         r.parsed_value.DescribeInstancesResponse.ResponseMetadata.RequestId,
+//     );
+// }
+
+// Running this breaks the compiler
+// broken LLVM module found: Operand is nulltType...
+//   br i1 %100, label %ErrRetReturn12, <null operand!>, !dbg !7881
+// Operand is null
+//   br i1 %100, label %ErrRetReturn12, <null operand!>, !dbg !8012
+//
+// This is a bug in the Zig compiler.
+// test "parse xml request (comptime)" {
+//     const allocator = std.testing.allocator;
+//     const svs = Services(.{.ec2}){};
+//     const request = svs.ec2.describe_instances.Request{};
+//     // const FullR = FullResponse(request);
+//     // https://github.com/Snektron/vulkan-zig/commit/511211f03896b1becdb274c8ab4f2dacd2be4bf2
+//     // https://raw.githubusercontent.com/Snektron/vulkan-zig/master/generator/xml.zig
+//     const response = @import("describe_instances.xml.zig").describe_instances_test_response;
+//
+//     const SResponse = ServerResponse(request);
+//     const r = try xml_shaper.parse(SResponse, response, .{ .allocator = allocator, .match_predicate = xml_shaper.fuzzyEqual });
+//     // defer r.deinit();
+//     try std.testing.expectEqualStrings(
+//         "37f07eb3-4a90-4166-b36f-225f79b6a0fe",
+//         r.parsed_value.DescribeInstancesResponse.ResponseMetadata.RequestId,
+//     );
 // }
