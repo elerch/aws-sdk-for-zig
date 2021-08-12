@@ -176,7 +176,7 @@ fn generateOperation(allocator: *std.mem.Allocator, operation: smithy.ShapeInfo,
     _ = try writer.write(",\n");
     _ = try writer.write("    Response: type = ");
     if (operation.shape.operation.output) |member| {
-        try generateTypeFor(allocator, member, shapes, writer, "    ", true, &type_stack, true);
+        try generateTypeFor(allocator, member, shapes, writer, "    ", false, &type_stack, true);
     } else _ = try writer.write("struct {}"); // we want to maintain consistency with other ops
     _ = try writer.write(",\n");
 

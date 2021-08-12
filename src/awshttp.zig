@@ -74,14 +74,15 @@ const SigningOptions = struct {
     service: []const u8,
 };
 
-const HttpRequest = struct {
+pub const HttpRequest = struct {
     path: []const u8 = "/",
     query: []const u8 = "",
     body: []const u8 = "",
     method: []const u8 = "POST",
-    // headers: []Header = .{},
+    content_type: []const u8 = "application/json", // Can we get away with this?
+    headers: []Header = &[_]Header{},
 };
-const HttpResult = struct {
+pub const HttpResult = struct {
     response_code: u16, // actually 3 digits can fit in u10
     body: []const u8,
     headers: []Header,
@@ -99,7 +100,7 @@ const HttpResult = struct {
     }
 };
 
-const Header = struct {
+pub const Header = struct {
     name: []const u8,
     value: []const u8,
 };
@@ -320,7 +321,7 @@ pub const AwsHttp = struct {
         var tls_connection_options: ?*c.aws_tls_connection_options = null;
         const host = try self.allocator.dupeZ(u8, endpoint.host);
         defer self.allocator.free(host);
-        try self.addHeaders(http_request.?, host, request.body);
+        try self.addHeaders(http_request.?, host, request.body, request.content_type, request.headers);
         if (std.mem.eql(u8, endpoint.scheme, "https")) {
             // TODO: Figure out why this needs to be inline vs function call
             // tls_connection_options = try self.setupTls(host);
@@ -631,7 +632,7 @@ pub const AwsHttp = struct {
         async_result.sync.store(false, .SeqCst);
     }
 
-    fn addHeaders(self: Self, request: *c.aws_http_message, host: []const u8, body: []const u8) !void {
+    fn addHeaders(self: Self, request: *c.aws_http_message, host: []const u8, body: []const u8, content_type: []const u8, additional_headers: []Header) !void {
         const accept_header = c.aws_http_header{
             .name = c.aws_byte_cursor_from_c_str("Accept"),
             .value = c.aws_byte_cursor_from_c_str("application/json"),
@@ -662,21 +663,36 @@ pub const AwsHttp = struct {
         // const accept_encoding_header = c.aws_http_header{
         //     .name = c.aws_byte_cursor_from_c_str("Accept-Encoding"),
         //     .value = c.aws_byte_cursor_from_c_str("identity"),
-        //     .compression = .AWS_HTTP_HEADER_COMPRESSION_USE_CACHE,
+        //     .compression = 0, //.AWS_HTTP_HEADER_COMPRESSION_USE_CACHE,
         // };
         // if (c.aws_http_message_add_header(request, accept_encoding_header) != c.AWS_OP_SUCCESS)
         //     return AwsError.AddHeaderError;
 
         // AWS *does* seem to care about Content-Type. I don't think this header
         // will hold for all APIs
-        // TODO: Work out Content-type
+        const c_type = try std.fmt.allocPrintZ(self.allocator, "{s}", .{content_type});
+        defer self.allocator.free(c_type);
         const content_type_header = c.aws_http_header{
             .name = c.aws_byte_cursor_from_c_str("Content-Type"),
-            .value = c.aws_byte_cursor_from_c_str("application/x-www-form-urlencoded"),
+            .value = c.aws_byte_cursor_from_c_str(c_type),
             .compression = 0, // .AWS_HTTP_HEADER_COMPRESSION_USE_CACHE,
         };
         if (c.aws_http_message_add_header(request, content_type_header) != c.AWS_OP_SUCCESS)
             return AwsError.AddHeaderError;
+
+        for (additional_headers) |h| {
+            const name = try std.fmt.allocPrintZ(self.allocator, "{s}", .{h.name});
+            defer self.allocator.free(name);
+            const value = try std.fmt.allocPrintZ(self.allocator, "{s}", .{h.value});
+            defer self.allocator.free(value);
+            const c_header = c.aws_http_header{
+                .name = c.aws_byte_cursor_from_c_str(name),
+                .value = c.aws_byte_cursor_from_c_str(value),
+                .compression = 0, // .AWS_HTTP_HEADER_COMPRESSION_USE_CACHE,
+            };
+            if (c.aws_http_message_add_header(request, c_header) != c.AWS_OP_SUCCESS)
+                return AwsError.AddHeaderError;
+        }
 
         if (body.len > 0) {
             const len = try std.fmt.allocPrintZ(self.allocator, "{d}", .{body.len});

@@ -56,17 +56,64 @@ pub const Aws = struct {
 
         // It seems as though there are 3 major branches of the 6 protocols.
         // 1. query/ec2_query, which are identical until you get to complex
-        //    structures. TBD if the shortcut we're taking for query to make
-        //    it return json will work on EC2, but my guess is yes.
+        //    structures. EC2 query does not allow us to request json though,
+        //    so we need to handle xml returns from this.
         // 2. *json*: These three appear identical for input (possible difference
         //    for empty body serialization), but differ in error handling.
         //    We're not doing a lot of error handling here, though.
         // 3. rest_xml: This is a one-off for S3, never used since
         switch (service_meta.aws_protocol) {
-            .query, .ec2_query => return self.callQuery(request, service_meta, action, options),
-            .rest_json_1, .json_1_0, .json_1_1 => @compileError("REST Json, Json 1.0/1.1 protocol not yet supported"),
-            .rest_xml => @compileError("REST XML protocol not yet supported"),
+            .query => return self.callQuery(request, service_meta, action, options),
+            // .query, .ec2_query => return self.callQuery(request, service_meta, action, options),
+            .rest_json_1, .json_1_0, .json_1_1 => return self.callJson(request, service_meta, action, options),
+            .ec2_query, .rest_xml => @compileError("XML responses may be blocked on a zig compiler bug scheduled to be fixed in 0.9.0"),
         }
+    }
+
+    /// Calls using one of the json protocols (rest_json_1, json_1_0, json_1_1
+    fn callJson(self: Self, comptime request: anytype, comptime service_meta: anytype, action: anytype, options: Options) !FullResponse(request) {
+        // Target might be a problem. The smithy docs differ fairly significantly
+        // from the REST API examples. Here I'm following the REST API examples
+        // as they have not yet led me astray. Whether they're consistent
+        // across other services is another matter...
+        var version = try self.allocator.alloc(u8, service_meta.version.len);
+        defer self.allocator.free(version);
+        const replacements = std.mem.replace(u8, service_meta.version, "-", "", version);
+        // Resize the version, otherwise the junk at the end will mess with allocPrint
+        version = try self.allocator.resize(version, version.len - replacements);
+        const target =
+            try std.fmt.allocPrint(self.allocator, "{s}_{s}.{s}", .{
+            service_meta.sdk_id,
+            version,
+            action.action_name,
+        });
+        defer self.allocator.free(target);
+
+        var buffer = std.ArrayList(u8).init(self.allocator);
+        defer buffer.deinit();
+
+        // The transformer needs to allocate stuff out of band, but we
+        // can guarantee we don't need the memory after this call completes,
+        // so we'll use an arena allocator to whack everything.
+        // TODO: Determine if sending in null values is ok, or if we need another
+        //       tweak to the stringify function to exclude
+        var nameAllocator = std.heap.ArenaAllocator.init(self.allocator);
+        defer nameAllocator.deinit();
+        try json.stringify(request, .{ .whitespace = .{}, .allocator = &nameAllocator.allocator, .nameTransform = pascalTransformer }, buffer.writer());
+
+        var content_type: []const u8 = undefined;
+        switch (service_meta.aws_protocol) {
+            .rest_json_1 => content_type = "application/json",
+            .json_1_0 => content_type = "application/x-amz-json-1.0",
+            .json_1_1 => content_type = "application/x-amz-json-1.1",
+            else => unreachable,
+        }
+        return try self.callAws(request, service_meta, .{
+            .query = "",
+            .body = buffer.items,
+            .content_type = content_type,
+            .headers = &[_]awshttp.Header{.{ .name = "X-Amz-Target", .value = target }},
+        }, options);
     }
 
     // Call using query protocol. This is documented as an XML protocol, but
@@ -74,7 +121,7 @@ pub const Aws = struct {
     // Query, so we'll handle both here. Realistically we probably don't effectively
     // handle lists and maps properly anyway yet, so we'll go for it and see
     // where it breaks. PRs and/or failing test cases appreciated.
-    fn callQuery(self: Self, comptime request: anytype, service_meta: anytype, action: anytype, options: Options) !FullResponse(request) {
+    fn callQuery(self: Self, comptime request: anytype, comptime service_meta: anytype, action: anytype, options: Options) !FullResponse(request) {
         var buffer = std.ArrayList(u8).init(self.allocator);
         defer buffer.deinit();
         const writer = buffer.writer();
@@ -103,31 +150,28 @@ pub const Aws = struct {
         else // EC2
             try std.fmt.allocPrint(self.allocator, "{s}", .{buffer.items});
         defer self.allocator.free(body);
+        return try self.callAws(request, service_meta, .{
+            .query = query,
+            .body = body,
+            .content_type = "application/x-www-form-urlencoded",
+        }, options);
+    }
 
+    fn callAws(self: Self, comptime request: anytype, comptime service_meta: anytype, aws_request: awshttp.HttpRequest, options: Options) !FullResponse(request) {
         const FullR = FullResponse(request);
         const response = try self.aws_http.callApi(
             service_meta.endpoint_prefix,
-            .{
-                .body = body,
-                .query = query,
-            },
+            aws_request,
             .{
                 .region = options.region,
                 .dualstack = options.dualstack,
                 .sigv4_service_name = service_meta.sigv4_name,
             },
         );
-        // TODO: Can response handling be reused?
         defer response.deinit();
+        // try self.reportTraffic("", aws_request, response, log.debug);
         if (response.response_code != 200) {
-            log.err("call failed! return status: {d}", .{response.response_code});
-            log.err("Request Query:\n  |{s}\n", .{query});
-            log.err("Request Body:\n  |{s}\n", .{body});
-
-            log.err("Response Headers:\n", .{});
-            for (response.headers) |h|
-                log.err("\t{s}:{s}\n", .{ h.name, h.value });
-            log.err("Response Body:\n  |{s}", .{response.body});
+            try self.reportTraffic("Call Failed", aws_request, response, log.err);
             return error.HttpFailure;
         }
         // EC2 ignores our accept type, but technically query protocol only
@@ -137,6 +181,10 @@ pub const Aws = struct {
         for (response.headers) |h| {
             if (std.mem.eql(u8, "Content-Type", h.name)) {
                 if (std.mem.startsWith(u8, h.value, "application/json")) {
+                    isJson = true;
+                } else if (std.mem.startsWith(u8, h.value, "application/x-amz-json-1.0")) {
+                    isJson = true;
+                } else if (std.mem.startsWith(u8, h.value, "application/x-amz-json-1.1")) {
                     isJson = true;
                 } else if (std.mem.startsWith(u8, h.value, "text/xml")) {
                     isJson = false;
@@ -160,18 +208,52 @@ pub const Aws = struct {
             .allow_unknown_fields = true, // new option. Cannot yet handle non-struct fields though
             .allow_missing_fields = false, // new option. Cannot yet handle non-struct fields though
         };
-        const SResponse = ServerResponse(request);
+
+        // const SResponse = ServerResponse(request);
+        const SResponse = if (service_meta.aws_protocol != .query and service_meta.aws_protocol != .ec2_query)
+            Response(request)
+        else
+            ServerResponse(request);
+
         const parsed_response = json.parse(SResponse, &stream, parser_options) catch |e| {
             log.err(
                 \\Call successful, but unexpected response from service.
                 \\This could be the result of a bug or a stale set of code generated
-                \\service models. Response from server:
+                \\service models.
+                \\
+                \\Model Type: {s}
+                \\
+                \\Response from server:
                 \\
                 \\{s}
                 \\
-            , .{response.body});
+            , .{ SResponse, response.body });
             return e;
         };
+
+        if (service_meta.aws_protocol != .query and service_meta.aws_protocol != .ec2_query) {
+            var request_id: []u8 = undefined;
+            var found = false;
+            for (response.headers) |h| {
+                if (std.ascii.eqlIgnoreCase(h.name, "X-Amzn-RequestId")) {
+                    found = true;
+                    request_id = try std.fmt.allocPrint(self.allocator, "{s}", .{h.value}); // will be freed in FullR.deinit()
+                }
+            }
+            if (!found) {
+                try self.reportTraffic("Request ID not found", aws_request, response, log.err);
+                return error.RequestIdNotFound;
+            }
+
+            return FullR{
+                .response = parsed_response,
+                .response_metadata = .{
+                    .request_id = request_id,
+                },
+                .parser_options = parser_options,
+                .raw_parsed = .{ .raw = parsed_response },
+            };
+        }
 
         // Grab the first (and only) object from the server. Server shape expected to be:
         // { ActionResponse: {ActionResult: {...}, ResponseMetadata: {...} } }
@@ -189,8 +271,35 @@ pub const Aws = struct {
                 .request_id = real_response.ResponseMetadata.RequestId,
             },
             .parser_options = parser_options,
-            .raw_parsed = parsed_response,
+            .raw_parsed = .{ .server = parsed_response },
         };
+    }
+
+    fn reportTraffic(self: Self, info: []const u8, request: awshttp.HttpRequest, response: awshttp.HttpResult, comptime reporter: fn (comptime []const u8, anytype) void) !void {
+        var msg = std.ArrayList(u8).init(self.allocator);
+        defer msg.deinit();
+        const writer = msg.writer();
+        try writer.print("{s}\n\n", .{info});
+        try writer.print("Return status: {d}\n\n", .{response.response_code});
+        if (request.query.len > 0) try writer.print("Request Query:\n  \t{s}\n", .{request.query});
+        _ = try writer.write("Unique Request Headers:\n");
+        if (request.headers.len > 0) {
+            for (request.headers) |h|
+                try writer.print("\t{s}: {s}\n", .{ h.name, h.value });
+        }
+        try writer.print("\tContent-Type: {s}\n\n", .{request.content_type});
+
+        _ = try writer.write("Request Body:\n");
+        try writer.print("-------------\n{s}\n", .{request.body});
+        _ = try writer.write("-------------\n");
+        _ = try writer.write("Response Headers:\n");
+        for (response.headers) |h|
+            try writer.print("\t{s}: {s}\n", .{ h.name, h.value });
+
+        _ = try writer.write("Response Body:\n");
+        try writer.print("--------------\n{s}\n", .{response.body});
+        _ = try writer.write("--------------\n");
+        reporter("{s}\n", .{msg.items});
     }
 };
 
@@ -250,11 +359,20 @@ fn FullResponse(comptime request: anytype) type {
             request_id: []u8,
         },
         parser_options: json.ParseOptions,
-        raw_parsed: ServerResponse(request),
+        raw_parsed: union(enum) {
+            server: ServerResponse(request),
+            raw: Response(request),
+        },
+        // raw_parsed: ServerResponse(request),
 
         const Self = @This();
         pub fn deinit(self: Self) void {
-            json.parseFree(ServerResponse(request), self.raw_parsed, self.parser_options);
+            switch (self.raw_parsed) {
+                .server => json.parseFree(ServerResponse(request), self.raw_parsed.server, self.parser_options),
+                .raw => json.parseFree(Response(request), self.raw_parsed.raw, self.parser_options),
+            }
+
+            self.parser_options.allocator.?.free(self.response_metadata.request_id);
         }
     };
 }
@@ -265,6 +383,9 @@ fn queryFieldTransformer(field_name: []const u8, encoding_options: url.EncodingO
     return try case.snakeToPascal(encoding_options.allocator.?, field_name);
 }
 
+fn pascalTransformer(field_name: []const u8, options: json.StringifyOptions) anyerror![]const u8 {
+    return try case.snakeToPascal(options.allocator.?, field_name);
+}
 // Use for debugging json responses of specific requests
 // test "dummy request" {
 //     const allocator = std.testing.allocator;

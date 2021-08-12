@@ -27,6 +27,8 @@ const Tests = enum {
     query_no_input,
     query_with_input,
     ec2_query_no_input,
+    json_1_0_query_with_input,
+    json_1_0_query_no_input,
 };
 
 pub fn main() anyerror!void {
@@ -65,7 +67,7 @@ pub fn main() anyerror!void {
     var client = aws.Aws.init(allocator);
     defer client.deinit();
 
-    const services = aws.Services(.{ .sts, .ec2 }){};
+    const services = aws.Services(.{ .sts, .ec2, .dynamo_db }){};
 
     for (tests.items) |t| {
         std.log.info("===== Start Test: {s} =====", .{@tagName(t)});
@@ -84,12 +86,27 @@ pub fn main() anyerror!void {
                     .duration_seconds = 900,
                 }, options);
                 defer access.deinit();
-                std.log.info("access key: {s}", .{access.response.credentials.access_key_id});
+                std.log.info("access key: {s}", .{access.response.credentials.?.access_key_id});
+            },
+            .json_1_0_query_with_input => {
+                // TODO: Find test without sensitive info
+                const tables = try client.call(services.dynamo_db.list_tables.Request{
+                    .limit = 1,
+                }, options);
+                defer tables.deinit();
+                std.log.info("request id: {s}", .{tables.response_metadata.request_id});
+                std.log.info("account has tables: {b}", .{tables.response.table_names.?.len > 0});
+            },
+            .json_1_0_query_no_input => {
+                const limits = try client.call(services.dynamo_db.describe_limits.Request{}, options);
+                defer limits.deinit();
+                std.log.info("account read capacity limit: {d}", .{limits.response.account_max_read_capacity_units});
             },
             .ec2_query_no_input => {
-                const instances = try client.call(services.ec2.describe_instances.Request{}, options);
-                defer instances.deinit();
-                std.log.info("reservation count: {d}", .{instances.response.reservations.len});
+                std.log.err("EC2 Test disabled due to compiler bug", .{});
+                // const instances = try client.call(services.ec2.describe_instances.Request{}, options);
+                // defer instances.deinit();
+                // std.log.info("reservation count: {d}", .{instances.response.reservations.len});
             },
         }
         std.log.info("===== End Test: {s} =====\n", .{@tagName(t)});
