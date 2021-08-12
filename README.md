@@ -100,7 +100,7 @@ TODO List:
 * Move to compiler on tagged release (hopefully 0.8.1)
 (new 2021-05-29. I will proceed in this order unless I get other requests)
 * ✓ Implement [AWS query protocol](https://awslabs.github.io/smithy/1.0/spec/aws/aws-query-protocol.html). This is the protocol in use by sts.getcalleridentity. Total service count 18
-* Implement [AWS Json 1.0 protocol](https://awslabs.github.io/smithy/1.0/spec/aws/aws-json-1_0-protocol.html). Includes dynamodb. Total service count 18
+* ✓ Implement [AWS Json 1.0 protocol](https://awslabs.github.io/smithy/1.0/spec/aws/aws-json-1_0-protocol.html). Includes dynamodb. Total service count 18
 * Implement [AWS Json 1.1 protocol](https://awslabs.github.io/smithy/1.0/spec/aws/aws-json-1_1-protocol.html). Includes ecs. Total service count 105
 * Implement [AWS restXml protocol](https://awslabs.github.io/smithy/1.0/spec/aws/aws-restxml-protocol.html). Includes S3. Total service count 4. This may be blocked due to the same issue as EC2.
 * Implement [AWS EC2 query protocol](https://awslabs.github.io/smithy/1.0/spec/aws/aws-ec2-query-protocol.html). Includes EC2. Total service count 1. This is currently blocked, probably on self-hosted compiler coming in zig 0.9.0 (January 2022) due to compiler bug discovered. More details and llvm ir log can be found in the [XML branch](https://git.lerch.org/lobo/aws-sdk-for-zig/src/branch/xml).
