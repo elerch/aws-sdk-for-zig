@@ -268,7 +268,7 @@ pub const Aws = struct {
         return FullR{
             .response = @field(real_response, @typeInfo(@TypeOf(real_response)).Struct.fields[0].name),
             .response_metadata = .{
-                .request_id = real_response.ResponseMetadata.RequestId,
+                .request_id = try self.allocator.dupe(u8, real_response.ResponseMetadata.RequestId),
             },
             .parser_options = parser_options,
             .raw_parsed = .{ .server = parsed_response },
