@@ -72,19 +72,9 @@ pub const Aws = struct {
 
     /// Calls using one of the json protocols (rest_json_1, json_1_0, json_1_1
     fn callJson(self: Self, comptime request: anytype, comptime service_meta: anytype, action: anytype, options: Options) !FullResponse(request) {
-        // Target might be a problem. The smithy docs differ fairly significantly
-        // from the REST API examples. Here I'm following the REST API examples
-        // as they have not yet led me astray. Whether they're consistent
-        // across other services is another matter...
-        var version = try self.allocator.alloc(u8, service_meta.version.len);
-        defer self.allocator.free(version);
-        const replacements = std.mem.replace(u8, service_meta.version, "-", "", version);
-        // Resize the version, otherwise the junk at the end will mess with allocPrint
-        version = try self.allocator.resize(version, version.len - replacements);
         const target =
-            try std.fmt.allocPrint(self.allocator, "{s}_{s}.{s}", .{
-            service_meta.sdk_id,
-            version,
+            try std.fmt.allocPrint(self.allocator, "{s}.{s}", .{
+            service_meta.name,
             action.action_name,
         });
         defer self.allocator.free(target);
@@ -96,7 +86,11 @@ pub const Aws = struct {
         // can guarantee we don't need the memory after this call completes,
         // so we'll use an arena allocator to whack everything.
         // TODO: Determine if sending in null values is ok, or if we need another
-        //       tweak to the stringify function to exclude
+        //       tweak to the stringify function to exclude. According to the
+        //       smithy spec, "A null value MAY be provided or omitted
+        //       for a boxed member with no observable difference." But we're
+        //       seeing a lot of differences here between spec and reality
+        //
         var nameAllocator = std.heap.ArenaAllocator.init(self.allocator);
         defer nameAllocator.deinit();
         try json.stringify(request, .{ .whitespace = .{}, .allocator = &nameAllocator.allocator, .nameTransform = pascalTransformer }, buffer.writer());
