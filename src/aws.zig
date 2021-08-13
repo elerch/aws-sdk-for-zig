@@ -93,7 +93,7 @@ pub const Aws = struct {
         //
         var nameAllocator = std.heap.ArenaAllocator.init(self.allocator);
         defer nameAllocator.deinit();
-        try json.stringify(request, .{ .whitespace = .{}, .allocator = &nameAllocator.allocator, .nameTransform = pascalTransformer }, buffer.writer());
+        try json.stringify(request, .{ .whitespace = .{} }, buffer.writer());
 
         var content_type: []const u8 = undefined;
         switch (service_meta.aws_protocol) {
@@ -377,8 +377,33 @@ fn queryFieldTransformer(field_name: []const u8, encoding_options: url.EncodingO
     return try case.snakeToPascal(encoding_options.allocator.?, field_name);
 }
 
-fn pascalTransformer(field_name: []const u8, options: json.StringifyOptions) anyerror![]const u8 {
-    return try case.snakeToPascal(options.allocator.?, field_name);
+test "basic json request serialization" {
+    const allocator = std.testing.allocator;
+    const svs = Services(.{.dynamo_db}){};
+    const request = svs.dynamo_db.list_tables.Request{
+        .limit = 1,
+    };
+    var buffer = std.ArrayList(u8).init(allocator);
+    defer buffer.deinit();
+
+    // The transformer needs to allocate stuff out of band, but we
+    // can guarantee we don't need the memory after this call completes,
+    // so we'll use an arena allocator to whack everything.
+    // TODO: Determine if sending in null values is ok, or if we need another
+    //       tweak to the stringify function to exclude. According to the
+    //       smithy spec, "A null value MAY be provided or omitted
+    //       for a boxed member with no observable difference." But we're
+    //       seeing a lot of differences here between spec and reality
+    //
+    var nameAllocator = std.heap.ArenaAllocator.init(allocator);
+    defer nameAllocator.deinit();
+    try json.stringify(request, .{ .whitespace = .{} }, buffer.writer());
+    try std.testing.expectEqualStrings(
+        \\{
+        \\    "ExclusiveStartTableName": null,
+        \\    "Limit": 1
+        \\}
+    , buffer.items);
 }
 // Use for debugging json responses of specific requests
 // test "dummy request" {

@@ -329,13 +329,35 @@ fn generateSimpleTypeFor(_: anytype, type_name: []const u8, writer: anytype, all
 }
 
 fn generateComplexTypeFor(allocator: *std.mem.Allocator, members: []smithy.TypeMember, type_type_name: []const u8, shapes: anytype, writer: anytype, prefix: []const u8, all_required: bool, type_stack: anytype) anyerror!void {
+    const Mapping = struct { snake: []const u8, json: []const u8 };
+    var mappings = try std.ArrayList(Mapping).initCapacity(allocator, members.len);
+    defer {
+        for (mappings.items) |mapping| {
+            allocator.free(mapping.snake);
+        }
+        mappings.deinit();
+    }
     // prolog. We'll rely on caller to get the spacing correct here
     _ = try writer.write(type_type_name);
     _ = try writer.write(" {\n");
     for (members) |member| {
         const new_prefix = try std.fmt.allocPrint(allocator, "    {s}", .{prefix});
         defer allocator.free(new_prefix);
+        // This is our mapping
         const snake_case_member = try snake.fromPascalCase(allocator, member.name);
+        // So it looks like some services have duplicate names?! Check out "httpMethod"
+        // in API Gateway. Not sure what we're supposed to do there. Checking the go
+        // sdk, they move this particular duplicate to 'http_method' - not sure yet
+        // if this is a hard-coded exception`
+        var found_trait = false;
+        for (member.traits) |trait| {
+            if (trait == .json_name) {
+                found_trait = true;
+                mappings.appendAssumeCapacity(.{ .snake = try allocator.dupe(u8, snake_case_member), .json = trait.json_name });
+            }
+        }
+        if (!found_trait)
+            mappings.appendAssumeCapacity(.{ .snake = try allocator.dupe(u8, snake_case_member), .json = member.name });
         defer allocator.free(snake_case_member);
         try writer.print("{s}    {s}: ", .{ prefix, avoidReserved(snake_case_member) });
         if (!all_required) try writeOptional(member.traits, writer, null);
@@ -344,6 +366,30 @@ fn generateComplexTypeFor(allocator: *std.mem.Allocator, members: []smithy.TypeM
             try writeOptional(member.traits, writer, " = null");
         _ = try writer.write(",\n");
     }
+
+    // Add in json mappings. The function looks like this:
+    //
+    // pub fn jsonFieldNameFor(_: @This(), comptime field_name: []const u8) []const u8 {
+    //     const mappings = .{
+    //         .exclusive_start_table_name = "ExclusiveStartTableName",
+    //         .limit = "Limit",
+    //     };
+    //     return @field(mappings, field_name);
+    // }
+    //
+    // TODO: There is a smithy trait that will specify the json name. We should be using
+    //       this instead if applicable.
+    try writer.print("\n{s}    pub fn jsonFieldNameFor(_: @This(), comptime field_name: []const u8) []const u8 ", .{prefix});
+    _ = try writer.write("{\n");
+    try writer.print("{s}        const mappings = .", .{prefix});
+    _ = try writer.write("{\n");
+    for (mappings.items) |mapping| {
+        try writer.print("{s}            .{s} = \"{s}\",\n", .{ prefix, avoidReserved(mapping.snake), mapping.json });
+    }
+    _ = try writer.write(prefix);
+    _ = try writer.write("        };\n");
+    try writer.print("{s}        return @field(mappings, field_name);\n{s}", .{ prefix, prefix });
+    _ = try writer.write("    }\n");
 }
 
 fn writeOptional(traits: ?[]smithy.Trait, writer: anytype, value: ?[]const u8) !void {

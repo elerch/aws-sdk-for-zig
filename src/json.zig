@@ -2656,15 +2656,6 @@ pub const StringifyOptions = struct {
 
     string: StringOptions = StringOptions{ .String = .{} },
 
-    nameTransform: fn ([]const u8, StringifyOptions) anyerror![]const u8 = nullTransform,
-
-    /// Not used by stringify - might be needed for your name transformer
-    allocator: ?*std.mem.Allocator = null,
-
-    fn nullTransform(name: []const u8, _: StringifyOptions) ![]const u8 {
-        return name;
-    }
-
     /// Should []u8 be serialised as a string? or an array?
     pub const StringOptions = union(enum) {
         Array,
@@ -2777,10 +2768,13 @@ pub fn stringify(
                     try out_stream.writeByte('\n');
                     try child_whitespace.outputIndent(out_stream);
                 }
-                const name = child_options.nameTransform(Field.name, options) catch {
-                    return error.NameTransformationError;
-                };
-                try stringify(name, options, out_stream);
+                if (comptime std.meta.trait.hasFn("jsonFieldNameFor")(T)) {
+                    const name = value.jsonFieldNameFor(Field.name);
+                    try stringify(name, options, out_stream);
+                } else {
+                    try stringify(Field.name, options, out_stream);
+                }
+
                 try out_stream.writeByte(':');
                 if (child_options.whitespace) |child_whitespace| {
                     if (child_whitespace.separator) {
