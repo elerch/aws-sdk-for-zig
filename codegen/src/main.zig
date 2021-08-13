@@ -166,6 +166,16 @@ fn generateOperation(allocator: *std.mem.Allocator, operation: smithy.ShapeInfo,
     const operation_name = avoidReserved(snake_case_name);
     try writer.print("pub const {s}: struct ", .{operation_name});
     _ = try writer.write("{\n");
+    for (operation.shape.operation.traits) |trait| {
+        if (trait == .http) {
+            _ = try writer.write("    pub const http_config = .{\n");
+            try writer.print("        .method = \"{s}\",\n", .{trait.http.method});
+            try writer.print("        .uri = \"{s}\",\n", .{trait.http.uri});
+            try writer.print("        .success_code = {d},\n", .{trait.http.code});
+            _ = try writer.write("    };\n\n");
+        }
+    }
+
     try writer.print("    action_name: []const u8 = \"{s}\",\n", .{operation.name});
     _ = try writer.write("    Request: type = ");
     if (operation.shape.operation.input) |member| {

@@ -91,6 +91,7 @@ pub const TraitType = enum {
     aws_auth_sigv4,
     aws_protocol,
     ec2_query_name,
+    http,
     json_name,
     required,
     documentation,
@@ -114,6 +115,11 @@ pub const Trait = union(TraitType) {
     aws_protocol: AwsProtocol,
     ec2_query_name: []const u8,
     json_name: []const u8,
+    http: struct {
+        method: []const u8,
+        uri: []const u8,
+        code: i64 = 200,
+    },
     required: struct {},
     documentation: []const u8,
     pattern: []const u8,
@@ -539,6 +545,18 @@ fn getTrait(trait_type: []const u8, value: std.json.Value) SmithyParseError!?Tra
     if (std.mem.eql(u8, trait_type, "aws.protocols#ec2QueryName"))
         return Trait{ .ec2_query_name = value.String };
 
+    if (std.mem.eql(u8, trait_type, "smithy.api#http")) {
+        var code: i64 = 200;
+        if (value.Object.get("code")) |v| {
+            if (v == .Integer)
+                code = v.Integer;
+        }
+        return Trait{ .http = .{
+            .method = value.Object.get("method").?.String,
+            .uri = value.Object.get("uri").?.String,
+            .code = code,
+        } };
+    }
     if (std.mem.eql(u8, trait_type, "smithy.api#jsonName"))
         return Trait{ .json_name = value.String };
 
