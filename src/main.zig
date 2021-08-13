@@ -29,6 +29,8 @@ const Tests = enum {
     ec2_query_no_input,
     json_1_0_query_with_input,
     json_1_0_query_no_input,
+    json_1_1_query_with_input,
+    json_1_1_query_no_input,
 };
 
 pub fn main() anyerror!void {
@@ -67,7 +69,7 @@ pub fn main() anyerror!void {
     var client = aws.Aws.init(allocator);
     defer client.deinit();
 
-    const services = aws.Services(.{ .sts, .ec2, .dynamo_db }){};
+    const services = aws.Services(.{ .sts, .ec2, .dynamo_db, .ecs }){};
 
     for (tests.items) |t| {
         std.log.info("===== Start Test: {s} =====", .{@tagName(t)});
@@ -89,7 +91,6 @@ pub fn main() anyerror!void {
                 std.log.info("access key: {s}", .{access.response.credentials.?.access_key_id});
             },
             .json_1_0_query_with_input => {
-                // TODO: Find test without sensitive info
                 const tables = try client.call(services.dynamo_db.list_tables.Request{
                     .limit = 1,
                 }, options);
@@ -101,6 +102,20 @@ pub fn main() anyerror!void {
                 const limits = try client.call(services.dynamo_db.describe_limits.Request{}, options);
                 defer limits.deinit();
                 std.log.info("account read capacity limit: {d}", .{limits.response.account_max_read_capacity_units});
+            },
+            .json_1_1_query_with_input => {
+                const clusters = try client.call(services.ecs.list_clusters.Request{
+                    .max_results = 1,
+                }, options);
+                defer clusters.deinit();
+                std.log.info("request id: {s}", .{clusters.response_metadata.request_id});
+                std.log.info("account has clusters: {b}", .{clusters.response.cluster_arns.?.len > 0});
+            },
+            .json_1_1_query_no_input => {
+                const clusters = try client.call(services.ecs.list_clusters.Request{}, options);
+                defer clusters.deinit();
+                std.log.info("request id: {s}", .{clusters.response_metadata.request_id});
+                std.log.info("account has clusters: {b}", .{clusters.response.cluster_arns.?.len > 0});
             },
             .ec2_query_no_input => {
                 std.log.err("EC2 Test disabled due to compiler bug", .{});
