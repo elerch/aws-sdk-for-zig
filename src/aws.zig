@@ -11,6 +11,7 @@ const log = std.log.scoped(.aws);
 pub const Options = struct {
     region: []const u8 = "aws-global",
     dualstack: bool = false,
+    success_http_code: i64 = 200,
 };
 
 /// Using this constant may blow up build times. Recommed using Services()
@@ -65,12 +66,45 @@ pub const Aws = struct {
         switch (service_meta.aws_protocol) {
             .query => return self.callQuery(request, service_meta, action, options),
             // .query, .ec2_query => return self.callQuery(request, service_meta, action, options),
-            .rest_json_1, .json_1_0, .json_1_1 => return self.callJson(request, service_meta, action, options),
+            .json_1_0, .json_1_1 => return self.callJson(request, service_meta, action, options),
+            .rest_json_1 => return self.callRestJson(request, service_meta, action, options),
             .ec2_query, .rest_xml => @compileError("XML responses may be blocked on a zig compiler bug scheduled to be fixed in 0.9.0"),
         }
     }
 
-    /// Calls using one of the json protocols (rest_json_1, json_1_0, json_1_1
+    /// Rest Json is the most complex and so we handle this seperately
+    fn callRestJson(self: Self, comptime request: anytype, comptime service_meta: anytype, action: anytype, options: Options) !FullResponse(request) {
+        const Action = @TypeOf(action);
+        var aws_request: awshttp.HttpRequest = .{
+            .method = Action.http_config.method,
+            .content_type = "application/json",
+            .path = Action.http_config.uri,
+        };
+
+        log.debug("Rest JSON v1 method: {s}", .{aws_request.method});
+        log.debug("Rest JSON v1 success code: {d}", .{Action.http_config.success_code});
+        log.debug("Rest JSON v1 raw uri: {s}", .{Action.http_config.uri});
+
+        aws_request.query = try buildQuery(self.allocator, request);
+        log.debug("Rest JSON v1 query: {s}", .{aws_request.query});
+        defer self.allocator.free(aws_request.query);
+        // We don't know if we need a body...guessing here, this should cover most
+        var buffer = std.ArrayList(u8).init(self.allocator);
+        defer buffer.deinit();
+        var nameAllocator = std.heap.ArenaAllocator.init(self.allocator);
+        defer nameAllocator.deinit();
+        if (std.mem.eql(u8, "PUT", aws_request.method) or std.mem.eql(u8, "POST", aws_request.method)) {
+            try json.stringify(request, .{ .whitespace = .{} }, buffer.writer());
+        }
+
+        return try self.callAws(request, service_meta, aws_request, .{
+            .success_http_code = Action.http_config.success_code,
+            .region = options.region,
+            .dualstack = options.dualstack,
+        });
+    }
+
+    /// Calls using one of the json protocols (json_1_0, json_1_1)
     fn callJson(self: Self, comptime request: anytype, comptime service_meta: anytype, action: anytype, options: Options) !FullResponse(request) {
         const target =
             try std.fmt.allocPrint(self.allocator, "{s}.{s}", .{
@@ -97,7 +131,6 @@ pub const Aws = struct {
 
         var content_type: []const u8 = undefined;
         switch (service_meta.aws_protocol) {
-            .rest_json_1 => content_type = "application/json",
             .json_1_0 => content_type = "application/x-amz-json-1.0",
             .json_1_1 => content_type = "application/x-amz-json-1.1",
             else => unreachable,
@@ -377,6 +410,53 @@ fn queryFieldTransformer(field_name: []const u8, encoding_options: url.EncodingO
     return try case.snakeToPascal(encoding_options.allocator.?, field_name);
 }
 
+fn buildQuery(allocator: *std.mem.Allocator, comptime request: anytype) ![]const u8 {
+    // query should look something like this:
+    // pub const http_query = .{
+    //     .master_region = "MasterRegion",
+    //     .function_version = "FunctionVersion",
+    //     .marker = "Marker",
+    // };
+    const query_arguments = @TypeOf(request).http_query;
+    var buffer = std.ArrayList(u8).init(allocator);
+    const writer = buffer.writer();
+    defer buffer.deinit();
+    var has_begun = false;
+    inline for (@typeInfo(@TypeOf(query_arguments)).Struct.fields) |arg| {
+        const val = @field(request, arg.name);
+        if (@typeInfo(@TypeOf(val)) == .Optional) {
+            if (val) |v| {
+                try addQueryArg(@field(query_arguments, arg.name), v, writer, !has_begun);
+                has_begun = true;
+            }
+        } else {
+            try addQueryArg(@field(query_arguments, arg.name), val, writer, !has_begun);
+            has_begun = true;
+        }
+    }
+    return buffer.toOwnedSlice();
+}
+
+fn addQueryArg(key: []const u8, value: anytype, writer: anytype, start: bool) !void {
+    if (start)
+        _ = try writer.write("?")
+    else
+        _ = try writer.write("&");
+    // TODO: url escaping
+    try writer.print("{s}=", .{key});
+    try json.stringify(value, .{}, writer);
+}
+
+test "REST Json v1 builds proper queries" {
+    const allocator = std.testing.allocator;
+    const svs = Services(.{.lambda}){};
+    const request = svs.lambda.list_functions.Request{
+        .max_items = 1,
+    };
+    const query = try buildQuery(allocator, request);
+    defer allocator.free(query);
+    try std.testing.expectEqualStrings("?MaxItems=1", query);
+}
 test "basic json request serialization" {
     const allocator = std.testing.allocator;
     const svs = Services(.{.dynamo_db}){};

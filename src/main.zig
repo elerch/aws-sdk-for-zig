@@ -31,6 +31,8 @@ const Tests = enum {
     json_1_0_query_no_input,
     json_1_1_query_with_input,
     json_1_1_query_no_input,
+    rest_json_1_query_no_input,
+    rest_json_1_query_with_input,
 };
 
 pub fn main() anyerror!void {
@@ -69,53 +71,67 @@ pub fn main() anyerror!void {
     var client = aws.Aws.init(allocator);
     defer client.deinit();
 
-    const services = aws.Services(.{ .sts, .ec2, .dynamo_db, .ecs }){};
+    const services = aws.Services(.{ .sts, .ec2, .dynamo_db, .ecs, .lambda }){};
 
     for (tests.items) |t| {
         std.log.info("===== Start Test: {s} =====", .{@tagName(t)});
         switch (t) {
             .query_no_input => {
-                const resp = try client.call(services.sts.get_caller_identity.Request{}, options);
-                defer resp.deinit();
-                std.log.info("arn: {s}", .{resp.response.arn});
-                std.log.info("id: {s}", .{resp.response.user_id});
-                std.log.info("account: {s}", .{resp.response.account});
-                std.log.info("requestId: {s}", .{resp.response_metadata.request_id});
+                const call = try client.call(services.sts.get_caller_identity.Request{}, options);
+                defer call.deinit();
+                std.log.info("arn: {s}", .{call.response.arn});
+                std.log.info("id: {s}", .{call.response.user_id});
+                std.log.info("account: {s}", .{call.response.account});
+                std.log.info("requestId: {s}", .{call.response_metadata.request_id});
             },
             .query_with_input => {
                 // TODO: Find test without sensitive info
-                const access = try client.call(services.sts.get_session_token.Request{
+                const call = try client.call(services.sts.get_session_token.Request{
                     .duration_seconds = 900,
                 }, options);
-                defer access.deinit();
-                std.log.info("access key: {s}", .{access.response.credentials.?.access_key_id});
+                defer call.deinit();
+                std.log.info("call key: {s}", .{call.response.credentials.?.access_key_id});
             },
             .json_1_0_query_with_input => {
-                const tables = try client.call(services.dynamo_db.list_tables.Request{
+                const call = try client.call(services.dynamo_db.list_tables.Request{
                     .limit = 1,
                 }, options);
-                defer tables.deinit();
-                std.log.info("request id: {s}", .{tables.response_metadata.request_id});
-                std.log.info("account has tables: {b}", .{tables.response.table_names.?.len > 0});
+                defer call.deinit();
+                std.log.info("request id: {s}", .{call.response_metadata.request_id});
+                std.log.info("account has call: {b}", .{call.response.table_names.?.len > 0});
             },
             .json_1_0_query_no_input => {
-                const limits = try client.call(services.dynamo_db.describe_limits.Request{}, options);
-                defer limits.deinit();
-                std.log.info("account read capacity limit: {d}", .{limits.response.account_max_read_capacity_units});
+                const call = try client.call(services.dynamo_db.describe_limits.Request{}, options);
+                defer call.deinit();
+                std.log.info("account read capacity limit: {d}", .{call.response.account_max_read_capacity_units});
             },
             .json_1_1_query_with_input => {
-                const clusters = try client.call(services.ecs.list_clusters.Request{
+                const call = try client.call(services.ecs.list_clusters.Request{
                     .max_results = 1,
                 }, options);
-                defer clusters.deinit();
-                std.log.info("request id: {s}", .{clusters.response_metadata.request_id});
-                std.log.info("account has clusters: {b}", .{clusters.response.cluster_arns.?.len > 0});
+                defer call.deinit();
+                std.log.info("request id: {s}", .{call.response_metadata.request_id});
+                std.log.info("account has call: {b}", .{call.response.cluster_arns.?.len > 0});
             },
             .json_1_1_query_no_input => {
-                const clusters = try client.call(services.ecs.list_clusters.Request{}, options);
-                defer clusters.deinit();
-                std.log.info("request id: {s}", .{clusters.response_metadata.request_id});
-                std.log.info("account has clusters: {b}", .{clusters.response.cluster_arns.?.len > 0});
+                const call = try client.call(services.ecs.list_clusters.Request{}, options);
+                defer call.deinit();
+                std.log.info("request id: {s}", .{call.response_metadata.request_id});
+                std.log.info("account has call: {b}", .{call.response.cluster_arns.?.len > 0});
+            },
+            .rest_json_1_query_with_input => {
+                const call = try client.call(services.lambda.list_functions.Request{
+                    .max_items = 1,
+                }, options);
+                defer call.deinit();
+                std.log.info("request id: {s}", .{call.response_metadata.request_id});
+                std.log.info("account has call: {b}", .{call.response.functions.?.len > 0});
+            },
+            .rest_json_1_query_no_input => {
+                const call = try client.call(services.lambda.list_functions.Request{}, options);
+                defer call.deinit();
+                std.log.info("request id: {s}", .{call.response_metadata.request_id});
+                std.log.info("account has call: {b}", .{call.response.functions.?.len > 0});
             },
             .ec2_query_no_input => {
                 std.log.err("EC2 Test disabled due to compiler bug", .{});
