@@ -485,6 +485,42 @@ test "basic json request serialization" {
         \\}
     , buffer.items);
 }
+test "layer object only" {
+    const TestResponse = struct {
+        arn: ?[]const u8 = null,
+        // uncompressed_code_size: ?i64 = null,
+
+        pub fn jsonFieldNameFor(_: @This(), comptime field_name: []const u8) []const u8 {
+            const mappings = .{
+                .arn = "Arn",
+            };
+            return @field(mappings, field_name);
+        }
+    };
+    const response =
+        \\        {
+        \\          "UncompressedCodeSize": 2,
+        \\          "Arn": "blah"
+        \\        }
+    ;
+    // const response =
+    //     \\        {
+    //     \\          "UncompressedCodeSize": 22599541,
+    //     \\          "Arn": "arn:aws:lambda:us-west-2:550620852718:layer:PollyNotes-lib:4"
+    //     \\        }
+    // ;
+    const allocator = std.testing.allocator;
+    var stream = json.TokenStream.init(response);
+    const parser_options = json.ParseOptions{
+        .allocator = allocator,
+        .allow_camel_case_conversion = true, // new option
+        .allow_snake_case_conversion = true, // new option
+        .allow_unknown_fields = true, // new option. Cannot yet handle non-struct fields though
+        .allow_missing_fields = false, // new option. Cannot yet handle non-struct fields though
+    };
+    const r = try json.parse(TestResponse, &stream, parser_options);
+    json.parseFree(TestResponse, r, parser_options);
+}
 // Use for debugging json responses of specific requests
 // test "dummy request" {
 //     const allocator = std.testing.allocator;

@@ -1136,6 +1136,9 @@ pub const TokenStream = struct {
             return error.UnexpectedEndOfJson;
         }
     }
+    fn stackUsed(self: *TokenStream) u8 {
+        return self.parser.stack_used + if (self.token != null) @as(u8, 1) else 0;
+    }
 };
 
 fn checkNext(p: *TokenStream, id: std.meta.Tag(Token)) !void {
@@ -1532,6 +1535,20 @@ fn snakeCaseComp(field: []const u8, key: []const u8, options: ParseOptions) !boo
 
     return std.mem.eql(u8, comp_field, normalized_key);
 }
+const SkipValueError = error{UnexpectedJsonDepth} || TokenStream.Error;
+
+fn skipValue(tokens: *TokenStream) SkipValueError!void {
+    const original_depth = tokens.stackUsed();
+
+    // Return an error if no value is found
+    _ = try tokens.next();
+    if (tokens.stackUsed() < original_depth) return error.UnexpectedJsonDepth;
+    if (tokens.stackUsed() == original_depth) return;
+
+    while (try tokens.next()) |_| {
+        if (tokens.stackUsed() == original_depth) return;
+    }
+}
 
 fn parseInternal(comptime T: type, token: Token, tokens: *TokenStream, options: ParseOptions) !T {
     switch (@typeInfo(T)) {
@@ -1675,6 +1692,7 @@ fn parseInternal(comptime T: type, token: Token, tokens: *TokenStream, options: 
                             }
                         }
                         if (!found and !options.allow_unknown_fields) return error.UnknownField;
+                        if (!found) try skipValue(tokens);
                     },
                     .ObjectBegin => {
                         if (!options.allow_unknown_fields) return error.UnknownField;
