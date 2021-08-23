@@ -1806,6 +1806,35 @@ fn parseInternal(comptime T: type, token: Token, tokens: *TokenStream, options: 
                                 },
                             }
                         },
+                        .ObjectBegin => {
+                            // We are parsing into a slice, but we have an
+                            // ObjectBegin. This might be ok, iff the type
+                            // follows this pattern: []struct { key: []const u8, value: anytype }
+                            // (could key be anytype?).
+                            if (!isMapPattern(T))
+                                return error.UnexpectedToken;
+                            var arraylist = std.ArrayList(ptrInfo.child).init(allocator);
+                            errdefer {
+                                while (arraylist.popOrNull()) |v| {
+                                    parseFree(ptrInfo.child, v, options);
+                                }
+                                arraylist.deinit();
+                            }
+                            while (true) {
+                                const key = (try tokens.next()) orelse return error.UnexpectedEndOfJson;
+                                switch (key) {
+                                    .ObjectEnd => break,
+                                    else => {},
+                                }
+
+                                try arraylist.ensureCapacity(arraylist.items.len + 1);
+                                const key_val = try parseInternal(try typeForField(ptrInfo.child, "key"), key, tokens, options);
+                                const val = (try tokens.next()) orelse return error.UnexpectedEndOfJson;
+                                const val_val = try parseInternal(try typeForField(ptrInfo.child, "value"), val, tokens, options);
+                                arraylist.appendAssumeCapacity(.{ .key = key_val, .value = val_val });
+                            }
+                            return arraylist.toOwnedSlice();
+                        },
                         else => return error.UnexpectedToken,
                     }
                 },
@@ -1815,6 +1844,40 @@ fn parseInternal(comptime T: type, token: Token, tokens: *TokenStream, options: 
         else => @compileError("Unable to parse into type '" ++ @typeName(T) ++ "'"),
     }
     unreachable;
+}
+
+fn typeForField(comptime T: type, field_name: []const u8) !type {
+    const ti = @typeInfo(T);
+    switch (ti) {
+        .Struct => {
+            inline for (ti.Struct.fields) |field| {
+                if (std.mem.eql(u8, field.name, field_name))
+                    return field.field_type;
+            }
+        },
+        else => return error.TypeIsNotAStruct, // should not hit this
+    }
+    return error.FieldNotFound;
+}
+
+fn isMapPattern(comptime T: type) bool {
+    // We should be getting a type that is a pointer to a slice.
+    // Let's just double check before proceeding
+    const ti = @typeInfo(T);
+    if (ti != .Pointer) return false;
+    if (ti.Pointer.size != .Slice) return false;
+    const ti_child = @typeInfo(ti.Pointer.child);
+    if (ti_child != .Struct) return false;
+    if (ti_child.Struct.fields.len != 2) return false;
+    var key_found = false;
+    var value_found = false;
+    inline for (ti_child.Struct.fields) |field| {
+        if (std.mem.eql(u8, "key", field.name))
+            key_found = true;
+        if (std.mem.eql(u8, "value", field.name))
+            value_found = true;
+    }
+    return key_found and value_found;
 }
 
 pub fn parse(comptime T: type, tokens: *TokenStream, options: ParseOptions) !T {
@@ -1920,6 +1983,15 @@ test "parse into that allocates a slice" {
         defer parseFree([]u8, r, options);
         try testing.expectEqualSlices(u8, "with\\escape", r);
     }
+}
+
+test "parse into that uses a map pattern" {
+    const options = ParseOptions{ .allocator = testing.allocator };
+    const Map = []struct { key: []const u8, value: []const u8 };
+    const r = try parse(Map, &TokenStream.init("{\"foo\": \"bar\"}"), options);
+    defer parseFree(Map, r, options);
+    try testing.expectEqualSlices(u8, "foo", r[0].key);
+    try testing.expectEqualSlices(u8, "bar", r[0].value);
 }
 
 test "parse into tagged union" {
