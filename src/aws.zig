@@ -59,20 +59,20 @@ pub fn Request(comptime action: anytype) type {
         const FullResponseType = FullResponse(action);
         const Self = @This();
         const action = action;
+        const meta_info = ActionRequest.metaInfo();
+        const service_meta = meta_info.service_metadata;
 
         pub fn call(request: ActionRequest, options: Options) !FullResponseType {
             // every codegenned request object includes a metaInfo function to get
             // pointers to service and action
-            const meta_info = ActionRequest.metaInfo();
-            const service_meta = meta_info.service_metadata;
 
             log.debug("call: prefix {s}, sigv4 {s}, version {s}, action {s}", .{
-                service_meta.endpoint_prefix,
-                service_meta.sigv4_name,
-                service_meta.version,
+                Self.service_meta.endpoint_prefix,
+                Self.service_meta.sigv4_name,
+                Self.service_meta.version,
                 action.action_name,
             });
-            log.debug("proto: {s}", .{service_meta.aws_protocol});
+            log.debug("proto: {s}", .{Self.service_meta.aws_protocol});
 
             // It seems as though there are 3 major branches of the 6 protocols.
             // 1. query/ec2_query, which are identical until you get to complex
@@ -82,9 +82,9 @@ pub fn Request(comptime action: anytype) type {
             //    for empty body serialization), but differ in error handling.
             //    We're not doing a lot of error handling here, though.
             // 3. rest_xml: This is a one-off for S3, never used since
-            switch (service_meta.aws_protocol) {
+            switch (Self.service_meta.aws_protocol) {
                 .query => return Self.callQuery(request, options),
-                // .query, .ec2_query => return self.callQuery(request, service_meta, action, options),
+                // .query, .ec2_query => return self.callQuery(request, Self.service_meta, action, options),
                 .json_1_0, .json_1_1 => return Self.callJson(request, options),
                 .rest_json_1 => return Self.callRestJson(request, options),
                 .ec2_query, .rest_xml => @compileError("XML responses may be blocked on a zig compiler bug scheduled to be fixed in 0.9.0"),
@@ -126,10 +126,9 @@ pub fn Request(comptime action: anytype) type {
 
         /// Calls using one of the json protocols (json_1_0, json_1_1)
         fn callJson(request: ActionRequest, options: Options) !FullResponseType {
-            const service_meta = ActionRequest.metaInfo().service_metadata;
             const target =
                 try std.fmt.allocPrint(options.client.allocator, "{s}.{s}", .{
-                service_meta.name,
+                Self.service_meta.name,
                 action.action_name,
             });
             defer options.client.allocator.free(target);
@@ -151,7 +150,7 @@ pub fn Request(comptime action: anytype) type {
             try json.stringify(request, .{ .whitespace = .{} }, buffer.writer());
 
             var content_type: []const u8 = undefined;
-            switch (service_meta.aws_protocol) {
+            switch (Self.service_meta.aws_protocol) {
                 .json_1_0 => content_type = "application/x-amz-json-1.0",
                 .json_1_1 => content_type = "application/x-amz-json-1.1",
                 else => unreachable,
@@ -179,20 +178,19 @@ pub fn Request(comptime action: anytype) type {
             });
             const continuation = if (buffer.items.len > 0) "&" else "";
 
-            const service_meta = ActionRequest.metaInfo().service_metadata;
-            const query = if (service_meta.aws_protocol == .query)
+            const query = if (Self.service_meta.aws_protocol == .query)
                 try std.fmt.allocPrint(options.client.allocator, "", .{})
             else // EC2
                 try std.fmt.allocPrint(options.client.allocator, "?Action={s}&Version={s}", .{
                     action.action_name,
-                    service_meta.version,
+                    Self.service_meta.version,
                 });
             defer options.client.allocator.free(query);
 
-            const body = if (service_meta.aws_protocol == .query)
+            const body = if (Self.service_meta.aws_protocol == .query)
                 try std.fmt.allocPrint(options.client.allocator, "Action={s}&Version={s}{s}{s}", .{
                     action.action_name,
-                    service_meta.version,
+                    Self.service_meta.version,
                     continuation,
                     buffer.items,
                 })
@@ -207,14 +205,13 @@ pub fn Request(comptime action: anytype) type {
         }
 
         fn callAws(aws_request: awshttp.HttpRequest, options: Options) !FullResponseType {
-            const service_meta = ActionRequest.metaInfo().service_metadata;
             const response = try options.client.aws_http.callApi(
-                service_meta.endpoint_prefix,
+                Self.service_meta.endpoint_prefix,
                 aws_request,
                 .{
                     .region = options.region,
                     .dualstack = options.dualstack,
-                    .sigv4_service_name = service_meta.sigv4_name,
+                    .sigv4_service_name = Self.service_meta.sigv4_name,
                 },
             );
             defer response.deinit();
@@ -258,7 +255,7 @@ pub fn Request(comptime action: anytype) type {
             };
 
             // const SResponse = ServerResponse(request);
-            const SResponse = if (service_meta.aws_protocol != .query and service_meta.aws_protocol != .ec2_query)
+            const SResponse = if (Self.service_meta.aws_protocol != .query and Self.service_meta.aws_protocol != .ec2_query)
                 action.Response
             else
                 ServerResponse(action);
@@ -279,7 +276,7 @@ pub fn Request(comptime action: anytype) type {
                 return e;
             };
 
-            if (service_meta.aws_protocol != .query and service_meta.aws_protocol != .ec2_query) {
+            if (Self.service_meta.aws_protocol != .query and Self.service_meta.aws_protocol != .ec2_query) {
                 var request_id: []u8 = undefined;
                 var found = false;
                 for (response.headers) |h| {
