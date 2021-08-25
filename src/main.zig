@@ -33,6 +33,7 @@ const Tests = enum {
     json_1_1_query_no_input,
     rest_json_1_query_no_input,
     rest_json_1_query_with_input,
+    rest_json_1_work_with_lambda,
 };
 
 pub fn main() anyerror!void {
@@ -64,11 +65,12 @@ pub fn main() anyerror!void {
             try tests.append(@field(Tests, f.name));
     }
 
+    std.log.info("Start\n", .{});
+    var client = aws.Client.init(allocator);
     const options = aws.Options{
         .region = "us-west-2",
+        .client = client,
     };
-    std.log.info("Start\n", .{});
-    var client = aws.Aws.init(allocator);
     defer client.deinit();
 
     const services = aws.Services(.{ .sts, .ec2, .dynamo_db, .ecs, .lambda }){};
@@ -77,7 +79,8 @@ pub fn main() anyerror!void {
         std.log.info("===== Start Test: {s} =====", .{@tagName(t)});
         switch (t) {
             .query_no_input => {
-                const call = try client.call(services.sts.get_caller_identity.Request{}, options);
+                const call = try aws.Request(services.sts.get_caller_identity).call(.{}, options);
+                // const call = try client.call(services.sts.get_caller_identity.Request{}, options);
                 defer call.deinit();
                 std.log.info("arn: {s}", .{call.response.arn});
                 std.log.info("id: {s}", .{call.response.user_id});
@@ -90,7 +93,7 @@ pub fn main() anyerror!void {
                     .duration_seconds = 900,
                 }, options);
                 defer call.deinit();
-                std.log.info("call key: {s}", .{call.response.credentials.?.access_key_id});
+                std.log.info("access key: {s}", .{call.response.credentials.?.access_key_id});
             },
             .json_1_0_query_with_input => {
                 const call = try client.call(services.dynamo_db.list_tables.Request{
@@ -98,7 +101,7 @@ pub fn main() anyerror!void {
                 }, options);
                 defer call.deinit();
                 std.log.info("request id: {s}", .{call.response_metadata.request_id});
-                std.log.info("account has call: {b}", .{call.response.table_names.?.len > 0});
+                std.log.info("account has tables: {b}", .{call.response.table_names.?.len > 0});
             },
             .json_1_0_query_no_input => {
                 const call = try client.call(services.dynamo_db.describe_limits.Request{}, options);
@@ -111,13 +114,13 @@ pub fn main() anyerror!void {
                 }, options);
                 defer call.deinit();
                 std.log.info("request id: {s}", .{call.response_metadata.request_id});
-                std.log.info("account has call: {b}", .{call.response.cluster_arns.?.len > 0});
+                std.log.info("account has clusters: {b}", .{call.response.cluster_arns.?.len > 0});
             },
             .json_1_1_query_no_input => {
                 const call = try client.call(services.ecs.list_clusters.Request{}, options);
                 defer call.deinit();
                 std.log.info("request id: {s}", .{call.response_metadata.request_id});
-                std.log.info("account has call: {b}", .{call.response.cluster_arns.?.len > 0});
+                std.log.info("account has clusters: {b}", .{call.response.cluster_arns.?.len > 0});
             },
             .rest_json_1_query_with_input => {
                 const call = try client.call(services.lambda.list_functions.Request{
@@ -125,13 +128,40 @@ pub fn main() anyerror!void {
                 }, options);
                 defer call.deinit();
                 std.log.info("request id: {s}", .{call.response_metadata.request_id});
-                std.log.info("account has call: {b}", .{call.response.functions.?.len > 0});
+                std.log.info("account has functions: {b}", .{call.response.functions.?.len > 0});
             },
             .rest_json_1_query_no_input => {
                 const call = try client.call(services.lambda.list_functions.Request{}, options);
                 defer call.deinit();
                 std.log.info("request id: {s}", .{call.response_metadata.request_id});
-                std.log.info("account has call: {b}", .{call.response.functions.?.len > 0});
+                std.log.info("account has functions: {b}", .{call.response.functions.?.len > 0});
+            },
+            .rest_json_1_work_with_lambda => {
+                const call = try client.call(services.lambda.list_functions.Request{}, options);
+                defer call.deinit();
+                std.log.info("list request id: {s}", .{call.response_metadata.request_id});
+                if (call.response.functions) |fns| {
+                    if (fns.len > 0) {
+                        const func = fns[0];
+                        const arn = func.function_arn.?;
+                        var tags = try std.ArrayList(@typeInfo(try typeForField(services.lambda.tag_resource.Request, "tags")).Pointer.child).initCapacity(allocator, 1);
+                        defer tags.deinit();
+                        tags.appendAssumeCapacity(.{ .key = "Foo", .value = "Bar" });
+                        const req = services.lambda.tag_resource.Request{ .resource = arn, .tags = tags.items };
+                        const addtag = try aws.Request(services.lambda.tag_resource).call(req, options);
+                        // const addtag = try client.call(services.lambda.tag_resource.Request{ .resource = arn, .tags = &.{.{ .key = "Foo", .value = "Bar" }} }, options);
+                        std.log.info("add tag request id: {s}", .{addtag.response_metadata.request_id});
+                        var tag_keys = try std.ArrayList([]const u8).initCapacity(allocator, 1);
+                        defer tag_keys.deinit();
+                        tag_keys.appendAssumeCapacity("Foo");
+                        const deletetag = try aws.Request(services.lambda.untag_resource).call(.{ .tag_keys = tag_keys.items, .resource = arn }, options);
+                        std.log.info("delete tag request id: {s}", .{deletetag.response_metadata.request_id});
+                    } else {
+                        std.log.err("no functions to work with", .{});
+                    }
+                } else {
+                    std.log.err("no functions to work with", .{});
+                }
             },
             .ec2_query_no_input => {
                 std.log.err("EC2 Test disabled due to compiler bug", .{});
@@ -154,6 +184,19 @@ pub fn main() anyerror!void {
     // }
 
     std.log.info("===== Tests complete =====", .{});
+}
+fn typeForField(comptime T: type, field_name: []const u8) !type {
+    const ti = @typeInfo(T);
+    switch (ti) {
+        .Struct => {
+            inline for (ti.Struct.fields) |field| {
+                if (std.mem.eql(u8, field.name, field_name))
+                    return field.field_type;
+            }
+        },
+        else => return error.TypeIsNotAStruct, // should not hit this
+    }
+    return error.FieldNotFound;
 }
 
 // TODO: Move into json.zig
