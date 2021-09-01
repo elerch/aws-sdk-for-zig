@@ -410,7 +410,7 @@ fn buildQuery(allocator: *std.mem.Allocator, request: anytype) ![]const u8 {
     defer buffer.deinit();
     var has_begun = false;
     const Req = @TypeOf(request);
-    if (std.meta.fieldIndex(Req, "http_query") == null)
+    if (declaration(Req, "http_query") == null)
         return buffer.toOwnedSlice();
     const query_arguments = Req.http_query;
     inline for (@typeInfo(@TypeOf(query_arguments)).Struct.fields) |arg| {
@@ -426,6 +426,14 @@ fn buildQuery(allocator: *std.mem.Allocator, request: anytype) ![]const u8 {
         }
     }
     return buffer.toOwnedSlice();
+}
+
+fn declaration(comptime T: type, name: []const u8) ?std.builtin.TypeInfo.Declaration {
+    for (std.meta.declarations(T)) |decl| {
+        if (std.mem.eql(u8, name, decl.name))
+            return decl;
+    }
+    return null;
 }
 
 fn addQueryArg(key: []const u8, value: anytype, writer: anytype, start: bool) !void {
