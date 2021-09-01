@@ -144,6 +144,7 @@ pub fn main() anyerror!void {
                     if (fns.len > 0) {
                         const func = fns[0];
                         const arn = func.function_arn.?;
+                        // This is a bit ugly. Maybe a helper function in the library would help?
                         var tags = try std.ArrayList(@typeInfo(try typeForField(services.lambda.tag_resource.Request, "tags")).Pointer.child).initCapacity(allocator, 1);
                         defer tags.deinit();
                         tags.appendAssumeCapacity(.{ .key = "Foo", .value = "Bar" });
@@ -151,10 +152,8 @@ pub fn main() anyerror!void {
                         const addtag = try aws.Request(services.lambda.tag_resource).call(req, options);
                         // const addtag = try client.call(services.lambda.tag_resource.Request{ .resource = arn, .tags = &.{.{ .key = "Foo", .value = "Bar" }} }, options);
                         std.log.info("add tag request id: {s}", .{addtag.response_metadata.request_id});
-                        var tag_keys = try std.ArrayList([]const u8).initCapacity(allocator, 1);
-                        defer tag_keys.deinit();
-                        tag_keys.appendAssumeCapacity("Foo");
-                        const deletetag = try aws.Request(services.lambda.untag_resource).call(.{ .tag_keys = tag_keys.items, .resource = arn }, options);
+                        var keys = [_][]const u8{"Foo"}; // Would love to have a way to express this without burning a var here
+                        const deletetag = try aws.Request(services.lambda.untag_resource).call(.{ .tag_keys = keys[0..], .resource = arn }, options);
                         std.log.info("delete tag request id: {s}", .{deletetag.response_metadata.request_id});
                     } else {
                         std.log.err("no functions to work with", .{});
