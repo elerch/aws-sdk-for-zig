@@ -46,8 +46,7 @@ test "sts includes get_caller_identity" {
 }
 test "can get service and action name from request" {
     // get request object. This call doesn't have parameters
-    const req = services.sts.get_caller_identity.Request{};
-    const metadata = req.metaInfo();
+    const metadata = services.sts.get_caller_identity.Request.metaInfo();
     try expectEqualStrings("2011-06-15", metadata.service_metadata.version);
 }
 test "can filter services" {
