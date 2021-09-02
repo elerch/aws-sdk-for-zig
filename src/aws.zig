@@ -100,12 +100,14 @@ pub fn Request(comptime action: anytype) type {
                 .path = Action.http_config.uri,
             };
 
-            log.debug("Rest JSON v1 method: {s}", .{aws_request.method});
-            log.debug("Rest JSON v1 success code: {d}", .{Action.http_config.success_code});
-            log.debug("Rest JSON v1 raw uri: {s}", .{Action.http_config.uri});
-
+            log.debug("Rest JSON v1 method: '{s}'", .{aws_request.method});
+            log.debug("Rest JSON v1 success code: '{d}'", .{Action.http_config.success_code});
+            log.debug("Rest JSON v1 raw uri: '{s}'", .{Action.http_config.uri});
+            aws_request.path = Action.http_config.uri;
+            defer options.client.allocator.free(aws_request.path);
+            log.debug("Rest JSON v1 processed uri: '{s}'", .{aws_request.path});
             aws_request.query = try buildQuery(options.client.allocator, request);
-            log.debug("Rest JSON v1 query: {s}", .{aws_request.query});
+            log.debug("Rest JSON v1 query: '{s}'", .{aws_request.query});
             defer options.client.allocator.free(aws_request.query);
             // We don't know if we need a body...guessing here, this should cover most
             var buffer = std.ArrayList(u8).init(options.client.allocator);
@@ -115,6 +117,7 @@ pub fn Request(comptime action: anytype) type {
             if (std.mem.eql(u8, "PUT", aws_request.method) or std.mem.eql(u8, "POST", aws_request.method)) {
                 try json.stringify(request, .{ .whitespace = .{} }, buffer.writer());
             }
+            aws_request.body = buffer.items;
 
             return try Self.callAws(aws_request, .{
                 .success_http_code = Action.http_config.success_code,
@@ -244,7 +247,10 @@ pub fn Request(comptime action: anytype) type {
             // TODO: Handle XML
             if (!isJson) return error.XmlUnimplemented;
 
-            var stream = json.TokenStream.init(response.body);
+            const SResponse = if (Self.service_meta.aws_protocol != .query and Self.service_meta.aws_protocol != .ec2_query)
+                action.Response
+            else
+                ServerResponse(action);
 
             const parser_options = json.ParseOptions{
                 .allocator = options.client.allocator,
@@ -253,12 +259,18 @@ pub fn Request(comptime action: anytype) type {
                 .allow_unknown_fields = true, // new option. Cannot yet handle non-struct fields though
                 .allow_missing_fields = false, // new option. Cannot yet handle non-struct fields though
             };
+            if (std.meta.fields(SResponse).len == 0) // We don't care about the body if there are no fields
+                // Do we care if an unexpected body comes in?
+                return FullResponseType{
+                    .response = .{},
+                    .response_metadata = .{
+                        .request_id = try requestIdFromHeaders(aws_request, response, options),
+                    },
+                    .parser_options = parser_options,
+                    .raw_parsed = .{ .raw = .{} },
+                };
 
-            // const SResponse = ServerResponse(request);
-            const SResponse = if (Self.service_meta.aws_protocol != .query and Self.service_meta.aws_protocol != .ec2_query)
-                action.Response
-            else
-                ServerResponse(action);
+            var stream = json.TokenStream.init(response.body);
 
             const parsed_response = json.parse(SResponse, &stream, parser_options) catch |e| {
                 log.err(
@@ -277,23 +289,10 @@ pub fn Request(comptime action: anytype) type {
             };
 
             if (Self.service_meta.aws_protocol != .query and Self.service_meta.aws_protocol != .ec2_query) {
-                var request_id: []u8 = undefined;
-                var found = false;
-                for (response.headers) |h| {
-                    if (std.ascii.eqlIgnoreCase(h.name, "X-Amzn-RequestId")) {
-                        found = true;
-                        request_id = try std.fmt.allocPrint(options.client.allocator, "{s}", .{h.value}); // will be freed in FullR.deinit()
-                    }
-                }
-                if (!found) {
-                    try reportTraffic(options.client.allocator, "Request ID not found", aws_request, response, log.err);
-                    return error.RequestIdNotFound;
-                }
-
                 return FullResponseType{
                     .response = parsed_response,
                     .response_metadata = .{
-                        .request_id = request_id,
+                        .request_id = try requestIdFromHeaders(aws_request, response, options),
                     },
                     .parser_options = parser_options,
                     .raw_parsed = .{ .raw = parsed_response },
@@ -322,6 +321,21 @@ pub fn Request(comptime action: anytype) type {
     };
 }
 
+fn requestIdFromHeaders(request: awshttp.HttpRequest, response: awshttp.HttpResult, options: Options) ![]u8 {
+    var request_id: []u8 = undefined;
+    var found = false;
+    for (response.headers) |h| {
+        if (std.ascii.eqlIgnoreCase(h.name, "X-Amzn-RequestId")) {
+            found = true;
+            request_id = try std.fmt.allocPrint(options.client.allocator, "{s}", .{h.value}); // will be freed in FullR.deinit()
+        }
+    }
+    if (!found) {
+        try reportTraffic(options.client.allocator, "Request ID not found", request, response, log.err);
+        return error.RequestIdNotFound;
+    }
+    return request_id;
+}
 fn ServerResponse(comptime action: anytype) type {
     const T = action.Response;
     // NOTE: The non-standard capitalization here is used as a performance
