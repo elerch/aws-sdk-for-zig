@@ -1324,6 +1324,14 @@ pub const Value = union(enum) {
     }
 };
 
+pub fn dump(value: anytype) void {
+    var held = std.debug.getStderrMutex().acquire();
+    defer held.release();
+
+    const stderr = std.io.getStdErr().writer();
+    std.json.stringify(value, std.json.StringifyOptions{ .whitespace = null }, stderr) catch return;
+}
+
 test "Value.jsonStringify" {
     {
         var buffer: [10]u8 = undefined;
