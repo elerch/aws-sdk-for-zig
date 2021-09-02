@@ -580,9 +580,11 @@ pub const AwsHttp = struct {
             .service = c.aws_byte_cursor_from_c_str(@ptrCast([*c]const u8, signing_service)),
             .should_sign_header = null,
             .should_sign_header_ud = null,
+            // TODO: S3 does not double uri encode. Also not sure why normalizing
+            //       the path here is a flag - seems like it should always do this?
             .flags = c.bitfield_workaround_aws_signing_config_aws_flags{
-                .use_double_uri_encode = 0,
-                .should_normalize_uri_path = 0,
+                .use_double_uri_encode = 1,
+                .should_normalize_uri_path = 1,
                 .omit_session_token = 1,
             },
             .signed_body_value = c.aws_byte_cursor_from_c_str(""),
