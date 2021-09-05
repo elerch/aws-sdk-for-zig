@@ -1410,7 +1410,7 @@ fn parsedEqual(a: anytype, b: @TypeOf(a)) bool {
             if (a == null or b == null) return false;
             return parsedEqual(a.?, b.?);
         },
-        .Union => {
+        .Union => |info| {
             if (info.tag_type) |UnionTag| {
                 const tag_a = std.meta.activeTag(a);
                 const tag_b = std.meta.activeTag(b);
@@ -2866,20 +2866,26 @@ pub fn stringify(
                     try out_stream.writeByte('\n');
                     try child_whitespace.outputIndent(out_stream);
                 }
-                if (comptime std.meta.trait.hasFn("jsonFieldNameFor")(T)) {
-                    const name = value.jsonFieldNameFor(Field.name);
-                    try stringify(name, options, out_stream);
-                } else {
-                    try stringify(Field.name, options, out_stream);
-                }
+                var field_written = false;
+                if (comptime std.meta.trait.hasFn("jsonStringifyField")(T))
+                    field_written = try value.jsonStringifyField(Field.name, child_options, out_stream);
 
-                try out_stream.writeByte(':');
-                if (child_options.whitespace) |child_whitespace| {
-                    if (child_whitespace.separator) {
-                        try out_stream.writeByte(' ');
+                if (!field_written) {
+                    if (comptime std.meta.trait.hasFn("jsonFieldNameFor")(T)) {
+                        const name = value.jsonFieldNameFor(Field.name);
+                        try stringify(name, options, out_stream);
+                    } else {
+                        try stringify(Field.name, options, out_stream);
                     }
+
+                    try out_stream.writeByte(':');
+                    if (child_options.whitespace) |child_whitespace| {
+                        if (child_whitespace.separator) {
+                            try out_stream.writeByte(' ');
+                        }
+                    }
+                    try stringify(@field(value, Field.name), child_options, out_stream);
                 }
-                try stringify(@field(value, Field.name), child_options, out_stream);
             }
             if (field_output) {
                 if (options.whitespace) |whitespace| {
