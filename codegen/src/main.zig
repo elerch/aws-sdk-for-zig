@@ -1,6 +1,7 @@
 const std = @import("std");
 const smithy = @import("smithy");
 const snake = @import("snake.zig");
+const json_zig = @embedFile("json.zig");
 
 pub fn main() anyerror!void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -10,6 +11,9 @@ pub fn main() anyerror!void {
     const args = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, args);
     const stdout = std.io.getStdOut().writer();
+    const json_file = try std.fs.cwd().createFile("json.zig", .{});
+    defer json_file.close();
+    try json_file.writer().writeAll(json_zig);
     const manifest_file = try std.fs.cwd().createFile("service_manifest.zig", .{});
     defer manifest_file.close();
     const manifest = manifest_file.writer();
@@ -42,6 +46,8 @@ fn processFile(arg: []const u8, stdout: anytype, manifest: anytype) !void {
     file = try std.fs.cwd().createFile(filename, .{ .truncate = true });
     errdefer file.close();
     writer = &file.writer();
+    _ = try writer.write("const std = @import(\"std\");\n");
+    _ = try writer.write("const serializeMap = @import(\"json.zig\").serializeMap;\n");
     _ = try writer.write("const smithy = @import(\"smithy\");\n\n");
     std.log.info("Processing file: {s}", .{arg});
     const service_names = generateServicesForFilePath(allocator, ";", arg, writer) catch |err| {
