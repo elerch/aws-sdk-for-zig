@@ -103,7 +103,7 @@ pub fn Request(comptime action: anytype) type {
             log.debug("Rest JSON v1 method: '{s}'", .{aws_request.method});
             log.debug("Rest JSON v1 success code: '{d}'", .{Action.http_config.success_code});
             log.debug("Rest JSON v1 raw uri: '{s}'", .{Action.http_config.uri});
-            aws_request.path = Action.http_config.uri;
+            aws_request.path = try buildPath(options.client.allocator, Action.http_config.uri, ActionRequest, request);
             defer options.client.allocator.free(aws_request.path);
             log.debug("Rest JSON v1 processed uri: '{s}'", .{aws_request.path});
             aws_request.query = try buildQuery(options.client.allocator, request);
@@ -412,6 +412,80 @@ fn queryFieldTransformer(field_name: []const u8, encoding_options: url.EncodingO
     return try case.snakeToPascal(encoding_options.allocator.?, field_name);
 }
 
+fn buildPath(allocator: *std.mem.Allocator, raw_uri: []const u8, comptime ActionRequest: type, request: anytype) ![]const u8 {
+    var buffer = try std.ArrayList(u8).initCapacity(allocator, raw_uri.len);
+    // const writer = buffer.writer();
+    defer buffer.deinit();
+    var in_var = false;
+    var start: u64 = 0;
+    for (raw_uri) |c, inx| {
+        switch (c) {
+            '{' => {
+                in_var = true;
+                start = inx + 1;
+            },
+            '}' => {
+                in_var = false;
+                const replacement_var = raw_uri[start..inx];
+                inline for (std.meta.fields(ActionRequest)) |field| {
+                    if (std.mem.eql(u8, request.jsonFieldNameFor(field.name), replacement_var)) {
+                        var replacement_buffer = try std.ArrayList(u8).initCapacity(allocator, raw_uri.len);
+                        defer replacement_buffer.deinit();
+                        var encoded_buffer = try std.ArrayList(u8).initCapacity(allocator, raw_uri.len);
+                        defer encoded_buffer.deinit();
+                        const replacement_writer = replacement_buffer.writer();
+                        // std.mem.replacementSize
+                        try json.stringify(
+                            @field(request, field.name),
+                            .{},
+                            replacement_writer,
+                        );
+                        const trimmed_replacement_val = std.mem.trim(u8, replacement_buffer.items, "\"");
+                        try uriEncode(trimmed_replacement_val, encoded_buffer.writer());
+                        try buffer.appendSlice(encoded_buffer.items);
+                    }
+                }
+            },
+            else => if (!in_var) {
+                try buffer.append(c);
+            } else {},
+        }
+    }
+    return buffer.toOwnedSlice();
+}
+
+fn uriEncode(input: []const u8, writer: anytype) !void {
+    for (input) |c|
+        try uriEncodeByte(c, writer);
+}
+
+fn uriEncodeByte(char: u8, writer: anytype) !void {
+    switch (char) {
+        '!' => _ = try writer.write("%21"),
+        '#' => _ = try writer.write("%23"),
+        '$' => _ = try writer.write("%24"),
+        '&' => _ = try writer.write("%26"),
+        '\'' => _ = try writer.write("%27"),
+        '(' => _ = try writer.write("%28"),
+        ')' => _ = try writer.write("%29"),
+        '*' => _ = try writer.write("%2A"),
+        '+' => _ = try writer.write("%2B"),
+        ',' => _ = try writer.write("%2C"),
+        '/' => _ = try writer.write("%2F"),
+        ':' => _ = try writer.write("%3A"),
+        ';' => _ = try writer.write("%3B"),
+        '=' => _ = try writer.write("%3D"),
+        '?' => _ = try writer.write("%3F"),
+        '@' => _ = try writer.write("%40"),
+        '[' => _ = try writer.write("%5B"),
+        ']' => _ = try writer.write("%5D"),
+        '%' => _ = try writer.write("%25"),
+        else => {
+            _ = try writer.writeByte(char);
+        },
+    }
+}
+
 fn buildQuery(allocator: *std.mem.Allocator, request: anytype) ![]const u8 {
     // query should look something like this:
     // pub const http_query = .{
@@ -422,22 +496,15 @@ fn buildQuery(allocator: *std.mem.Allocator, request: anytype) ![]const u8 {
     var buffer = std.ArrayList(u8).init(allocator);
     const writer = buffer.writer();
     defer buffer.deinit();
-    var has_begun = false;
+    var prefix = "?";
     const Req = @TypeOf(request);
     if (declaration(Req, "http_query") == null)
         return buffer.toOwnedSlice();
     const query_arguments = Req.http_query;
     inline for (@typeInfo(@TypeOf(query_arguments)).Struct.fields) |arg| {
         const val = @field(request, arg.name);
-        if (@typeInfo(@TypeOf(val)) == .Optional) {
-            if (val) |v| {
-                try addQueryArg(@field(query_arguments, arg.name), v, writer, !has_begun);
-                has_begun = true;
-            }
-        } else {
-            try addQueryArg(@field(query_arguments, arg.name), val, writer, !has_begun);
-            has_begun = true;
-        }
+        if (try addQueryArg(arg.field_type, prefix, @field(query_arguments, arg.name), val, writer))
+            prefix = "&";
     }
     return buffer.toOwnedSlice();
 }
@@ -450,15 +517,103 @@ fn declaration(comptime T: type, name: []const u8) ?std.builtin.TypeInfo.Declara
     return null;
 }
 
-fn addQueryArg(key: []const u8, value: anytype, writer: anytype, start: bool) !void {
-    if (start)
-        _ = try writer.write("?")
-    else
-        _ = try writer.write("&");
-    // TODO: url escaping
-    try writer.print("{s}=", .{key});
-    try json.stringify(value, .{}, writer);
+fn addQueryArg(comptime ValueType: type, prefix: []const u8, key: []const u8, value: anytype, writer: anytype) !bool {
+    switch (@typeInfo(@TypeOf(value))) {
+        .Optional => {
+            if (value) |v|
+                return try addQueryArg(ValueType, prefix, key, v, writer);
+            return false;
+        },
+        // if this is a pointer, we want to make sure it is more than just a string
+        .Pointer => |ptr| {
+            if (ptr.child == u8 or ptr.size != .Slice) {
+                // This is just a string
+                return try addBasicQueryArg(prefix, key, value, writer);
+            }
+            var p = prefix;
+            for (value) |li| {
+                if (try addQueryArg(ValueType, p, key, li, writer))
+                    p = "&";
+            }
+            return std.mem.eql(u8, "&", p);
+        },
+        .Array => |arr| {
+            if (arr.child == u8)
+                return try addBasicQueryArg(prefix, key, value, writer);
+            var p = prefix;
+            for (value) |li| {
+                if (try addQueryArg(ValueType, p, key, li, writer))
+                    p = "&";
+            }
+            return std.mem.eql(u8, "&", p);
+        },
+        else => {
+            return try addBasicQueryArg(prefix, key, value, writer);
+        },
+    }
 }
+fn addBasicQueryArg(prefix: []const u8, key: []const u8, value: anytype, writer: anytype) !bool {
+    _ = try writer.write(prefix);
+    // TODO: url escaping
+    try uriEncode(key, writer);
+    _ = try writer.write("=");
+    try json.stringify(value, .{}, ignoringWriter(uriEncodingWriter(writer).writer(), '"').writer());
+    return true;
+}
+pub fn uriEncodingWriter(child_stream: anytype) UriEncodingWriter(@TypeOf(child_stream)) {
+    return .{ .child_stream = child_stream };
+}
+
+/// A Writer that ignores a character
+pub fn UriEncodingWriter(comptime WriterType: type) type {
+    return struct {
+        child_stream: WriterType,
+
+        pub const Error = WriterType.Error;
+        pub const Writer = std.io.Writer(*Self, Error, write);
+
+        const Self = @This();
+
+        pub fn write(self: *Self, bytes: []const u8) Error!usize {
+            try uriEncode(bytes, self.child_stream);
+            return bytes.len; // We say that all bytes are "written", even if they're not, as caller may be retrying
+        }
+
+        pub fn writer(self: *Self) Writer {
+            return .{ .context = self };
+        }
+    };
+}
+
+pub fn ignoringWriter(child_stream: anytype, ignore: u8) IgnoringWriter(@TypeOf(child_stream)) {
+    return .{ .child_stream = child_stream, .ignore = ignore };
+}
+
+/// A Writer that ignores a character
+pub fn IgnoringWriter(comptime WriterType: type) type {
+    return struct {
+        child_stream: WriterType,
+        ignore: u8,
+
+        pub const Error = WriterType.Error;
+        pub const Writer = std.io.Writer(*Self, Error, write);
+
+        const Self = @This();
+
+        pub fn write(self: *Self, bytes: []const u8) Error!usize {
+            for (bytes) |b| {
+                if (b != self.ignore)
+                    try self.child_stream.writeByte(b);
+            }
+            return bytes.len; // We say that all bytes are "written", even if they're not, as caller may be retrying
+        }
+
+        pub fn writer(self: *Self) Writer {
+            return .{ .context = self };
+        }
+    };
+}
+
 fn reportTraffic(allocator: *std.mem.Allocator, info: []const u8, request: awshttp.HttpRequest, response: awshttp.HttpResult, comptime reporter: fn (comptime []const u8, anytype) void) !void {
     var msg = std.ArrayList(u8).init(allocator);
     defer msg.deinit();
@@ -486,6 +641,42 @@ fn reportTraffic(allocator: *std.mem.Allocator, info: []const u8, request: awsht
     reporter("{s}\n", .{msg.items});
 }
 
+// TODO: Where does this belong really?
+fn typeForField(comptime T: type, field_name: []const u8) !type {
+    const ti = @typeInfo(T);
+    switch (ti) {
+        .Struct => {
+            inline for (ti.Struct.fields) |field| {
+                if (std.mem.eql(u8, field.name, field_name))
+                    return field.field_type;
+            }
+        },
+        else => return error.TypeIsNotAStruct, // should not hit this
+    }
+    return error.FieldNotFound;
+}
+
+test "custom serialization for map objects" {
+    const allocator = std.testing.allocator;
+    var buffer = std.ArrayList(u8).init(allocator);
+    defer buffer.deinit();
+    var tags = try std.ArrayList(@typeInfo(try typeForField(services.lambda.tag_resource.Request, "tags")).Pointer.child).initCapacity(allocator, 2);
+    defer tags.deinit();
+    tags.appendAssumeCapacity(.{ .key = "Foo", .value = "Bar" });
+    tags.appendAssumeCapacity(.{ .key = "Baz", .value = "Qux" });
+    const req = services.lambda.tag_resource.Request{ .resource = "hello", .tags = tags.items };
+    try json.stringify(req, .{ .whitespace = .{} }, buffer.writer());
+    try std.testing.expectEqualStrings(
+        \\{
+        \\    "Resource": "hello",
+        \\    "Tags": {
+        \\        "Foo": "Bar",
+        \\        "Baz": "Qux"
+        \\    }
+        \\}
+    , buffer.items);
+}
+
 test "REST Json v1 builds proper queries" {
     const allocator = std.testing.allocator;
     const svs = Services(.{.lambda}){};
@@ -495,6 +686,52 @@ test "REST Json v1 builds proper queries" {
     const query = try buildQuery(allocator, request);
     defer allocator.free(query);
     try std.testing.expectEqualStrings("?MaxItems=1", query);
+}
+test "REST Json v1 handles reserved chars in queries" {
+    const allocator = std.testing.allocator;
+    const svs = Services(.{.lambda}){};
+    var keys = [_][]const u8{"Foo?I'm a crazy%dude"}; // Would love to have a way to express this without burning a var here
+    const request = svs.lambda.untag_resource.Request{
+        .tag_keys = keys[0..],
+        .resource = "hello",
+    };
+    const query = try buildQuery(allocator, request);
+    defer allocator.free(query);
+    try std.testing.expectEqualStrings("?tagKeys=Foo%3FI%27m a crazy%25dude", query);
+}
+test "REST Json v1 serializes lists in queries" {
+    const allocator = std.testing.allocator;
+    const svs = Services(.{.lambda}){};
+    var keys = [_][]const u8{ "Foo", "Bar" }; // Would love to have a way to express this without burning a var here
+    const request = svs.lambda.untag_resource.Request{
+        .tag_keys = keys[0..],
+        .resource = "hello",
+    };
+    const query = try buildQuery(allocator, request);
+    defer allocator.free(query);
+    try std.testing.expectEqualStrings("?tagKeys=Foo&tagKeys=Bar", query);
+}
+test "REST Json v1 buildpath substitutes" {
+    const allocator = std.testing.allocator;
+    const svs = Services(.{.lambda}){};
+    const request = svs.lambda.list_functions.Request{
+        .max_items = 1,
+    };
+    const input_path = "https://myhost/{MaxItems}/";
+    const output_path = try buildPath(allocator, input_path, @TypeOf(request), request);
+    defer allocator.free(output_path);
+    try std.testing.expectEqualStrings("https://myhost/1/", output_path);
+}
+test "REST Json v1 buildpath handles restricted characters" {
+    const allocator = std.testing.allocator;
+    const svs = Services(.{.lambda}){};
+    const request = svs.lambda.list_functions.Request{
+        .marker = ":",
+    };
+    const input_path = "https://myhost/{Marker}/";
+    const output_path = try buildPath(allocator, input_path, @TypeOf(request), request);
+    defer allocator.free(output_path);
+    try std.testing.expectEqualStrings("https://myhost/%3A/", output_path);
 }
 test "basic json request serialization" {
     const allocator = std.testing.allocator;
@@ -560,6 +797,7 @@ test "layer object only" {
     const r = try json.parse(TestResponse, &stream, parser_options);
     json.parseFree(TestResponse, r, parser_options);
 }
+
 // Use for debugging json responses of specific requests
 // test "dummy request" {
 //     const allocator = std.testing.allocator;
