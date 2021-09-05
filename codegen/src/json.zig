@@ -3,6 +3,7 @@ const std = @import("std");
 // specifically call this out
 pub fn serializeMap(map: anytype, key: []const u8, options: anytype, out_stream: anytype) !bool {
     if (map.len == 0) return true;
+    // TODO: Map might be [][]struct{key, value} rather than []struct{key, value}
     var child_options = options;
     if (child_options.whitespace) |*child_ws|
         child_ws.indent_level += 1;

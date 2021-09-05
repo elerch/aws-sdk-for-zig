@@ -163,7 +163,7 @@ fn constantName(allocator: *std.mem.Allocator, id: []const u8) ![]const u8 {
 
 const GenerationState = struct {
     type_stack: *std.ArrayList(*const smithy.ShapeInfo),
-    map_fields: *std.StringArrayHashMap(std.ArrayList([]const u8)),
+    // we will need some sort of "type decls needed" for recursive structures
     allocator: *std.mem.Allocator,
     indent_level: u64,
     all_required: bool,
@@ -179,15 +179,8 @@ fn generateOperation(allocator: *std.mem.Allocator, operation: smithy.ShapeInfo,
 
     var type_stack = std.ArrayList(*const smithy.ShapeInfo).init(allocator);
     defer type_stack.deinit();
-    var map_fields = std.StringArrayHashMap(std.ArrayList([]const u8)).init(allocator);
-    defer {
-        for (map_fields.values()) |v|
-            v.deinit();
-        map_fields.deinit();
-    }
     const state = GenerationState{
         .type_stack = &type_stack,
-        .map_fields = &map_fields,
         .allocator = allocator,
         .indent_level = 1,
         .all_required = false,
@@ -218,7 +211,7 @@ fn generateOperation(allocator: *std.mem.Allocator, operation: smithy.ShapeInfo,
     try outputIndent(state, writer);
     _ = try writer.write("Request: type = ");
     if (operation.shape.operation.input) |member| {
-        try generateTypeFor(member, shapes, writer, state, false);
+        if (try generateTypeFor(member, shapes, writer, state, false)) unreachable; // we expect only structs here
         _ = try writer.write("\n");
         try generateMetadataFunction(operation_name, state, writer);
     } else {
@@ -229,7 +222,7 @@ fn generateOperation(allocator: *std.mem.Allocator, operation: smithy.ShapeInfo,
     try outputIndent(state, writer);
     _ = try writer.write("Response: type = ");
     if (operation.shape.operation.output) |member| {
-        try generateTypeFor(member, shapes, writer, state, true);
+        if (try generateTypeFor(member, shapes, writer, state, true)) unreachable; // we expect only structs here
     } else _ = try writer.write("struct {}"); // we want to maintain consistency with other ops
     _ = try writer.write(",\n");
 
@@ -284,7 +277,8 @@ fn endsWith(item: []const u8, str: []const u8) bool {
     return std.mem.eql(u8, item, str[str.len - item.len ..]);
 }
 /// return type is anyerror!void as this is a recursive function, so the compiler cannot properly infer error types
-fn generateTypeFor(shape_id: []const u8, shapes: std.StringHashMap(smithy.ShapeInfo), writer: anytype, state: GenerationState, end_structure: bool) anyerror!void {
+fn generateTypeFor(shape_id: []const u8, shapes: std.StringHashMap(smithy.ShapeInfo), writer: anytype, state: GenerationState, end_structure: bool) anyerror!bool {
+    var rc = false;
     if (shapes.get(shape_id) == null) {
         std.debug.print("Shape ID not found. This is most likely a bug. Shape ID: {s}\n", .{shape_id});
         return error.InvalidType;
@@ -319,12 +313,15 @@ fn generateTypeFor(shape_id: []const u8, shapes: std.StringHashMap(smithy.ShapeI
         // DOS attack
         try generateSimpleTypeFor("nothing", "[]const u8", writer);
         std.log.warn("Type cycle detected, limiting depth. Type: {s}", .{shape_id});
-        // std.log.info("  Type stack:\n", .{});
-        // for (type_stack.items) |i|
-        //     std.log.info("  {s}", .{i.*.id});
-        return;
+        // if (std.mem.eql(u8, "com.amazonaws.workmail#Timestamp", shape_id)) {
+        //     std.log.info("  Type stack:\n", .{});
+        //     for (state.type_stack.items) |i|
+        //         std.log.info("  {s}", .{i.*.id});
+        // }
+        return false; // not a map
     }
     try state.type_stack.append(&shape_info);
+    defer _ = state.type_stack.pop();
     switch (shape) {
         .structure => {
             try generateComplexTypeFor(shape_id, shape.structure.members, "struct", shapes, writer, state);
@@ -344,11 +341,13 @@ fn generateTypeFor(shape_id: []const u8, shapes: std.StringHashMap(smithy.ShapeI
         .integer => |s| try generateSimpleTypeFor(s, "i64", writer),
         .list => {
             _ = try writer.write("[]");
-            try generateTypeFor(shape.list.member_target, shapes, writer, state, true);
+            // The serializer will have to deal with the idea we might be an array
+            return try generateTypeFor(shape.list.member_target, shapes, writer, state, true);
         },
         .set => {
             _ = try writer.write("[]");
-            try generateTypeFor(shape.set.member_target, shapes, writer, state, true);
+            // The serializer will have to deal with the idea we might be an array
+            return try generateTypeFor(shape.set.member_target, shapes, writer, state, true);
         },
         .timestamp => |s| try generateSimpleTypeFor(s, "i64", writer),
         .blob => |s| try generateSimpleTypeFor(s, "[]const u8", writer),
@@ -357,30 +356,33 @@ fn generateTypeFor(shape_id: []const u8, shapes: std.StringHashMap(smithy.ShapeI
         .float => |s| try generateSimpleTypeFor(s, "f32", writer),
         .long => |s| try generateSimpleTypeFor(s, "i64", writer),
         .map => {
-            // TODO: We need this:
-            //
-            // pub fn jsonStringifyField(self: @This(), comptime field_name: []const u8, options: anytype, out_stream: anytype) !bool {
-            //     if (std.mem.eql(u8, "tags", field_name))
-            //         return try serializeMap(self.tags, self.jsonFieldNameFor("tags"), options, out_stream);
-            //     return false;
-            // }
             _ = try writer.write("[]struct {\n");
             var child_state = state;
             child_state.indent_level += 1;
             try outputIndent(child_state, writer);
             _ = try writer.write("key: ");
             try writeOptional(shape.map.traits, writer, null);
-            try generateTypeFor(shape.map.key, shapes, writer, state, true);
+            var sub_maps = std.ArrayList([]const u8).init(state.allocator);
+            defer sub_maps.deinit();
+            if (try generateTypeFor(shape.map.key, shapes, writer, child_state, true))
+                try sub_maps.append("key");
             try writeOptional(shape.map.traits, writer, " = null");
             _ = try writer.write(",\n");
             try outputIndent(child_state, writer);
             _ = try writer.write("value: ");
             try writeOptional(shape.map.traits, writer, null);
-            try generateTypeFor(shape.map.key, shapes, writer, state, true);
+            if (try generateTypeFor(shape.map.value, shapes, writer, child_state, true))
+                try sub_maps.append("value");
             try writeOptional(shape.map.traits, writer, " = null");
             _ = try writer.write(",\n");
+            if (sub_maps.items.len > 0) {
+                _ = try writer.write("\n");
+                try writeStringify(state, sub_maps.items, writer);
+            }
             try outputIndent(state, writer);
             _ = try writer.write("}");
+
+            rc = true;
         },
         else => {
             std.log.err("encountered unimplemented shape type {s} for shape_id {s}. Generated code will not compile", .{ @tagName(shape), shape_id });
@@ -388,7 +390,7 @@ fn generateTypeFor(shape_id: []const u8, shapes: std.StringHashMap(smithy.ShapeI
             // return error{UnimplementedShapeType}.UnimplementedShapeType;
         },
     }
-    _ = state.type_stack.pop();
+    return rc;
 }
 
 fn generateSimpleTypeFor(_: anytype, type_name: []const u8, writer: anytype) !void {
@@ -421,6 +423,11 @@ fn generateComplexTypeFor(shape_id: []const u8, members: []smithy.TypeMember, ty
             state.allocator.free(mapping.snake);
         http_header_mappings.deinit();
     }
+    var map_fields = std.ArrayList([]const u8).init(state.allocator);
+    defer {
+        for (map_fields.items) |f| state.allocator.free(f);
+        map_fields.deinit();
+    }
     // prolog. We'll rely on caller to get the spacing correct here
     _ = try writer.write(type_type_name);
     _ = try writer.write(" {\n");
@@ -449,9 +456,12 @@ fn generateComplexTypeFor(shape_id: []const u8, members: []smithy.TypeMember, ty
             json_field_name_mappings.appendAssumeCapacity(.{ .snake = try state.allocator.dupe(u8, snake_case_member), .json = member.name });
         defer state.allocator.free(snake_case_member);
         try outputIndent(child_state, writer);
-        try writer.print("{s}: ", .{avoidReserved(snake_case_member)});
+        const member_name = avoidReserved(snake_case_member);
+        try writer.print("{s}: ", .{member_name});
         try writeOptional(member.traits, writer, null);
-        try generateTypeFor(member.target, shapes, writer, child_state, true);
+        if (try generateTypeFor(member.target, shapes, writer, child_state, true))
+            try map_fields.append(try std.fmt.allocPrint(state.allocator, "{s}", .{member_name}));
+
         if (!std.mem.eql(u8, "union", type_type_name))
             try writeOptional(member.traits, writer, " = null");
         _ = try writer.write(",\n");
@@ -481,8 +491,7 @@ fn generateComplexTypeFor(shape_id: []const u8, members: []smithy.TypeMember, ty
     //
     try writer.writeByte('\n');
     try outputIndent(child_state, writer);
-    _ = try writer.write("pub fn jsonFieldNameFor(_: @This(), comptime field_name: []const u8) []const u8 ");
-    _ = try writer.write("{\n");
+    _ = try writer.write("pub fn jsonFieldNameFor(_: @This(), comptime field_name: []const u8) []const u8 {\n");
     var grandchild_state = child_state;
     grandchild_state.indent_level += 1;
     // We need to force output here becaseu we're referencing the field in the return statement below
@@ -491,8 +500,34 @@ fn generateComplexTypeFor(shape_id: []const u8, members: []smithy.TypeMember, ty
     _ = try writer.write("return @field(mappings, field_name);\n");
     try outputIndent(child_state, writer);
     _ = try writer.write("}\n");
+    try writeStringify(child_state, map_fields.items, writer);
+}
 
-    // TODO: Deal with the jsonStringifyField stuff
+fn writeStringify(state: GenerationState, fields: [][]const u8, writer: anytype) !void {
+    if (fields.len > 0) {
+        // pub fn jsonStringifyField(self: @This(), comptime field_name: []const u8, options: anytype, out_stream: anytype) !bool {
+        //     if (std.mem.eql(u8, "tags", field_name))
+        //         return try serializeMap(self.tags, self.jsonFieldNameFor("tags"), options, out_stream);
+        //     return false;
+        // }
+        var child_state = state;
+        child_state.indent_level += 1;
+        try writer.writeByte('\n');
+        try outputIndent(state, writer);
+        _ = try writer.write("pub fn jsonStringifyField(self: @This(), comptime field_name: []const u8, options: anytype, out_stream: anytype) !bool {\n");
+        var return_state = child_state;
+        return_state.indent_level += 1;
+        for (fields) |field| {
+            try outputIndent(child_state, writer);
+            try writer.print("if (std.mem.eql(u8, \"{s}\", field_name))\n", .{field});
+            try outputIndent(return_state, writer);
+            try writer.print("return try serializeMap(self.{s}, self.jsonFieldNameFor(\"{s}\"), options, out_stream);\n", .{ field, field });
+        }
+        try outputIndent(child_state, writer);
+        _ = try writer.write("return false;\n");
+        try outputIndent(state, writer);
+        _ = try writer.write("}\n");
+    }
 }
 
 fn writeMappings(state: GenerationState, @"pub": []const u8, mapping_name: []const u8, mappings: anytype, force_output: bool, writer: anytype) !void {
