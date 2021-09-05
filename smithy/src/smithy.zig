@@ -620,6 +620,7 @@ fn getTrait(trait_type: []const u8, value: std.json.Value) SmithyParseError!?Tra
         \\smithy.api#xmlName
         \\smithy.waiters#waitable
     ;
+    // var iterator = std.mem.split(u8, list, "\n"); // Uncomment for 0.8.1
     var iterator = std.mem.split(list, "\n");
     while (iterator.next()) |known_but_unimplemented| {
         if (std.mem.eql(u8, trait_type, known_but_unimplemented))
