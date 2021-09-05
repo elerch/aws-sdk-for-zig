@@ -123,7 +123,7 @@ fn generateServices(allocator: *std.mem.Allocator, comptime _: []const u8, file:
         try writer.print("pub const name: []const u8 = \"{s}\";\n", .{name});
         // TODO: This really should just be ".whatevs". We're fully qualifying here, which isn't typical
         try writer.print("pub const aws_protocol: smithy.AwsProtocol = smithy.{s};\n\n", .{aws_protocol});
-        _ = try writer.write("pub const service_metadata : struct {\n");
+        _ = try writer.write("pub const service_metadata: struct {\n");
         try writer.print("    version: []const u8 = \"{s}\",\n", .{version});
         try writer.print("    sdk_id: []const u8 = \"{s}\",\n", .{sdk_id});
         try writer.print("    arn_namespace: []const u8 = \"{s}\",\n", .{arn_namespace});
