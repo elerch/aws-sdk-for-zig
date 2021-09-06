@@ -321,6 +321,7 @@ pub fn Request(comptime action: anytype) type {
     };
 }
 
+/// Get request ID from headers. Caller responsible for freeing memory
 fn requestIdFromHeaders(request: awshttp.HttpRequest, response: awshttp.HttpResult, options: Options) ![]u8 {
     var request_id: []u8 = undefined;
     var found = false;

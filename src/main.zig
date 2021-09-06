@@ -150,10 +150,12 @@ pub fn main() anyerror!void {
                         tags.appendAssumeCapacity(.{ .key = "Foo", .value = "Bar" });
                         const req = services.lambda.tag_resource.Request{ .resource = arn, .tags = tags.items };
                         const addtag = try aws.Request(services.lambda.tag_resource).call(req, options);
+                        defer addtag.deinit();
                         // const addtag = try client.call(services.lambda.tag_resource.Request{ .resource = arn, .tags = &.{.{ .key = "Foo", .value = "Bar" }} }, options);
                         std.log.info("add tag request id: {s}", .{addtag.response_metadata.request_id});
                         var keys = [_][]const u8{"Foo"}; // Would love to have a way to express this without burning a var here
                         const deletetag = try aws.Request(services.lambda.untag_resource).call(.{ .tag_keys = keys[0..], .resource = arn }, options);
+                        defer deletetag.deinit();
                         std.log.info("delete tag request id: {s}", .{deletetag.response_metadata.request_id});
                     } else {
                         std.log.err("no functions to work with", .{});
