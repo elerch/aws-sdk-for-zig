@@ -19,6 +19,25 @@ Running strip on the executable after compilation (it seems zig strip
 only goes so far), reduces this to 4.3M. This is for x86_linux,
 (which is all that's tested at the moment).
 
+# 2021-10-28 SDK Update
+
+To get smaller executable size and better portability with faster compilation,
+my intent is to rework the http communications using
+[requestz](https://github.com/ducdetronquito/requestz).  This relies on a
+couple other projects, and will require the creation of a zig implementation
+for [Signature Version 4](https://docs.aws.amazon.com/general/latest/gr/signature-version-4.html),
+along with support for some S3 quirks, etc. It will also reduce compatibility
+with some edge cases. Long term I think this is a better approach, however and
+will remove (or replace) a ton of the C dependencies as well as avoid a bunch
+of complexity such as the event loop C implementation found in the AWS
+libraries, which eventually could be replaced by zig async. I will create a new branch
+for this work as master is currently working fairly well. My hope is to
+converge on Zig 0.9.0 so this SDK doesn't have to keep up with changes going on
+in zig master. I'd also love to have an official package manager in zig, but I
+know this is high on the priority list for the foundation. My goal is to **not** require
+[gyro](https://github.com/mattnite/gyro) as requestz does, but we'll see how
+that develops.
+
 ## Building
 
 I am assuming here that if you're playing with zig, you pretty much know
