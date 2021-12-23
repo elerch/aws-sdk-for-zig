@@ -105,6 +105,6 @@ RUN tar -czf aws-c-auth-clang.tgz /usr/local/*
 
 FROM alpine:3.13 as final
 COPY --from=auth /aws-c-auth-clang.tgz /
-ADD https://ziglang.org/download/0.8.1/zig-linux-x86_64-0.8.1.tar.xz /
+ADD https://ziglang.org/download/0.9.0/zig-linux-x86_64-0.9.0.tar.xz /
 RUN tar -xzf /aws-c-auth-clang.tgz && mkdir /src && tar -C /usr/local -xf zig-linux* && \
     ln -s /usr/local/zig-linux*/zig /usr/local/bin/zig

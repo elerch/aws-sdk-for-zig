@@ -6,10 +6,10 @@ pub const Smithy = struct {
     version: []const u8,
     metadata: ModelMetadata,
     shapes: []ShapeInfo,
-    allocator: *std.mem.Allocator,
+    allocator: std.mem.Allocator,
 
     const Self = @This();
-    pub fn init(allocator: *std.mem.Allocator, version: []const u8, metadata: ModelMetadata, shapeinfo: []ShapeInfo) Smithy {
+    pub fn init(allocator: std.mem.Allocator, version: []const u8, metadata: ModelMetadata, shapeinfo: []ShapeInfo) Smithy {
         return .{
             .version = version,
             .metadata = metadata,
@@ -233,7 +233,7 @@ pub const AwsProtocol = enum {
     ec2_query,
 };
 
-pub fn parse(allocator: *std.mem.Allocator, json_model: []const u8) !Smithy {
+pub fn parse(allocator: std.mem.Allocator, json_model: []const u8) !Smithy {
     // construct a parser. We're not copying strings here, but that may
     // be a poor decision
     var parser = std.json.Parser.init(allocator, false);
@@ -253,7 +253,7 @@ pub fn parse(allocator: *std.mem.Allocator, json_model: []const u8) !Smithy {
 
 // anytype: HashMap([]const u8, std.json.Value...)
 // list must be deinitialized by caller
-fn shapes(allocator: *std.mem.Allocator, map: anytype) ![]ShapeInfo {
+fn shapes(allocator: std.mem.Allocator, map: anytype) ![]ShapeInfo {
     var list = try std.ArrayList(ShapeInfo).initCapacity(allocator, map.count());
     defer list.deinit();
     var iterator = map.iterator();
@@ -329,7 +329,7 @@ fn shapes(allocator: *std.mem.Allocator, map: anytype) ![]ShapeInfo {
     return list.toOwnedSlice();
 }
 
-fn getShape(allocator: *std.mem.Allocator, shape: std.json.Value) SmithyParseError!Shape {
+fn getShape(allocator: std.mem.Allocator, shape: std.json.Value) SmithyParseError!Shape {
     const shape_type = shape.Object.get("type").?.String;
     if (std.mem.eql(u8, shape_type, "service"))
         return Shape{
@@ -429,7 +429,7 @@ fn getShape(allocator: *std.mem.Allocator, shape: std.json.Value) SmithyParseErr
     return SmithyParseError.InvalidType;
 }
 
-fn parseMembers(allocator: *std.mem.Allocator, shape: ?std.json.Value) SmithyParseError![]TypeMember {
+fn parseMembers(allocator: std.mem.Allocator, shape: ?std.json.Value) SmithyParseError![]TypeMember {
     var rc: []TypeMember = &.{};
     if (shape == null)
         return rc;
@@ -449,7 +449,7 @@ fn parseMembers(allocator: *std.mem.Allocator, shape: ?std.json.Value) SmithyPar
 }
 
 // ArrayList of std.Json.Value
-fn parseTargetList(allocator: *std.mem.Allocator, list: anytype) SmithyParseError![][]const u8 {
+fn parseTargetList(allocator: std.mem.Allocator, list: anytype) SmithyParseError![][]const u8 {
     var array_list = std.ArrayList([]const u8).initCapacity(allocator, list.items.len) catch return SmithyParseError.OutOfMemory;
     defer array_list.deinit();
     for (list.items) |i| {
@@ -457,13 +457,13 @@ fn parseTargetList(allocator: *std.mem.Allocator, list: anytype) SmithyParseErro
     }
     return array_list.toOwnedSlice();
 }
-fn parseTraitsOnly(allocator: *std.mem.Allocator, shape: std.json.Value) SmithyParseError!TraitsOnly {
+fn parseTraitsOnly(allocator: std.mem.Allocator, shape: std.json.Value) SmithyParseError!TraitsOnly {
     return TraitsOnly{
         .traits = try parseTraits(allocator, shape.Object.get("traits")),
     };
 }
 
-fn parseTraits(allocator: *std.mem.Allocator, shape: ?std.json.Value) SmithyParseError![]Trait {
+fn parseTraits(allocator: std.mem.Allocator, shape: ?std.json.Value) SmithyParseError![]Trait {
     var rc: []Trait = &.{};
     if (shape == null)
         return rc;
@@ -620,8 +620,7 @@ fn getTrait(trait_type: []const u8, value: std.json.Value) SmithyParseError!?Tra
         \\smithy.api#xmlName
         \\smithy.waiters#waitable
     ;
-    // var iterator = std.mem.split(u8, list, "\n"); // Uncomment for 0.8.1
-    var iterator = std.mem.split(list, "\n");
+    var iterator = std.mem.split(u8, list, "\n");
     while (iterator.next()) |known_but_unimplemented| {
         if (std.mem.eql(u8, trait_type, known_but_unimplemented))
             return null;
@@ -677,7 +676,7 @@ fn parseId(id: []const u8) SmithyParseError!IdInfo {
         .member = member,
     };
 }
-fn read_file_to_string(allocator: *std.mem.Allocator, file_name: []const u8, max_bytes: usize) ![]const u8 {
+fn read_file_to_string(allocator: std.mem.Allocator, file_name: []const u8, max_bytes: usize) ![]const u8 {
     const file = try std.fs.cwd().openFile(file_name, std.fs.File.OpenFlags{});
     defer file.close();
     return file.readToEndAlloc(allocator, max_bytes);
@@ -688,13 +687,13 @@ const intrinsic_type_count: usize = 5; // 5 intrinsic types are added to every m
 fn getTestData(_: *std.mem.Allocator) []const u8 {
     if (test_data) |d| return d;
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    test_data = read_file_to_string(&gpa.allocator, "test.json", 150000) catch @panic("could not read test.json");
+    test_data = read_file_to_string(gpa.allocator, "test.json", 150000) catch @panic("could not read test.json");
     return test_data.?;
 }
 test "read file" {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer if (gpa.deinit()) @panic("leak");
-    const allocator = &gpa.allocator;
+    const allocator = gpa.allocator;
     _ = getTestData(allocator);
     // test stuff
 }
@@ -720,7 +719,7 @@ test "parse string" {
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer if (gpa.deinit()) @panic("leak");
-    const allocator = &gpa.allocator;
+    const allocator = gpa.allocator;
     const model = try parse(allocator, test_string);
     defer model.deinit();
     try expect(std.mem.eql(u8, model.version, "1.0"));
@@ -754,7 +753,7 @@ test "parse shape with member" {
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer if (gpa.deinit()) @panic("leak");
-    const allocator = &gpa.allocator;
+    const allocator = gpa.allocator;
     const model = try parse(allocator, test_string);
     defer model.deinit();
     try expect(std.mem.eql(u8, model.version, "1.0"));
@@ -768,7 +767,7 @@ test "parse shape with member" {
 test "parse file" {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer if (gpa.deinit()) @panic("leak");
-    const allocator = &gpa.allocator;
+    const allocator = gpa.allocator;
     const test_string = getTestData(allocator);
     const model = try parse(allocator, test_string);
     defer model.deinit();

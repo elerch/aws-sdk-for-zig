@@ -1,7 +1,7 @@
 const std = @import("std");
 const expectEqualStrings = std.testing.expectEqualStrings;
 
-pub fn snakeToCamel(allocator: *std.mem.Allocator, name: []const u8) ![]u8 {
+pub fn snakeToCamel(allocator: std.mem.Allocator, name: []const u8) ![]u8 {
     var utf8_name = (std.unicode.Utf8View.init(name) catch unreachable).iterator();
     var target_inx: u64 = 0;
     var previous_ascii: u8 = 0;
@@ -24,7 +24,7 @@ pub fn snakeToCamel(allocator: *std.mem.Allocator, name: []const u8) ![]u8 {
     rc[target_inx] = 0; // add zero sentinel
     return rc[0..target_inx];
 }
-pub fn snakeToPascal(allocator: *std.mem.Allocator, name: []const u8) ![]u8 {
+pub fn snakeToPascal(allocator: std.mem.Allocator, name: []const u8) ![]u8 {
     const rc = try snakeToCamel(allocator, name);
     if (rc[0] >= 'a' and rc[0] <= 'z') {
         const uppercase_char = rc[0] - ('a' - 'A');

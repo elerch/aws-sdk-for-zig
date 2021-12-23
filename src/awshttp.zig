@@ -86,7 +86,7 @@ pub const HttpResult = struct {
     response_code: u16, // actually 3 digits can fit in u10
     body: []const u8,
     headers: []Header,
-    allocator: *std.mem.Allocator,
+    allocator: std.mem.Allocator,
 
     pub fn deinit(self: HttpResult) void {
         self.allocator.free(self.body);
@@ -110,14 +110,14 @@ const EndPoint = struct {
     host: []const u8,
     scheme: []const u8,
     port: u16,
-    allocator: *std.mem.Allocator,
+    allocator: std.mem.Allocator,
 
     fn deinit(self: EndPoint) void {
         self.allocator.free(self.uri);
     }
 };
 
-fn cInit(_: *std.mem.Allocator) void {
+fn cInit(_: std.mem.Allocator) void {
     // TODO: what happens if we actually get an allocator?
     httplog.debug("auth init", .{});
     c_allocator = c.aws_default_allocator();
@@ -179,7 +179,7 @@ fn cDeinit() void { // probably the wrong name
 }
 
 pub const AwsHttp = struct {
-    allocator: *std.mem.Allocator,
+    allocator: std.mem.Allocator,
     bootstrap: *c.aws_client_bootstrap,
     resolver: *c.aws_host_resolver,
     eventLoopGroup: *c.aws_event_loop_group,
@@ -187,7 +187,7 @@ pub const AwsHttp = struct {
 
     const Self = @This();
 
-    pub fn init(allocator: *std.mem.Allocator) Self {
+    pub fn init(allocator: std.mem.Allocator) Self {
         if (reference_count == 0) cInit(allocator);
         reference_count += 1;
         httplog.debug("auth ref count: {}", .{reference_count});
@@ -347,7 +347,7 @@ pub const AwsHttp = struct {
                 c.aws_tls_ctx_options_init_default_client(tls_ctx_options.?, c_allocator);
                 // h2;http/1.1
                 if (c.aws_tls_ctx_options_set_alpn_list(tls_ctx_options, "http/1.1") != c.AWS_OP_SUCCESS) {
-                    httplog.alert("Failed to load alpn list with error {s}.", .{c.aws_error_debug_str(c.aws_last_error())});
+                    httplog.err("Failed to load alpn list with error {s}.", .{c.aws_error_debug_str(c.aws_last_error())});
                     return AwsError.AlpnError;
                 }
 
@@ -374,7 +374,7 @@ pub const AwsHttp = struct {
             var host_var = host;
             var host_cur = c.aws_byte_cursor_from_c_str(@ptrCast([*c]const u8, host_var));
             if (c.aws_tls_connection_options_set_server_name(tls_connection_options, c_allocator, &host_cur) != c.AWS_OP_SUCCESS) {
-                httplog.alert("Failed to set servername with error {s}.", .{c.aws_error_debug_str(c.aws_last_error())});
+                httplog.err("Failed to set servername with error {s}.", .{c.aws_error_debug_str(c.aws_last_error())});
                 return AwsError.TlsError;
             }
         }
@@ -409,7 +409,7 @@ pub const AwsHttp = struct {
             .on_shutdown = connectionShutdownCallback,
         };
         if (c.aws_http_client_connect(&http_client_options) != c.AWS_OP_SUCCESS) {
-            httplog.alert("HTTP client connect failed with {s}.", .{c.aws_error_debug_str(c.aws_last_error())});
+            httplog.err("HTTP client connect failed with {s}.", .{c.aws_error_debug_str(c.aws_last_error())});
             return AwsError.HttpClientConnectError;
         }
         // TODO: Timeout
@@ -425,17 +425,17 @@ pub const AwsHttp = struct {
             .on_response_header_block_done = null,
             .on_response_body = incomingBodyCallback,
             .on_complete = requestCompleteCallback,
-            .user_data = @ptrCast(*c_void, &context),
+            .user_data = @ptrCast(*anyopaque, &context),
             .request = http_request,
         };
 
         const stream = c.aws_http_connection_make_request(context.connection, &request_options);
         if (stream == null) {
-            httplog.alert("failed to create request.", .{});
+            httplog.err("failed to create request.", .{});
             return AwsError.RequestCreateError;
         }
         if (c.aws_http_stream_activate(stream) != c.AWS_OP_SUCCESS) {
-            httplog.alert("HTTP request failed with {s}.", .{c.aws_error_debug_str(c.aws_last_error())});
+            httplog.err("HTTP request failed with {s}.", .{c.aws_error_debug_str(c.aws_last_error())});
             return AwsError.HttpRequestError;
         }
         // TODO: Timeout
@@ -599,7 +599,7 @@ pub const AwsHttp = struct {
         var sign_result_request = AsyncResult(AwsAsyncCallbackResult(c.aws_http_message)){ .result = &signing_result };
         if (c.aws_sign_request_aws(c_allocator, signable, fullCast([*c]const c.aws_signing_config_base, signing_config), signComplete, &sign_result_request) != c.AWS_OP_SUCCESS) {
             const error_code = c.aws_last_error();
-            httplog.alert("Could not initiate signing request: {s}:{s}", .{ c.aws_error_name(error_code), c.aws_error_str(error_code) });
+            httplog.err("Could not initiate signing request: {s}:{s}", .{ c.aws_error_name(error_code), c.aws_error_str(error_code) });
             return AwsError.SigningInitiationError;
         }
 
@@ -615,7 +615,7 @@ pub const AwsHttp = struct {
     /// It's my theory that the aws event loop has a trigger to corrupt the
     /// signing result after this call completes. So the technique of assigning
     /// now, using later will not work
-    fn signComplete(result: ?*c.aws_signing_result, error_code: c_int, user_data: ?*c_void) callconv(.C) void {
+    fn signComplete(result: ?*c.aws_signing_result, error_code: c_int, user_data: ?*anyopaque) callconv(.C) void {
         var async_result = userDataTo(AsyncResult(AwsAsyncCallbackResult(c.aws_http_message)), user_data);
         var http_request = async_result.result.result;
         async_result.sync.store(true, .SeqCst);
@@ -625,11 +625,11 @@ pub const AwsHttp = struct {
 
         if (result != null) {
             if (c.aws_apply_signing_result_to_http_request(http_request, c_allocator, result) != c.AWS_OP_SUCCESS) {
-                httplog.alert("Could not apply signing request to http request: {s}", .{c.aws_error_debug_str(c.aws_last_error())});
+                httplog.err("Could not apply signing request to http request: {s}", .{c.aws_error_debug_str(c.aws_last_error())});
             }
             httplog.debug("signing result applied", .{});
         } else {
-            httplog.alert("Did not receive signing result: {s}", .{c.aws_error_debug_str(c.aws_last_error())});
+            httplog.err("Did not receive signing result: {s}", .{c.aws_error_debug_str(c.aws_last_error())});
         }
         async_result.sync.store(false, .SeqCst);
     }
@@ -710,11 +710,11 @@ pub const AwsHttp = struct {
         }
     }
 
-    fn connectionSetupCallback(connection: ?*c.aws_http_connection, error_code: c_int, user_data: ?*c_void) callconv(.C) void {
+    fn connectionSetupCallback(connection: ?*c.aws_http_connection, error_code: c_int, user_data: ?*anyopaque) callconv(.C) void {
         httplog.debug("connection setup callback start", .{});
         var context = userDataTo(RequestContext, user_data);
         if (error_code != c.AWS_OP_SUCCESS) {
-            httplog.alert("Failed to setup connection: {s}.", .{c.aws_error_debug_str(c.aws_last_error())});
+            httplog.err("Failed to setup connection: {s}.", .{c.aws_error_debug_str(c.aws_last_error())});
             context.return_error = AwsError.SetupConnectionError;
         }
         context.connection = connection;
@@ -722,13 +722,13 @@ pub const AwsHttp = struct {
         httplog.debug("connection setup callback end", .{});
     }
 
-    fn connectionShutdownCallback(connection: ?*c.aws_http_connection, error_code: c_int, _: ?*c_void) callconv(.C) void {
+    fn connectionShutdownCallback(connection: ?*c.aws_http_connection, error_code: c_int, _: ?*anyopaque) callconv(.C) void {
         //                                                             ^^ error_code ^^ user_data
         httplog.debug("connection shutdown callback start ({*}). error_code: {d}", .{ connection, error_code });
         httplog.debug("connection shutdown callback end", .{});
     }
 
-    fn incomingHeadersCallback(stream: ?*c.aws_http_stream, _: c.aws_http_header_block, headers: [*c]const c.aws_http_header, num_headers: usize, user_data: ?*c_void) callconv(.C) c_int {
+    fn incomingHeadersCallback(stream: ?*c.aws_http_stream, _: c.aws_http_header_block, headers: [*c]const c.aws_http_header, num_headers: usize, user_data: ?*anyopaque) callconv(.C) c_int {
         var context = userDataTo(RequestContext, user_data);
 
         if (context.response_code == null) {
@@ -737,7 +737,7 @@ pub const AwsHttp = struct {
                 context.response_code = @intCast(u16, status); // RFC says this is a 3 digit number, so c_int is silly
                 httplog.debug("response status code from callback: {d}", .{status});
             } else {
-                httplog.alert("could not get status code", .{});
+                httplog.err("could not get status code", .{});
                 context.return_error = AwsError.StatusCodeError;
             }
         }
@@ -746,11 +746,11 @@ pub const AwsHttp = struct {
             const value = header.value.ptr[0..header.value.len];
             httplog.debug("header from callback: {s}: {s}", .{ name, value });
             context.addHeader(name, value) catch
-                httplog.alert("could not append header to request context", .{});
+                httplog.err("could not append header to request context", .{});
         }
         return c.AWS_OP_SUCCESS;
     }
-    fn incomingBodyCallback(_: ?*c.aws_http_stream, data: [*c]const c.aws_byte_cursor, user_data: ?*c_void) callconv(.C) c_int {
+    fn incomingBodyCallback(_: ?*c.aws_http_stream, data: [*c]const c.aws_byte_cursor, user_data: ?*anyopaque) callconv(.C) c_int {
         var context = userDataTo(RequestContext, user_data);
 
         httplog.debug("inbound body, len {d}", .{data.*.len});
@@ -758,10 +758,10 @@ pub const AwsHttp = struct {
         // Need this to be a slice because it does not necessarily have a \0 sentinal
         const body_chunk = array[0..data.*.len];
         context.appendToBody(body_chunk) catch
-            httplog.alert("could not append to body!", .{});
+            httplog.err("could not append to body!", .{});
         return c.AWS_OP_SUCCESS;
     }
-    fn requestCompleteCallback(stream: ?*c.aws_http_stream, _: c_int, user_data: ?*c_void) callconv(.C) void {
+    fn requestCompleteCallback(stream: ?*c.aws_http_stream, _: c_int, user_data: ?*anyopaque) callconv(.C) void {
         //                                                      ^^ error_code
         var context = userDataTo(RequestContext, user_data);
         context.request_complete.store(true, .SeqCst);
@@ -780,7 +780,7 @@ pub const AwsHttp = struct {
 
         waitOnCallback(c.aws_credentials, &callback_results);
         if (credential_result.error_code != c.AWS_ERROR_SUCCESS) {
-            httplog.alert("Could not acquire credentials: {s}:{s}", .{ c.aws_error_name(credential_result.error_code), c.aws_error_str(credential_result.error_code) });
+            httplog.err("Could not acquire credentials: {s}:{s}", .{ c.aws_error_name(credential_result.error_code), c.aws_error_str(credential_result.error_code) });
             return AwsError.CredentialsError;
         }
         return credential_result.result orelse unreachable;
@@ -813,7 +813,7 @@ pub const AwsHttp = struct {
     }
 
     // Generic function that generates a type-specific funtion for callback use
-    fn awsAsyncCallback(comptime T: type, comptime message: []const u8) (fn (result: ?*T, error_code: c_int, user_data: ?*c_void) callconv(.C) void) {
+    fn awsAsyncCallback(comptime T: type, comptime message: []const u8) (fn (result: ?*T, error_code: c_int, user_data: ?*anyopaque) callconv(.C) void) {
         const inner = struct {
             fn func(userData: *AsyncResult(AwsAsyncCallbackResult(T)), apiData: ?*T) void {
                 userData.result.result = apiData;
@@ -824,15 +824,15 @@ pub const AwsHttp = struct {
 
     // used by awsAsyncCallbackResult to cast our generic userdata void *
     // into a type known to zig
-    fn userDataTo(comptime T: type, userData: ?*c_void) *T {
+    fn userDataTo(comptime T: type, userData: ?*anyopaque) *T {
         return @ptrCast(*T, @alignCast(@alignOf(T), userData));
     }
 
     // generic callback ability. Takes a function for the actual assignment
     // If you need a standard assignment, use awsAsyncCallback instead
-    fn awsAsyncCallbackResult(comptime T: type, comptime message: []const u8, comptime resultAssignment: (fn (user: *AsyncResult(AwsAsyncCallbackResult(T)), apiData: ?*T) void)) (fn (result: ?*T, error_code: c_int, user_data: ?*c_void) callconv(.C) void) {
+    fn awsAsyncCallbackResult(comptime T: type, comptime message: []const u8, comptime resultAssignment: (fn (user: *AsyncResult(AwsAsyncCallbackResult(T)), apiData: ?*T) void)) (fn (result: ?*T, error_code: c_int, user_data: ?*anyopaque) callconv(.C) void) {
         const inner = struct {
-            fn innerfunc(result: ?*T, error_code: c_int, user_data: ?*c_void) callconv(.C) void {
+            fn innerfunc(result: ?*T, error_code: c_int, user_data: ?*anyopaque) callconv(.C) void {
                 httplog.debug(message, .{});
                 var asyncResult = userDataTo(AsyncResult(AwsAsyncCallbackResult(T)), user_data);
 
@@ -883,7 +883,7 @@ fn fullCast(comptime T: type, val: anytype) T {
     return @ptrCast(T, @alignCast(@alignOf(T), val));
 }
 
-fn regionSubDomain(allocator: *std.mem.Allocator, service: []const u8, region: []const u8, useDualStack: bool) !EndPoint {
+fn regionSubDomain(allocator: std.mem.Allocator, service: []const u8, region: []const u8, useDualStack: bool) !EndPoint {
     const environment_override = std.os.getenv("AWS_ENDPOINT_URL");
     if (environment_override) |override| {
         const uri = try allocator.dupeZ(u8, override);
@@ -916,7 +916,7 @@ fn regionSubDomain(allocator: *std.mem.Allocator, service: []const u8, region: [
 ///
 /// allocator: Will be used only to construct the EndPoint struct
 /// uri: string constructed in such a way that deallocation is needed
-fn endPointFromUri(allocator: *std.mem.Allocator, uri: []const u8) !EndPoint {
+fn endPointFromUri(allocator: std.mem.Allocator, uri: []const u8) !EndPoint {
     var scheme: []const u8 = "";
     var host: []const u8 = "";
     var port: u16 = 443;
@@ -966,7 +966,7 @@ const RequestContext = struct {
     connection_complete: std.atomic.Atomic(bool) = std.atomic.Atomic(bool).init(false),
     request_complete: std.atomic.Atomic(bool) = std.atomic.Atomic(bool).init(false),
     return_error: ?AwsError = null,
-    allocator: *std.mem.Allocator,
+    allocator: std.mem.Allocator,
     body: ?[]const u8 = null,
     response_code: ?u16 = null,
     headers: ?std.ArrayList(Header) = null,

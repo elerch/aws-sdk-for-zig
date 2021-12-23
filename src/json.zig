@@ -1453,7 +1453,7 @@ fn parsedEqual(a: anytype, b: @TypeOf(a)) bool {
 }
 
 pub const ParseOptions = struct {
-    allocator: ?*Allocator = null,
+    allocator: ?Allocator = null,
 
     /// Behaviour when a duplicate field is encountered.
     duplicate_field_behavior: enum {
@@ -1795,7 +1795,7 @@ fn parseInternal(comptime T: type, token: Token, tokens: *TokenStream, options: 
                                     else => {},
                                 }
 
-                                try arraylist.ensureCapacity(arraylist.items.len + 1);
+                                try arraylist.ensureTotalCapacity(arraylist.items.len + 1);
                                 const v = try parseInternal(ptrInfo.child, tok, tokens, options);
                                 arraylist.appendAssumeCapacity(v);
                             }
@@ -1835,7 +1835,7 @@ fn parseInternal(comptime T: type, token: Token, tokens: *TokenStream, options: 
                                     else => {},
                                 }
 
-                                try arraylist.ensureCapacity(arraylist.items.len + 1);
+                                try arraylist.ensureTotalCapacity(arraylist.items.len + 1);
                                 const key_val = try parseInternal(try typeForField(ptrInfo.child, "key"), key, tokens, options);
                                 const val = (try tokens.next()) orelse return error.UnexpectedEndOfJson;
                                 const val_val = try parseInternal(try typeForField(ptrInfo.child, "value"), val, tokens, options);
@@ -2014,7 +2014,7 @@ test "parse into tagged union" {
 
     { // failing allocations should be bubbled up instantly without trying next member
         var fail_alloc = testing.FailingAllocator.init(testing.allocator, 0);
-        const options = ParseOptions{ .allocator = &fail_alloc.allocator };
+        const options = ParseOptions{ .allocator = fail_alloc.allocator() };
         const T = union(enum) {
             // both fields here match the input
             string: []const u8,
@@ -2062,7 +2062,7 @@ test "parse union bubbles up AllocatorRequired" {
 
 test "parseFree descends into tagged union" {
     var fail_alloc = testing.FailingAllocator.init(testing.allocator, 1);
-    const options = ParseOptions{ .allocator = &fail_alloc.allocator };
+    const options = ParseOptions{ .allocator = fail_alloc.allocator() };
     const T = union(enum) {
         int: i32,
         float: f64,
@@ -2217,7 +2217,7 @@ test "parse into struct with duplicate field" {
 
 /// A non-stream JSON parser which constructs a tree of Value's.
 pub const Parser = struct {
-    allocator: *Allocator,
+    allocator: Allocator,
     state: State,
     copy_strings: bool,
     // Stores parent nodes and un-combined Values.
@@ -2230,7 +2230,7 @@ pub const Parser = struct {
         Simple,
     };
 
-    pub fn init(allocator: *Allocator, copy_strings: bool) Parser {
+    pub fn init(allocator: Allocator, copy_strings: bool) Parser {
         return Parser{
             .allocator = allocator,
             .state = .Simple,
@@ -2255,7 +2255,7 @@ pub const Parser = struct {
         errdefer arena.deinit();
 
         while (try s.next()) |token| {
-            try p.transition(&arena.allocator, input, s.i - 1, token);
+            try p.transition(arena.allocator(), input, s.i - 1, token);
         }
 
         debug.assert(p.stack.items.len == 1);
@@ -2268,7 +2268,7 @@ pub const Parser = struct {
 
     // Even though p.allocator exists, we take an explicit allocator so that allocation state
     // can be cleaned up on error correctly during a `parse` on call.
-    fn transition(p: *Parser, allocator: *Allocator, input: []const u8, i: usize, token: Token) !void {
+    fn transition(p: *Parser, allocator: Allocator, input: []const u8, i: usize, token: Token) !void {
         switch (p.state) {
             .ObjectKey => switch (token) {
                 .ObjectEnd => {
@@ -2425,7 +2425,7 @@ pub const Parser = struct {
         }
     }
 
-    fn parseString(p: *Parser, allocator: *Allocator, s: std.meta.TagPayload(Token, Token.String), input: []const u8, i: usize) !Value {
+    fn parseString(p: *Parser, allocator: Allocator, s: std.meta.TagPayload(Token, Token.String), input: []const u8, i: usize) !Value {
         const slice = s.slice(input, i);
         switch (s.escapes) {
             .None => return Value{ .String = if (p.copy_strings) try allocator.dupe(u8, slice) else slice },
@@ -2623,7 +2623,7 @@ test "import more json tests" {
 //     try testing.expect(mem.eql(u8, tree.root.Object.get("str").?.String, "hello"));
 // }
 
-fn test_parse(arena_allocator: *std.mem.Allocator, json_str: []const u8) !Value {
+fn test_parse(arena_allocator: std.mem.Allocator, json_str: []const u8) !Value {
     var p = Parser.init(arena_allocator, false);
     return (try p.parse(json_str)).root;
 }
@@ -2631,13 +2631,13 @@ fn test_parse(arena_allocator: *std.mem.Allocator, json_str: []const u8) !Value 
 test "parsing empty string gives appropriate error" {
     var arena_allocator = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_allocator.deinit();
-    try testing.expectError(error.UnexpectedEndOfJson, test_parse(&arena_allocator.allocator, ""));
+    try testing.expectError(error.UnexpectedEndOfJson, test_parse(arena_allocator.allocator(), ""));
 }
 
 test "integer after float has proper type" {
     var arena_allocator = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_allocator.deinit();
-    const json = try test_parse(&arena_allocator.allocator,
+    const json = try test_parse(arena_allocator.allocator(),
         \\{
         \\  "float": 3.14,
         \\  "ints": [1, 2, 3]
@@ -2664,7 +2664,7 @@ test "escaped characters" {
         \\}
     ;
 
-    const obj = (try test_parse(&arena_allocator.allocator, input)).Object;
+    const obj = (try test_parse(arena_allocator.allocator(), input)).Object;
 
     try testing.expectEqualSlices(u8, obj.get("backslash").?.String, "\\");
     try testing.expectEqualSlices(u8, obj.get("forwardslash").?.String, "/");
@@ -2691,10 +2691,10 @@ test "string copy option" {
     var arena_allocator = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_allocator.deinit();
 
-    const tree_nocopy = try Parser.init(&arena_allocator.allocator, false).parse(input);
+    const tree_nocopy = try Parser.init(arena_allocator.allocator(), false).parse(input);
     const obj_nocopy = tree_nocopy.root.Object;
 
-    const tree_copy = try Parser.init(&arena_allocator.allocator, true).parse(input);
+    const tree_copy = try Parser.init(arena_allocator.allocator(), true).parse(input);
     const obj_copy = tree_copy.root.Object;
 
     for ([_][]const u8{ "noescape", "simple", "unicode", "surrogatepair" }) |field_name| {
@@ -3009,7 +3009,7 @@ fn teststringify(expected: []const u8, value: anytype, options: StringifyOptions
 
         fn write(self: *Self, bytes: []const u8) Error!usize {
             if (self.expected_remaining.len < bytes.len) {
-                std.debug.warn(
+                std.log.warn(
                     \\====== expected this output: =========
                     \\{s}
                     \\======== instead found this: =========
@@ -3022,7 +3022,7 @@ fn teststringify(expected: []const u8, value: anytype, options: StringifyOptions
                 return error.TooMuchData;
             }
             if (!mem.eql(u8, self.expected_remaining[0..bytes.len], bytes)) {
-                std.debug.warn(
+                std.log.warn(
                     \\====== expected this output: =========
                     \\{s}
                     \\======== instead found this: =========

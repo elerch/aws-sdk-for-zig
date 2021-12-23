@@ -26,12 +26,12 @@ pub const services = servicemodel.services;
 pub const Services = servicemodel.Services;
 
 pub const Client = struct {
-    allocator: *std.mem.Allocator,
+    allocator: std.mem.Allocator,
     aws_http: awshttp.AwsHttp,
 
     const Self = @This();
 
-    pub fn init(allocator: *std.mem.Allocator) Self {
+    pub fn init(allocator: std.mem.Allocator) Self {
         return .{
             .allocator = allocator,
             .aws_http = awshttp.AwsHttp.init(allocator),
@@ -413,7 +413,7 @@ fn queryFieldTransformer(field_name: []const u8, encoding_options: url.EncodingO
     return try case.snakeToPascal(encoding_options.allocator.?, field_name);
 }
 
-fn buildPath(allocator: *std.mem.Allocator, raw_uri: []const u8, comptime ActionRequest: type, request: anytype) ![]const u8 {
+fn buildPath(allocator: std.mem.Allocator, raw_uri: []const u8, comptime ActionRequest: type, request: anytype) ![]const u8 {
     var buffer = try std.ArrayList(u8).initCapacity(allocator, raw_uri.len);
     // const writer = buffer.writer();
     defer buffer.deinit();
@@ -487,7 +487,7 @@ fn uriEncodeByte(char: u8, writer: anytype) !void {
     }
 }
 
-fn buildQuery(allocator: *std.mem.Allocator, request: anytype) ![]const u8 {
+fn buildQuery(allocator: std.mem.Allocator, request: anytype) ![]const u8 {
     // query should look something like this:
     // pub const http_query = .{
     //     .master_region = "MasterRegion",
@@ -615,7 +615,7 @@ pub fn IgnoringWriter(comptime WriterType: type) type {
     };
 }
 
-fn reportTraffic(allocator: *std.mem.Allocator, info: []const u8, request: awshttp.HttpRequest, response: awshttp.HttpResult, comptime reporter: fn (comptime []const u8, anytype) void) !void {
+fn reportTraffic(allocator: std.mem.Allocator, info: []const u8, request: awshttp.HttpRequest, response: awshttp.HttpResult, comptime reporter: fn (comptime []const u8, anytype) void) !void {
     var msg = std.ArrayList(u8).init(allocator);
     defer msg.deinit();
     const writer = msg.writer();

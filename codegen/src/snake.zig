@@ -1,7 +1,7 @@
 const std = @import("std");
 const expectEqualStrings = std.testing.expectEqualStrings;
 
-pub fn fromPascalCase(allocator: *std.mem.Allocator, name: []const u8) ![]u8 {
+pub fn fromPascalCase(allocator: std.mem.Allocator, name: []const u8) ![]u8 {
     const rc = try allocator.alloc(u8, name.len * 2); // This is overkill, but is > the maximum length possibly needed
     errdefer allocator.free(rc);
     var utf8_name = (std.unicode.Utf8View.init(name) catch unreachable).iterator();

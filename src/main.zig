@@ -17,8 +17,8 @@ pub fn log(
     const prefix = "[" ++ @tagName(level) ++ "] " ++ scope_prefix;
 
     // Print the message to stderr, silently ignoring any errors
-    const held = std.debug.getStderrMutex().acquire();
-    defer held.release();
+    std.debug.getStderrMutex().lock();
+    defer std.debug.getStderrMutex().unlock();
     const stderr = std.io.getStdErr().writer();
     nosuspend stderr.print(prefix ++ format ++ "\n", args) catch return;
 }
@@ -42,7 +42,7 @@ pub fn main() anyerror!void {
         .backing_allocator = c_allocator,
     };
     defer _ = gpa.deinit();
-    const allocator = &gpa.allocator;
+    const allocator = gpa.allocator();
     var tests = std.ArrayList(Tests).init(allocator);
     defer tests.deinit();
     var args = std.process.args();

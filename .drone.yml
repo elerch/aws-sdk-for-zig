@@ -13,10 +13,10 @@ steps:
     REGISTRY:
       from_secret: docker_registry
   commands:
-  - wget https://ziglang.org/builds/zig-linux-x86_64-0.9.0-dev.321+15a030ef3.tar.xz
-  - tar x -C /usr/local -f zig-linux-x86_64-0.9.0-dev.321+15a030ef3.tar.xz
+  - wget https://ziglang.org/download/0.9.0/zig-linux-x86_64-0.9.0.tar.xz
+  - tar x -C /usr/local -f zig-linux-x86_64-0.9.0.tar.xz
   - rm /usr/local/bin/zig
-  - ln -s /usr/local/zig-linux-x86_64-0.9.0-dev.321+15a030ef3/zig /usr/local/bin/zig
+  - ln -s /usr/local/zig-linux-x86_64-0.9.0/zig /usr/local/bin/zig
   - (cd codegen && zig build test)
   - zig build # implicitly does a codegen
   - zig build test

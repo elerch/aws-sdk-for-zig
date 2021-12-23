@@ -6,7 +6,7 @@ const json_zig = @embedFile("json.zig");
 pub fn main() anyerror!void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
-    const allocator = &arena.allocator;
+    const allocator = arena.allocator();
 
     const args = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, args);
@@ -38,7 +38,7 @@ fn processFile(arg: []const u8, stdout: anytype, manifest: anytype) !void {
     // day I'm not sure we want to track down leaks
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
-    const allocator = &arena.allocator;
+    const allocator = arena.allocator();
     var writer = &stdout;
     var file: std.fs.File = undefined;
     const filename = try std.fmt.allocPrint(allocator, "{s}.zig", .{arg});
@@ -51,7 +51,7 @@ fn processFile(arg: []const u8, stdout: anytype, manifest: anytype) !void {
     _ = try writer.write("const smithy = @import(\"smithy\");\n\n");
     std.log.info("Processing file: {s}", .{arg});
     const service_names = generateServicesForFilePath(allocator, ";", arg, writer) catch |err| {
-        std.log.crit("Error processing file: {s}", .{arg});
+        std.log.err("Error processing file: {s}", .{arg});
         return err;
     };
     defer {
@@ -64,7 +64,7 @@ fn processFile(arg: []const u8, stdout: anytype, manifest: anytype) !void {
     }
 }
 
-fn generateServicesForFilePath(allocator: *std.mem.Allocator, comptime terminator: []const u8, path: []const u8, writer: anytype) ![][]const u8 {
+fn generateServicesForFilePath(allocator: std.mem.Allocator, comptime terminator: []const u8, path: []const u8, writer: anytype) ![][]const u8 {
     const file = try std.fs.cwd().openFile(path, .{ .read = true, .write = false });
     defer file.close();
     return try generateServices(allocator, terminator, file, writer);
@@ -135,7 +135,7 @@ fn countReferences(shape: smithy.ShapeInfo, shapes: std.StringHashMap(smithy.Sha
     }
 }
 
-fn generateServices(allocator: *std.mem.Allocator, comptime _: []const u8, file: std.fs.File, writer: anytype) ![][]const u8 {
+fn generateServices(allocator: std.mem.Allocator, comptime _: []const u8, file: std.fs.File, writer: anytype) ![][]const u8 {
     const json = try file.readToEndAlloc(allocator, 1024 * 1024 * 1024);
     defer allocator.free(json);
     const model = try smithy.parse(allocator, json);
@@ -229,7 +229,7 @@ fn generateServices(allocator: *std.mem.Allocator, comptime _: []const u8, file:
     return constant_names.toOwnedSlice();
 }
 
-fn generateAdditionalTypes(allocator: *std.mem.Allocator, file_state: FileGenerationState, writer: anytype) !void {
+fn generateAdditionalTypes(allocator: std.mem.Allocator, file_state: FileGenerationState, writer: anytype) !void {
     // More types may be added during processing
     while (file_state.additional_types_to_generate.popOrNull()) |t| {
         if (file_state.additional_types_generated.getEntry(t.name) != null) continue;
@@ -250,7 +250,7 @@ fn generateAdditionalTypes(allocator: *std.mem.Allocator, file_state: FileGenera
     }
 }
 
-fn constantName(allocator: *std.mem.Allocator, id: []const u8) ![]const u8 {
+fn constantName(allocator: std.mem.Allocator, id: []const u8) ![]const u8 {
     // There are some ids that don't follow consistent rules, so we'll
     // look for the exceptions and, if not found, revert to the snake case
     // algorithm
@@ -281,7 +281,7 @@ const GenerationState = struct {
     type_stack: *std.ArrayList(*const smithy.ShapeInfo),
     file_state: FileGenerationState,
     // we will need some sort of "type decls needed" for recursive structures
-    allocator: *std.mem.Allocator,
+    allocator: std.mem.Allocator,
     indent_level: u64,
 };
 
@@ -289,7 +289,7 @@ fn outputIndent(state: GenerationState, writer: anytype) !void {
     const n_chars = 4 * state.indent_level;
     try writer.writeByteNTimes(' ', n_chars);
 }
-fn generateOperation(allocator: *std.mem.Allocator, operation: smithy.ShapeInfo, file_state: FileGenerationState, writer: anytype) !void {
+fn generateOperation(allocator: std.mem.Allocator, operation: smithy.ShapeInfo, file_state: FileGenerationState, writer: anytype) !void {
     const snake_case_name = try snake.fromPascalCase(allocator, operation.name);
     defer allocator.free(snake_case_name);
 
@@ -707,7 +707,7 @@ fn writeOptional(traits: ?[]smithy.Trait, writer: anytype, value: ?[]const u8) !
         _ = try writer.write(v);
     } else _ = try writer.write("?");
 }
-fn camelCase(allocator: *std.mem.Allocator, name: []const u8) ![]const u8 {
+fn camelCase(allocator: std.mem.Allocator, name: []const u8) ![]const u8 {
     const first_letter = name[0] + ('a' - 'A');
     return try std.fmt.allocPrint(allocator, "{c}{s}", .{ first_letter, name[1..] });
 }

@@ -7,7 +7,7 @@ fn defaultTransformer(field_name: []const u8, _: EncodingOptions) anyerror![]con
 pub const FieldNameTransformer = fn ([]const u8, EncodingOptions) anyerror![]const u8;
 
 pub const EncodingOptions = struct {
-    allocator: ?*std.mem.Allocator = null,
+    allocator: ?std.mem.Allocator = null,
     field_name_transformer: *const FieldNameTransformer = &defaultTransformer,
 };
 
@@ -97,7 +97,7 @@ fn testencode(expected: []const u8, value: anytype, options: EncodingOptions) !v
         fn write(self: *Self, bytes: []const u8) Error!usize {
             // std.debug.print("{s}\n", .{bytes});
             if (self.expected_remaining.len < bytes.len) {
-                std.debug.warn(
+                std.log.warn(
                     \\====== expected this output: =========
                     \\{s}
                     \\======== instead found this: =========
@@ -110,7 +110,7 @@ fn testencode(expected: []const u8, value: anytype, options: EncodingOptions) !v
                 return error.TooMuchData;
             }
             if (!std.mem.eql(u8, self.expected_remaining[0..bytes.len], bytes)) {
-                std.debug.warn(
+                std.log.warn(
                     \\====== expected this output: =========
                     \\{s}
                     \\======== instead found this: =========
