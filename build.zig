@@ -1,8 +1,16 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const Builder = @import("std").build.Builder;
+const GitRepoStep = @import("GitRepoStep.zig");
+const CopyStep = @import("CopyStep.zig");
 
 pub fn build(b: *Builder) !void {
+    const zfetch_repo = GitRepoStep.create(b, .{
+        .url = "https://github.com/truemedian/zfetch",
+        // .branch = "0.1.10", // branch also takes tags. Tag 0.1.10 isn't quite new enough
+        .sha = "271cab5da4d12c8f08e67aa0cd5268da100e52f1",
+    });
+
     // Standard target options allows the person running `zig build` to choose
     // what target to build for. Here we do not override the defaults, which
     // means any target is allowed, and the default is native. Other options
@@ -17,46 +25,30 @@ pub fn build(b: *Builder) !void {
     // https://github.com/ziglang/zig/issues/855
     exe.addPackagePath("smithy", "smithy/src/smithy.zig");
 
-    // This bitfield workaround will end up requiring a bunch of headers that
-    // currently mean building in the docker container is the best way to build
-    // TODO: Determine if it's a good idea to copy these files out of our
-    // docker container to the local fs so we can just build even outside
-    // the container. And maybe, just maybe these even get committed to
-    // source control?
-    exe.addCSourceFile("src/bitfield-workaround.c", &[_][]const u8{"-std=c99"});
-    const c_include_dirs = .{
-        "./src/",
-        "/usr/local/include",
-    };
-    inline for (c_include_dirs) |dir|
-        exe.addIncludeDir(dir);
-
-    const dependent_objects = .{
-        "/usr/local/lib64/libs2n.a",
-        "/usr/local/lib64/libcrypto.a",
-        "/usr/local/lib64/libssl.a",
-        "/usr/local/lib64/libaws-c-auth.a",
-        "/usr/local/lib64/libaws-c-cal.a",
-        "/usr/local/lib64/libaws-c-common.a",
-        "/usr/local/lib64/libaws-c-compression.a",
-        "/usr/local/lib64/libaws-c-http.a",
-        "/usr/local/lib64/libaws-c-io.a",
-    };
-    inline for (dependent_objects) |obj|
-        exe.addObjectFile(obj);
-
-    exe.linkSystemLibrary("c");
     exe.setTarget(target);
     exe.setBuildMode(mode);
 
-    exe.override_dest_dir = .{ .custom = ".." };
     exe.linkage = .static;
 
     // TODO: Strip doesn't actually fully strip the executable. If we're on
     //       linux we can run strip on the result, probably at the expense
     //       of busting cache logic
-    const is_strip = b.option(bool, "strip", "strip exe [true]") orelse true;
-    exe.strip = is_strip;
+    exe.strip = b.option(bool, "strip", "strip exe [true]") orelse true;
+    const copy_deps = CopyStep.create(
+        b,
+        "zfetch_deps.zig",
+        "libs/zfetch/deps.zig",
+    );
+    copy_deps.step.dependOn(&zfetch_repo.step);
+
+    exe.step.dependOn(&copy_deps.step);
+
+    // This import won't work unless we're already cloned. The way around
+    // this is to have a multi-stage build process, but that's a lot of work.
+    // Instead, I've copied the addPackage and tweaked it for the build prefix
+    // so we'll have to keep that in sync with upstream
+    // const zfetch = @import("libs/zfetch/build.zig");
+    exe.addPackage(getZfetchPackage(b, "libs/zfetch") catch unreachable);
 
     const run_cmd = exe.run();
     run_cmd.step.dependOn(b.getInstallStep());
@@ -84,10 +76,14 @@ pub fn build(b: *Builder) !void {
         }
     }
 
-    // TODO: Support > linux
-    if (builtin.os.tag == .linux) {
+    if (target.getOs().tag == .linux) {
+        // TODO: Support > linux with RunStep
+        // std.build.RunStep.create(null,null).cwd(std.fs.path.resolve(b.build_root, "codegen")).addArgs(...)
         const codegen = b.step("gen", "Generate zig service code from smithy models");
         codegen.dependOn(&b.addSystemCommand(&.{ "/bin/sh", "-c", "cd codegen && zig build" }).step);
+
+        // This can probably be triggered instead by GitRepoStep cloning the repo
+        // with models
         // Since codegen binary is built every time, if it's newer than our
         // service manifest we know it needs to be regenerated. So this step
         // will remove the service manifest if codegen has been touched, thereby
@@ -109,4 +105,40 @@ pub fn build(b: *Builder) !void {
     }
 
     exe.install();
+}
+
+fn getDependency(comptime lib_prefix: []const u8, comptime name: []const u8, comptime root: []const u8) !std.build.Pkg {
+    const path = lib_prefix ++ "/libs/" ++ name ++ "/" ++ root;
+
+    // We don't actually care if the dependency has been checked out, as
+    // GitRepoStep will handle that for us
+    // Make sure that the dependency has been checked out.
+    // std.fs.cwd().access(path, .{}) catch |err| switch (err) {
+    //     error.FileNotFound => {
+    //         std.log.err("zfetch: dependency '{s}' not checked out", .{name});
+    //
+    //         return err;
+    //     },
+    //     else => return err,
+    // };
+
+    return std.build.Pkg{
+        .name = name,
+        .path = .{ .path = path },
+    };
+}
+
+pub fn getZfetchPackage(b: *std.build.Builder, comptime lib_prefix: []const u8) !std.build.Pkg {
+    var dependencies = b.allocator.alloc(std.build.Pkg, 4) catch unreachable;
+
+    dependencies[0] = try getDependency(lib_prefix, "iguanaTLS", "src/main.zig");
+    dependencies[1] = try getDependency(lib_prefix, "network", "network.zig");
+    dependencies[2] = try getDependency(lib_prefix, "uri", "uri.zig");
+    dependencies[3] = try getDependency(lib_prefix, "hzzp", "src/main.zig");
+
+    return std.build.Pkg{
+        .name = "zfetch",
+        .path = .{ .path = lib_prefix ++ "/src/main.zig" },
+        .dependencies = dependencies,
+    };
 }

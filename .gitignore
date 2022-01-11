@@ -7,3 +7,4 @@ service_manifest.zig
 demo
 src/models/
 smithy/zig-out/
+libs/
