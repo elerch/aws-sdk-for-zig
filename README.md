@@ -1,6 +1,8 @@
-# AWS SDK for Zig
+# AWS SDK for Zig (zig-native branch)
 
-[![Build Status](https://drone.lerch.org/api/badges/lobo/aws-sdk-for-zig/status.svg)](https://drone.lerch.org/lobo/aws-sdk-for-zig)
+[![Build Status](https://drone.lerch.org/api/badges/lobo/aws-sdk-for-zig/status.svg?ref=refs/heads/zig-native)](https://drone.lerch.org/api/badges/lobo/aws-sdk-for-zig/status.svg?ref=refs/heads/zig-native)
+
+## WARNING: This branch is in development, with builds currently failing!
 
 This SDK currently supports all AWS services except EC2 and S3. These two
 services only support XML, and zig 0.8.0 and master both trigger compile
@@ -16,95 +18,28 @@ Running strip on the executable after compilation (it seems zig strip
 only goes so far), reduces this to 4.3M. This is for x86_linux,
 (which is all that's tested at the moment).
 
-# 2022-01-10 SDK Update
-
-To get smaller executable size and better portability with faster compilation,
-my intent is to rework the http communications using
-[requestz](https://github.com/ducdetronquito/requestz).  This relies on a
-couple other projects, and will require the creation of a zig implementation
-for [Signature Version 4](https://docs.aws.amazon.com/general/latest/gr/signature-version-4.html),
-along with support for some S3 quirks, etc. It will also reduce compatibility
-with some edge cases. Long term I think this is a better approach, however and
-will remove (or replace) a ton of the C dependencies as well as avoid a bunch
-of complexity such as the event loop C implementation found in the AWS
-libraries, which eventually could be replaced by zig async. I have created a
-[new branch](https://github.com/elerch/aws-sdk-for-zig/tree/zig-native)
-for this work as master is currently working fairly well. I'd also love to have
-an official package manager in zig, but I know this is high on the priority
-list for the foundation. In the meantime I will depend on git commands executed
-by build.zig to handle packages.
-
 ## Building
 
-I am assuming here that if you're playing with zig, you pretty much know
-what you're doing, so I will stay brief.
+`zig build` should work. It will build the code generation project, run
+the code generation, then build the main project with the generated code.
+There is also a Makefile included, but this hasn't been used in a while
+and I'm not sure that works at the moment.
 
-First, the dependencies are required. Use the Dockerfile to build these.
-a `docker build` will do, but be prepared for it to run a while. The
-Dockerfile has been tested on x86_64 linux, but I do hope to get arm64
-supported as well.
-
-Once that's done, you'll have an alpine image with all dependencies ready
-to go and zig master installed. There are some build-related things still
-broken in 0.8.0 and hopefully 0.8.1 will address those and we can be on
-a standard release.
-
-* `zig build` should work. It will build the code generation project, run
-  the code generation, then build the main project with the generated code.
-  There is also a Makefile included, but this hasn't been used in a while
-  and I'm not sure that works at the moment.
+First time build should use `zig build -Dfetch` to fetch dependent packages
+(zfetch and friends).
 
 ## Running
 
-This library uses the aws c libraries for it's work, so it operates like most
-other 'AWS things'. Note that I tested by setting the appropriate environment
-variables, so config files haven't gotten a run through.
-main.zig gives you a handful of examples for working with services.
+This library mimics the aws c libraries for it's work, so it operates like most
+other 'AWS things'. main.zig gives you a handful of examples for working with services.
 For local testing or alternative endpoints, there's no real standard, so
 there is code to look for `AWS_ENDPOINT_URL` environment variable that will
-supercede all other configuration.
-
-## Dependencies
-
-
-Full dependency tree:
-aws-c-auth
-   * s2n
-      * aws-lc
-   * aws-c-common
-   * aws-c-compression
-     * aws-c-common
-   * aws-c-http
-     * s2n
-     * aws-c-common
-     * aws-c-io
-       * aws-c-common
-       * s2n
-         * aws-lc
-       * aws-c-cal
-         * aws-c-common
-         * aws-lc
-     * aws-c-compression
-       * aws-c-common
-   * aws-c-cal
-     * aws-c-common
-     * aws-lc
-
-Build order based on above:
-
-1. aws-c-common
-1. aws-lc
-2. s2n
-2. aws-c-cal
-2. aws-c-compression
-3. aws-c-io
-4. aws-c-http
-5. aws-c-auth
-
-Dockerfile in this repo will manage this
+supersede all other configuration.
 
 TODO List:
 
+* Implement credentials provider
+* Implement sigv4 signing
 * Implement jitter/exponential backoff. This appears to be configuration of
   `aws_c_io` and should therefore be trivial
 * Implement timeouts and other TODO's in the code
@@ -117,6 +52,7 @@ TODO List:
   self-hosted compiler coming in zig 0.9.0 (January 2022) due to compiler bug
   discovered. More details and llvm ir log can be found in the
   [XML branch](https://git.lerch.org/lobo/aws-sdk-for-zig/src/branch/xml).
+* Implement sigv4a signing
 
 Compiler wishlist/watchlist:
 
