@@ -37,10 +37,7 @@ const Tests = enum {
 };
 
 pub fn main() anyerror!void {
-    const c_allocator = std.heap.c_allocator;
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){
-        .backing_allocator = c_allocator,
-    };
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
     var tests = std.ArrayList(Tests).init(allocator);

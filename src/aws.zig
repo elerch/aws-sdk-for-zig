@@ -1,6 +1,6 @@
 const std = @import("std");
 
-const awshttp = @import("awshttp.zig");
+const awshttp = @import("aws_http.zig");
 const json = @import("json.zig");
 const url = @import("url.zig");
 const case = @import("case.zig");
