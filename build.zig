@@ -3,7 +3,8 @@ const builtin = @import("builtin");
 const Builder = @import("std").build.Builder;
 const GitRepoStep = @import("GitRepoStep.zig");
 const CopyStep = @import("CopyStep.zig");
-const @"test" = @import("build_test.zig");
+const tst = @import("build_test.zig");
+const VersionStep = @import("VersionStep.zig");
 
 pub fn build(b: *Builder) !void {
     const zfetch_repo = GitRepoStep.create(b, .{
@@ -42,6 +43,8 @@ pub fn build(b: *Builder) !void {
     );
     copy_deps.step.dependOn(&zfetch_repo.step);
 
+    const version = VersionStep.create(b, null);
+    exe.step.dependOn(&version.step);
     exe.step.dependOn(&copy_deps.step);
 
     // This import won't work unless we're already cloned. The way around
@@ -60,7 +63,8 @@ pub fn build(b: *Builder) !void {
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
 
-    var test_step = try @"test".addTestStep(b, mode, exe.packages.items);
+    var test_step = try tst.addTestStep(b, mode, exe.packages.items);
+    test_step.dependOn(&version.step);
 
     if (target.getOs().tag == .linux) {
         // TODO: Support > linux with RunStep
