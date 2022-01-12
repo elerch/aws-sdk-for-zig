@@ -3,6 +3,7 @@ const builtin = @import("builtin");
 const Builder = @import("std").build.Builder;
 const GitRepoStep = @import("GitRepoStep.zig");
 const CopyStep = @import("CopyStep.zig");
+const @"test" = @import("build_test.zig");
 
 pub fn build(b: *Builder) !void {
     const zfetch_repo = GitRepoStep.create(b, .{
@@ -59,22 +60,7 @@ pub fn build(b: *Builder) !void {
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
 
-    const test_step = b.step("test", "Run library tests");
-    var build_dir = try std.fs.openDirAbsolute(b.build_root, .{});
-    defer build_dir.close();
-    var src_dir = try build_dir.openDir("src", .{ .iterate = true });
-    defer src_dir.close();
-    var iterator = src_dir.iterate();
-    while (try iterator.next()) |entry| {
-        if (std.mem.endsWith(u8, entry.name, ".zig")) {
-            const name = try std.fmt.allocPrint(b.allocator, "src/{s}", .{entry.name});
-            defer b.allocator.free(name);
-            const t = b.addTest(name);
-            t.addPackagePath("smithy", "smithy/src/smithy.zig");
-            t.setBuildMode(mode);
-            test_step.dependOn(&t.step);
-        }
-    }
+    var test_step = try @"test".addTestStep(b, mode, exe.packages.items);
 
     if (target.getOs().tag == .linux) {
         // TODO: Support > linux with RunStep
