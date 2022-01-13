@@ -3,7 +3,7 @@ const aws = @import("aws.zig");
 const json = @import("json.zig");
 const version = @import("git_version.zig");
 
-var verbose = false;
+var verbose = true;
 
 pub fn log(
     comptime level: std.log.Level,

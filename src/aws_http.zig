@@ -121,17 +121,17 @@ pub const AwsHttp = struct {
         // destroys, etc
 
         // TODO: Add headers
-        _ = endpoint;
-        //try self.addHeaders(endpoint.host, request.body, request.content_type, request.headers);
-        if (signing_config) |opts| try signing.signRequest(self.allocator, request, opts);
-
-        // TODO: make req
         try zfetch.init(); // This only does anything on Windows. Not sure how performant it is to do this on every request
         defer zfetch.deinit();
         var headers = zfetch.Headers.init(self.allocator);
         defer headers.deinit();
         for (request.headers) |header|
             try headers.appendValue(header.name, header.value);
+        try addHeaders(self.allocator, &headers, endpoint.host, request.body, request.content_type, request.headers);
+
+        if (signing_config) |opts| try signing.signRequest(self.allocator, request, opts);
+
+        // TODO: make req
 
         // TODO: Construct URL with endpoint and request info
         var req = try zfetch.Request.init(self.allocator, "https://www.lerch.org", null);
@@ -168,69 +168,21 @@ pub const AwsHttp = struct {
         };
         return rc;
     }
-
-    fn addHeaders(self: Self, host: []const u8, body: []const u8, content_type: []const u8, additional_headers: []Header) !void {
-        _ = self;
-        _ = host;
-        _ = body;
-        _ = content_type;
-        _ = additional_headers;
-        // const accept_header = c.aws_http_header{
-        //     .name = c.aws_byte_cursor_from_c_str("Accept"),
-        //     .value = c.aws_byte_cursor_from_c_str("application/json"),
-        //     .compression = 0, // .AWS_HTTP_HEADER_COMPRESSION_USE_CACHE, // https://github.com/awslabs/aws-c-http/blob/ec42882310900f2b414b279fc24636ba4653f285/include/aws/http/request_response.h#L37
-        // };
-
-        // const host_header = c.aws_http_header{
-        //     .name = c.aws_byte_cursor_from_c_str("Host"),
-        //     .value = c.aws_byte_cursor_from_c_str(@ptrCast([*c]const u8, host)),
-        //     .compression = 0, // .AWS_HTTP_HEADER_COMPRESSION_USE_CACHE,
-        // };
-
-        // const user_agent_header = c.aws_http_header{
-        //     .name = c.aws_byte_cursor_from_c_str("User-Agent"),
-        //     .value = c.aws_byte_cursor_from_c_str("zig-aws 1.0, Powered by the AWS Common Runtime."),
-        //     .compression = 0, // .AWS_HTTP_HEADER_COMPRESSION_USE_CACHE,
-        // };
-
-        // AWS *does* seem to care about Content-Type. I don't think this header
-        // will hold for all APIs
-        // const c_type = try std.fmt.allocPrintZ(self.allocator, "{s}", .{content_type});
-        // defer self.allocator.free(c_type);
-        // const content_type_header = c.aws_http_header{
-        //     .name = c.aws_byte_cursor_from_c_str("Content-Type"),
-        //     .value = c.aws_byte_cursor_from_c_str(c_type),
-        //     .compression = 0, // .AWS_HTTP_HEADER_COMPRESSION_USE_CACHE,
-        // };
-        //
-        // for (additional_headers) |h| {
-        //     const name = try std.fmt.allocPrintZ(self.allocator, "{s}", .{h.name});
-        //     defer self.allocator.free(name);
-        //     const value = try std.fmt.allocPrintZ(self.allocator, "{s}", .{h.value});
-        //     defer self.allocator.free(value);
-        //     const c_header = c.aws_http_header{
-        //         .name = c.aws_byte_cursor_from_c_str(name),
-        //         .value = c.aws_byte_cursor_from_c_str(value),
-        //         .compression = 0, // .AWS_HTTP_HEADER_COMPRESSION_USE_CACHE,
-        //     };
-        //     if (c.aws_http_message_add_header(request, c_header) != c.AWS_OP_SUCCESS)
-        //         return AwsError.AddHeaderError;
-        // }
-        //
-        // if (body.len > 0) {
-        //     const len = try std.fmt.allocPrintZ(self.allocator, "{d}", .{body.len});
-        //     // This defer seems to work ok, but I'm a bit concerned about why
-        //     defer self.allocator.free(len);
-        //     const content_length_header = c.aws_http_header{
-        //         .name = c.aws_byte_cursor_from_c_str("Content-Length"),
-        //         .value = c.aws_byte_cursor_from_c_str(@ptrCast([*c]const u8, len)),
-        //         .compression = 0, // .AWS_HTTP_HEADER_COMPRESSION_USE_CACHE,
-        //     };
-        //     if (c.aws_http_message_add_header(request, content_length_header) != c.AWS_OP_SUCCESS)
-        //         return AwsError.AddHeaderError;
-        // }
-    }
 };
+
+fn addHeaders(allocator: std.mem.Allocator, z_headers: *zfetch.Headers, host: []const u8, body: []const u8, content_type: []const u8, additional_headers: []Header) !void {
+    try z_headers.appendValue("Accept", "application/json");
+    try z_headers.appendValue("Host", host);
+    try z_headers.appendValue("User-Agent", "zig-aws 1.0, Powered by the AWS Common Runtime.");
+    try z_headers.appendValue("Content-Type", content_type);
+    for (additional_headers) |h|
+        try z_headers.appendValue(h.name, h.value);
+    if (body.len > 0) {
+        const len = try std.fmt.allocPrint(allocator, "{d}", .{body.len});
+        defer allocator.free(len);
+        try z_headers.appendValue("Content-Length", len);
+    }
+}
 
 fn fullCast(comptime T: type, val: anytype) T {
     return @ptrCast(T, @alignCast(@alignOf(T), val));
