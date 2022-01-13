@@ -84,6 +84,9 @@ fn getGitVersion(allocator: std.mem.Allocator, git_working_root: ?[]const u8, en
     // 2022-01-12 12:21:28 -0800
     // HEAD -> zig-native
 
+    if (std.os.getenv("DRONE_COMMIT_SHA") != null)
+        return getGitVersionFromDrone(allocator);
+
     const log_output = try run(
         allocator,
         &[_][]const u8{
@@ -126,6 +129,18 @@ fn getGitVersion(allocator: std.mem.Allocator, git_working_root: ?[]const u8, en
         }
         break :blk "";
     };
+
+    return GitVersion{
+        .hash = hash,
+        .abbreviated_hash = abbrev_hash,
+        .commit_date = date,
+        .branch = branch,
+        .allocator = allocator,
+        .dirty = dirty,
+        .pretty_version = try prettyVersion(allocator, abbrev_hash, date, dirty_str),
+    };
+}
+fn prettyVersion(allocator: std.mem.Allocator, abbrev_hash: []const u8, date: []const u8, dirty_str: []const u8) ![]const u8 {
     const pretty_version: []const u8 = try std.fmt.allocPrint(
         allocator,
         "version {s}, committed at {s}{s}",
@@ -135,15 +150,20 @@ fn getGitVersion(allocator: std.mem.Allocator, git_working_root: ?[]const u8, en
             dirty_str,
         },
     );
+    return pretty_version;
+}
 
+fn getGitVersionFromDrone(allocator: std.mem.Allocator) !GitVersion {
+    const abbrev_hash = std.os.getenv("DRONE_COMMIT_SHA").?[0..7]; // This isn't quite how git works, but ok
+    const date = std.os.getenv("DRONE_BUILD_STARTED").?; // this is a timestamp :(
     return GitVersion{
-        .hash = hash,
+        .hash = std.os.getenv("DRONE_COMMIT_SHA").?,
         .abbreviated_hash = abbrev_hash,
         .commit_date = date,
-        .branch = branch,
+        .branch = std.os.getenv("DRONE_COMMIT_BRANCH").?,
         .allocator = allocator,
-        .dirty = dirty,
-        .pretty_version = pretty_version,
+        .dirty = false,
+        .pretty_version = try prettyVersion(allocator, abbrev_hash, date, ""),
     };
 }
 fn getLines(allocator: std.mem.Allocator, comptime line_count: u32, data: []const u8) ![line_count][]u8 {

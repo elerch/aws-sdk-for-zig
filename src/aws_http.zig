@@ -184,10 +184,6 @@ fn addHeaders(allocator: std.mem.Allocator, z_headers: *zfetch.Headers, host: []
     }
 }
 
-fn fullCast(comptime T: type, val: anytype) T {
-    return @ptrCast(T, @alignCast(@alignOf(T), val));
-}
-
 fn regionSubDomain(allocator: std.mem.Allocator, service: []const u8, region: []const u8, useDualStack: bool) !EndPoint {
     const environment_override = std.os.getenv("AWS_ENDPOINT_URL");
     if (environment_override) |override| {
