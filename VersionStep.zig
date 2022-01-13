@@ -84,10 +84,7 @@ fn getGitVersion(allocator: std.mem.Allocator, git_working_root: ?[]const u8, en
     // 2022-01-12 12:21:28 -0800
     // HEAD -> zig-native
 
-    if (std.os.getenv("DRONE_COMMIT_SHA") != null)
-        return getGitVersionFromDrone(allocator);
-
-    const log_output = try run(
+    const log_output = run(
         allocator,
         &[_][]const u8{
             "git",
@@ -97,7 +94,11 @@ fn getGitVersion(allocator: std.mem.Allocator, git_working_root: ?[]const u8, en
         },
         git_working_root,
         env,
-    );
+    ) catch |e| {
+        if (std.os.getenv("DRONE_COMMIT_SHA") != null)
+            return getGitVersionFromDrone(allocator);
+        return e;
+    };
     defer allocator.free(log_output);
     const line_data = try getLines(allocator, 4, log_output);
     const hash = line_data[0];
