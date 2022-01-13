@@ -1,6 +1,7 @@
 const std = @import("std");
 const aws = @import("aws.zig");
 const json = @import("json.zig");
+const version = @import("git_version.zig");
 
 var verbose = false;
 
@@ -43,9 +44,13 @@ pub fn main() anyerror!void {
     var tests = std.ArrayList(Tests).init(allocator);
     defer tests.deinit();
     var args = std.process.args();
+    var first = true;
     while (args.next(allocator)) |arg_or_error| {
         const arg = try arg_or_error;
         defer allocator.free(arg);
+        if (first)
+            std.log.info("{s} {s}", .{ arg, version.pretty_version });
+        first = false;
         if (std.mem.eql(u8, "-v", arg)) {
             verbose = true;
             continue;
