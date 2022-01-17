@@ -227,7 +227,7 @@ pub fn Request(comptime action: anytype) type {
             // look at the return type
             var isJson: bool = undefined;
             for (response.headers) |h| {
-                if (std.mem.eql(u8, "Content-Type", h.name)) {
+                if (std.ascii.eqlIgnoreCase("Content-Type", h.name)) {
                     if (std.mem.startsWith(u8, h.value, "application/json")) {
                         isJson = true;
                     } else if (std.mem.startsWith(u8, h.value, "application/x-amz-json-1.0")) {
