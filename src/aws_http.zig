@@ -120,7 +120,6 @@ pub const AwsHttp = struct {
         // End CreateRequest. This should return a struct with a deinit function that can do
         // destroys, etc
 
-        // TODO: Add headers
         try zfetch.init(); // This only does anything on Windows. Not sure how performant it is to do this on every request
         defer zfetch.deinit();
         var headers = zfetch.Headers.init(self.allocator);
@@ -128,41 +127,54 @@ pub const AwsHttp = struct {
         for (request.headers) |header|
             try headers.appendValue(header.name, header.value);
         try addHeaders(self.allocator, &headers, endpoint.host, request.body, request.content_type, request.headers);
+        log.debug("All Request Headers:", .{});
+        for (headers.list.items) |h|
+            log.debug("\t{s}: {s}", .{ h.name, h.value });
 
         if (signing_config) |opts| try signing.signRequest(self.allocator, request, opts);
 
-        // TODO: make req
-
         // TODO: Construct URL with endpoint and request info
-        var req = try zfetch.Request.init(self.allocator, "https://www.lerch.org", null);
+        var req = try zfetch.Request.init(self.allocator, "https://httpbin.org/post", null);
+        defer req.deinit();
 
-        // TODO: http method as requested
-        // TODO: payload
-        try req.do(.GET, headers, null);
+        const method = std.meta.stringToEnum(zfetch.Method, request.method).?;
+        try req.do(method, headers, if (request.body.len == 0) null else request.body);
 
         // TODO: Timeout - is this now above us?
         log.debug("request_complete. Response code {d}: {s}", .{ req.status.code, req.status.reason });
-        log.debug("headers:", .{});
+        log.debug("Response headers:", .{});
         var resp_headers = try std.ArrayList(Header).initCapacity(self.allocator, req.headers.list.items.len);
+        defer resp_headers.deinit();
+        var content_length: usize = 0;
         for (req.headers.list.items) |h| {
             log.debug("    {s}: {s}", .{ h.name, h.value });
-            resp_headers.appendAssumeCapacity(.{ .name = h.name, .value = h.value });
+            resp_headers.appendAssumeCapacity(.{
+                .name = try (self.allocator.dupe(u8, h.name)),
+                .value = try (self.allocator.dupe(u8, h.value)),
+            });
+            if (content_length == 0 and std.ascii.eqlIgnoreCase("content-length", h.name))
+                content_length = std.fmt.parseInt(usize, h.value, 10) catch 0;
         }
         const reader = req.reader();
         // TODO: Get content length and use that to allocate the buffer
+        // Content length can be missing, and why would we trust it anyway
         var buf: [65535]u8 = undefined;
+        var resp_payload = try std.ArrayList(u8).initCapacity(self.allocator, content_length);
+        defer resp_payload.deinit();
+
         while (true) {
             const read = try reader.read(&buf);
+            try resp_payload.appendSlice(buf[0..read]);
             if (read == 0) break;
         }
-        log.debug("raw response body:\n{s}", .{buf});
+        log.debug("raw response body:\n{s}", .{resp_payload.items});
 
         // Headers would need to be allocated/copied into HttpResult similar
         // to RequestContext, so we'll leave this as a later excercise
         // if it becomes necessary
         const rc = HttpResult{
             .response_code = req.status.code,
-            .body = "change me", // TODO: work this all out
+            .body = resp_payload.toOwnedSlice(),
             .headers = resp_headers.toOwnedSlice(),
             .allocator = self.allocator,
         };
