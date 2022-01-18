@@ -6,7 +6,7 @@ const std = @import("std");
 
 pub const DateTime = struct { day: u8, month: u8, year: u16, hour: u8, minute: u8, second: u8 };
 
-pub fn timestamp2DateTime(timestamp: i64) DateTime {
+pub fn timestampToDateTime(timestamp: i64) DateTime {
 
     // aus https://de.wikipedia.org/wiki/Unixzeit
     const unixtime = @intCast(u64, timestamp);
@@ -32,7 +32,7 @@ pub fn timestamp2DateTime(timestamp: i64) DateTime {
     year += @intCast(u16, temp);
     dayN -= DAYS_PER_YEAR * temp + temp / 4;
 
-    // TagN calculates the days of the year in relation to March 1
+    // dayN calculates the days of the year in relation to March 1
     var month = @intCast(u8, (5 * dayN + 2) / 153);
     var day = @intCast(u8, dayN - (@intCast(u64, month) * 153 + 2) / 5 + 1);
     //  153 = 31+30+31+30+31 Days for the 5 months from March through July
@@ -66,14 +66,16 @@ pub fn printDateTime(dt: DateTime) void {
 }
 
 pub fn printNowUtc() void {
-    printDateTime(timestamp2DateTime(std.time.timestamp()));
+    printDateTime(timestampToDateTime(std.time.timestamp()));
 }
 
 test "GMT and localtime" {
     std.testing.log_level = .debug;
     std.log.debug("\n", .{});
-    printDateTime(timestamp2DateTime(std.time.timestamp()));
-    try std.testing.expectEqual(DateTime{ .year = 2020, .month = 8, .day = 28, .hour = 9, .minute = 32, .second = 27 }, timestamp2DateTime(1598607147));
+    printDateTime(timestampToDateTime(std.time.timestamp()));
+    try std.testing.expectEqual(DateTime{ .year = 2020, .month = 8, .day = 28, .hour = 9, .minute = 32, .second = 27 }, timestampToDateTime(1598607147));
 
-    try std.testing.expectEqual(DateTime{ .year = 2020, .month = 11, .day = 1, .hour = 5, .minute = 6, .second = 7 }, timestamp2DateTime(1604207167));
+    try std.testing.expectEqual(DateTime{ .year = 2020, .month = 11, .day = 1, .hour = 5, .minute = 6, .second = 7 }, timestampToDateTime(1604207167));
+    // Get time for date: https://wtools.io/convert-date-time-to-unix-time
+    try std.testing.expectEqual(DateTime{ .year = 2015, .month = 08, .day = 30, .hour = 12, .minute = 36, .second = 00 }, timestampToDateTime(1440938160));
 }
