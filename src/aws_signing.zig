@@ -1,6 +1,7 @@
 const std = @import("std");
 const base = @import("aws_http_base.zig");
 const auth = @import("aws_authentication.zig");
+const date = @import("date.zig");
 
 const log = std.log.scoped(.aws_signing);
 
@@ -33,6 +34,7 @@ pub const Config = struct {
     algorithm: enum { v4, v4a } = .v4,
     // https://github.com/awslabs/aws-c-auth/blob/ace1311f8ef6ea890b26dd376031bed2721648eb/include/aws/auth/signing_config.h#L24
     // config_type: ?? // CRT only has one value. We'll ignore for now
+
     // https://github.com/awslabs/aws-c-auth/blob/ace1311f8ef6ea890b26dd376031bed2721648eb/include/aws/auth/signing_config.h#L49
     signature_type: enum {
         headers, // we only support this
@@ -42,7 +44,9 @@ pub const Config = struct {
         canonical_request_headers,
         canonical_request_query_params,
     } = .headers,
-    signing_time: ?i64 = null, // Used for testing. If null, will use current time
+
+    /// Used for testing. If null, will use current time
+    signing_time: ?i64 = null,
 
     // In the CRT, should_sign_header is a function to allow header filtering.
     // The _ud would be a anyopaque user defined data for the function to use
@@ -68,15 +72,169 @@ pub const Config = struct {
 pub const SignatureType = enum { sha256, none };
 pub const SigningError = error{
     NotImplemented,
-};
+    S3NotImplemented,
 
-pub fn signRequest(allocator: std.mem.Allocator, http_request: base.Request, config: Config) SigningError!void {
-    _ = allocator;
-    _ = http_request;
+    // There are a number of forbidden headers that the signing process
+    // basically "owns". For clarity, and because zig does not have a way
+    // to provide an error message
+    //
+    /// Used if the request headers already includes X-Amz-Date
+    /// If a specific date is required, use a specific signing_time in config
+    XAmzDateHeaderInRequest,
+    /// Used if the request headers already includes Authorization
+    AuthorizationHeaderInRequest,
+    /// Used if the request headers already includes x-amz-content-sha256
+    XAmzContentSha256HeaderInRequest,
+    /// Used if the request headers already includes x-amz-signature
+    XAmzSignatureHeaderInRequest,
+    /// Used if the request headers already includes x-amz-algorithm
+    XAmzAlgorithmHeaderInRequest,
+    /// Used if the request headers already includes x-amz-credential
+    XAmzCredentialHeaderInRequest,
+    /// Used if the request headers already includes x-amz-signedheaders
+    XAmzSignedHeadersHeaderInRequest,
+    /// Used if the request headers already includes x-amz-security-token
+    XAmzSecurityTokenHeaderInRequest,
+    /// Used if the request headers already includes x-amz-expires
+    XAmzExpiresHeaderInRequest,
+    /// Used if the request headers already includes x-amz-region-set
+    XAmzRegionSetHeaderInRequest,
+} || std.fmt.AllocPrintError;
+
+/// Signs a request. Only header signing is currently supported. Note that
+/// This adds two headers to the request, which will need to be freed by the
+/// caller. Use freeSignedRequest with the same parameters to free
+pub fn signRequest(allocator: std.mem.Allocator, request: *base.Request, config: Config) SigningError!void {
     try validateConfig(config);
+    for (request.headers) |h| {
+        inline for (forbidden_headers) |f| {
+            if (std.ascii.eqlIgnoreCase(h.name, f.name))
+                return f.err;
+        }
+    }
+
+    const signing_time = config.signing_time orelse std.time.timestamp();
+
+    const signed_date = date.timestampToDateTime(signing_time);
+
+    const signing_iso8601 = try std.fmt.allocPrint(
+        allocator,
+        "{:0>4}{:0>2}{:0>2}T{:0>2}{:0>2}{:0<2}Z",
+        .{
+            signed_date.year,
+            signed_date.month,
+            signed_date.day,
+            signed_date.hour,
+            signed_date.minute,
+            signed_date.second,
+        },
+    );
+    errdefer freeSignedRequest(allocator, request, config);
+
+    request.headers = allocator.resize(request.headers, request.headers.len + 1).?;
+    errdefer freeSignedRequest(allocator, request, config);
+    request.headers[request.headers.len - 1] = base.Header{
+        .name = "X-Amz-Date",
+        .value = signing_iso8601,
+    };
     log.debug("Signing with access key: {s}", .{config.credentials.access_key});
+    const canonical_request = try createCanonicalRequest(allocator, request.*, config);
+    defer {
+        allocator.free(canonical_request.arr);
+        allocator.free(canonical_request.hash);
+        allocator.free(canonical_request.headers.str);
+        allocator.free(canonical_request.headers.signed_headers);
+    }
+    const scope = try std.fmt.allocPrint(
+        allocator,
+        "{:0>4}{:0>2}{:0>2}/{s}/{s}/aws4_request",
+        .{
+            signed_date.year,
+            signed_date.month,
+            signed_date.day,
+            config.region,
+            config.service,
+        },
+    );
+    defer allocator.free(scope);
+
+    //Algorithm + \n +
+    //RequestDateTime + \n +
+    //CredentialScope + \n +
+    //HashedCanonicalRequest
+    const string_to_sign_fmt =
+        \\AWS4-HMAC-SHA256
+        \\{s}
+        \\{s}
+        \\{s}
+    ;
+    const string_to_sign = try std.fmt.allocPrint(
+        allocator,
+        string_to_sign_fmt,
+        .{
+            signing_iso8601,
+            scope,
+            canonical_request.hash,
+        },
+    );
+    defer allocator.free(string_to_sign);
+
+    const signing_key = try getSigningKey(allocator, scope[0..8], config);
+
+    request.headers = allocator.resize(request.headers, request.headers.len + 1).?;
+
+    request.headers[request.headers.len - 1] = base.Header{
+        .name = "Authorization",
+        .value = try std.fmt.allocPrint(
+            allocator,
+            "AWS4-HMAC-SHA256 Credential={s}/{s}, SignedHeaders={s}, Signature={s}",
+            .{
+                config.credentials.access_key,
+                scope,
+                canonical_request.headers.signed_headers,
+                std.fmt.fmtSliceHexLower(hmac(signing_key, string_to_sign)),
+            },
+        ),
+    };
 }
 
+pub fn freeSignedRequest(allocator: std.mem.Allocator, request: *base.Request, config: Config) void {
+    validateConfig(config) catch |e| {
+        log.err("Signing validation failed during signature free: {}", .{e});
+        if (@errorReturnTrace()) |trace| {
+            std.debug.dumpStackTrace(trace.*);
+        }
+        return;
+    };
+
+    var remove_len: u2 = 0;
+    for (request.headers) |h| {
+        if (std.ascii.eqlIgnoreCase(h.name, "X-Amz-Date") or std.ascii.eqlIgnoreCase(h.name, "Authorization")) {
+            allocator.free(h.value);
+            remove_len += 1;
+        }
+    }
+    request.headers = allocator.resize(request.headers, request.headers.len - remove_len).?;
+}
+
+fn getSigningKey(allocator: std.mem.Allocator, signing_date: []const u8, config: Config) ![]const u8 {
+    // TODO: This is designed for lots of caching. We need to work that out
+    // kSecret = your secret access key
+    // kDate = HMAC("AWS4" + kSecret, Date)
+    // kRegion = HMAC(kDate, Region)
+    // kService = HMAC(kRegion, Service)
+    // kSigning = HMAC(kService, "aws4_request")
+    var secret = try std.fmt.allocPrint(allocator, "AWS4{s}", .{config.credentials.secret_key});
+    defer {
+        for (secret) |_, i| secret[i] = 0; // zero our copy of secret
+        allocator.free(secret);
+    }
+    const k_date = hmac(secret, signing_date);
+    const k_region = hmac(k_date, config.region);
+    const k_service = hmac(k_region, config.service);
+    const k_signing = hmac(k_service, "aws4_request");
+    return k_signing;
+}
 fn validateConfig(config: Config) SigningError!void {
     if (config.signature_type != .headers or
         config.signed_body_header != .sha256 or
@@ -88,7 +246,20 @@ fn validateConfig(config: Config) SigningError!void {
         return SigningError.NotImplemented;
 }
 
-fn createCanonicalRequest(allocator: std.mem.Allocator, request: base.Request, config: Config) ![]const u8 {
+fn hmac(key: []const u8, data: []const u8) []const u8 {
+    var out: [std.crypto.auth.hmac.sha2.HmacSha256.mac_length]u8 = undefined;
+    std.crypto.auth.hmac.sha2.HmacSha256.create(&out, data, key);
+    return out[0..];
+    // const hasher = std.crypto.auth.hmac.sha2.HmacSha256.init(key);
+    // hasher.
+}
+const Hashed = struct {
+    arr: []const u8,
+    hash: []const u8,
+    headers: CanonicalHeaders,
+};
+
+fn createCanonicalRequest(allocator: std.mem.Allocator, request: base.Request, config: Config) !Hashed {
     // CanonicalRequest =
     // HTTPRequestMethod + '\n' +
     // CanonicalURI + '\n' +
@@ -112,11 +283,10 @@ fn createCanonicalRequest(allocator: std.mem.Allocator, request: base.Request, c
     const canonical_query = try canonicalQueryString(allocator, request.path);
     defer allocator.free(canonical_query);
     const canonical_headers = try canonicalHeaders(allocator, request.headers);
-    defer allocator.free(canonical_headers.str);
-    defer allocator.free(canonical_headers.signed_headers);
-    const payload_hash = try hashPayload(allocator, request.body, config.signed_body_header);
+    const payload_hash = try hash(allocator, request.body, config.signed_body_header);
     defer allocator.free(payload_hash);
-    return try std.fmt.allocPrint(allocator, fmt, .{
+
+    const canonical_request = try std.fmt.allocPrint(allocator, fmt, .{
         canonical_method,
         canonical_url,
         canonical_query,
@@ -124,6 +294,13 @@ fn createCanonicalRequest(allocator: std.mem.Allocator, request: base.Request, c
         canonical_headers.signed_headers,
         payload_hash,
     });
+    errdefer allocator.free(canonical_request);
+    const hashed = try hash(allocator, canonical_request, config.signed_body_header);
+    return Hashed{
+        .arr = canonical_request,
+        .hash = hashed,
+        .headers = canonical_headers,
+    };
 }
 
 fn canonicalRequestMethod(method: []const u8) ![]const u8 {
@@ -152,7 +329,7 @@ fn canonicalUri(allocator: std.mem.Allocator, path: []const u8, double_encode: b
     // For now, we will "Remove redundant and relative path components". This
     // doesn't apply to S3 anyway, and we'll make it the callers's problem
     if (!double_encode)
-        return error.S3NotImplemented;
+        return SigningError.S3NotImplemented;
     if (path.len == 0 or path[0] == '?' or path[0] == '#')
         return try allocator.dupe(u8, "/");
     const encoded_once = try encodeUri(allocator, path);
@@ -343,35 +520,43 @@ fn canonicalHeaders(allocator: std.mem.Allocator, headers: []base.Header) !Canon
     // my-header1:a b c\n
     // my-header2:"a b c"\n
     // x-amz-date:20150830T123600Z\n
-    var dest = try allocator.alloc(base.Header, headers.len);
+    var dest = try std.ArrayList(base.Header).initCapacity(allocator, headers.len);
     defer {
-        for (dest) |h| {
+        for (dest.items) |h| {
             allocator.free(h.name);
             allocator.free(h.value);
         }
-        allocator.free(dest);
+        dest.deinit();
     }
     var total_len: usize = 0;
     var total_name_len: usize = 0;
-    for (headers) |h, i| {
+    for (headers) |h| {
+        var skip = false;
+        inline for (skipped_headers) |s| {
+            if (std.ascii.eqlIgnoreCase(s, h.name)) {
+                skip = true;
+                break;
+            }
+        }
+        if (skip) continue;
+
         total_len += (h.name.len + h.value.len + 2);
         total_name_len += (h.name.len + 1);
         const value = try canonicalHeaderValue(allocator, h.value);
         defer allocator.free(value);
-        dest[i] = .{
-            .name = try std.ascii.allocLowerString(allocator, h.name),
-            .value = try std.fmt.allocPrint(allocator, "{s}", .{value}),
-        };
+        const n = try std.ascii.allocLowerString(allocator, h.name);
+        const v = try std.fmt.allocPrint(allocator, "{s}", .{value});
+        try dest.append(.{ .name = n, .value = v });
     }
 
-    std.sort.sort(base.Header, dest, {}, lessThan);
+    std.sort.sort(base.Header, dest.items, {}, lessThan);
 
     var dest_str = try std.ArrayList(u8).initCapacity(allocator, total_len);
     defer dest_str.deinit();
     var signed_headers = try std.ArrayList(u8).initCapacity(allocator, total_name_len);
     defer signed_headers.deinit();
     var first = true;
-    for (dest) |h| {
+    for (dest.items) |h| {
         dest_str.appendSliceAssumeCapacity(h.name);
         dest_str.appendAssumeCapacity(':');
         dest_str.appendSliceAssumeCapacity(h.value);
@@ -416,7 +601,7 @@ fn lessThan(context: void, lhs: base.Header, rhs: base.Header) bool {
     return std.ascii.lessThanIgnoreCase(lhs.name, rhs.name);
 }
 
-fn hashPayload(allocator: std.mem.Allocator, payload: []const u8, sig_type: SignatureType) ![]const u8 {
+fn hash(allocator: std.mem.Allocator, payload: []const u8, sig_type: SignatureType) ![]const u8 {
     if (sig_type != .sha256)
         return error.NotImplemented;
     const to_hash = blk: {
@@ -468,6 +653,7 @@ test "canonical headers" {
     defer headers.deinit();
     try headers.append(.{ .name = "Host", .value = "iam.amazonaws.com" });
     try headers.append(.{ .name = "Content-Type", .value = "application/x-www-form-urlencoded; charset=utf-8" });
+    try headers.append(.{ .name = "User-Agent", .value = "This header should be skipped" });
     try headers.append(.{ .name = "My-header1", .value = "  a  b  c  " });
     try headers.append(.{ .name = "X-Amz-Date", .value = "20150830T123600Z" });
     try headers.append(.{ .name = "My-header2", .value = "  \"a  b  c\"  " });
@@ -521,11 +707,15 @@ test "canonical request" {
             .secret_key = "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY",
             .session_token = null,
         },
-        .signing_time = 1642187728, // Should be 2015-08-30T12:36:00Z. Does zig stdlib have date parsing?
+        .signing_time = 1440938160, // 20150830T123600Z
     });
-    defer allocator.free(request);
-    std.log.debug("canonical request:\n{s}", .{request});
-    try std.testing.expect(request.len > 0); // TODO: improvify this
+    defer allocator.free(request.arr);
+    defer allocator.free(request.hash);
+    defer allocator.free(request.headers.str);
+    defer allocator.free(request.headers.signed_headers);
+    log.debug("canonical request:\n{s}", .{request.arr});
+    log.debug("canonical request hash: {s}", .{request.hash});
+    try std.testing.expect(request.arr.len > 0); // TODO: improvify this
 
 }
 test "can sign" {
@@ -556,7 +746,7 @@ test "can sign" {
     try headers.append(.{ .name = "User-Agent", .value = "zig-aws 1.0, Powered by the AWS Common Runtime." });
     try headers.append(.{ .name = "Host", .value = "sts.us-west-2.amazonaws.com" });
     try headers.append(.{ .name = "Accept", .value = "application/json" });
-    const req = base.Request{
+    var req = base.Request{
         .path = "/",
         .query = "",
         .body = "Action=GetCallerIdentity&Version=2011-06-15",
@@ -574,14 +764,44 @@ test "can sign" {
     // https://github.com/awslabs/aws-c-auth/blob/ace1311f8ef6ea890b26dd376031bed2721648eb/tests/sigv4_signing_tests.c#L1478
     //
     // for valid signatures. TODO: Get literally anything working first
-    try signRequest(allocator, req, .{
-        .region = "us-west-2", // us-east-1
-        .service = "sts", // service
+    const config = Config{
+        .region = "us-east-1",
+        .service = "service",
         .credentials = .{
             .access_key = "AKIDEXAMPLE",
             .secret_key = "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY",
-            .session_token = null,
+            .session_token = null, // TODO: add session token. I think we need X-Amz-Security-Token for that. Also, x-amz-region-set looks like part of v4a that will need to be dealt with eventually
         },
-        .signing_time = 1642187728, // Should be 2015-08-30T12:36:00Z. Does zig stdlib have date parsing?
-    });
+        .signing_time = 1440938160, // 20150830T123600Z
+    };
+    // TODO: There is an x-amz-content-sha256. Investigate
+    //
+    try signRequest(allocator, &req, config);
+    defer freeSignedRequest(allocator, &req, config);
+    try std.testing.expectEqualStrings("X-Amz-Date", req.headers[req.headers.len - 2].name);
+    try std.testing.expectEqualStrings("20150830T123600Z", req.headers[req.headers.len - 2].value);
+    log.debug("{s}", .{req.headers[req.headers.len - 1].value});
+    log.debug("{s}", .{req.headers[req.headers.len - 1].value});
 }
+const forbidden_headers = .{
+    .{ .name = "x-amz-content-sha256", .err = SigningError.XAmzContentSha256HeaderInRequest },
+    .{ .name = "Authorization", .err = SigningError.AuthorizationHeaderInRequest },
+    .{ .name = "X-Amz-Signature", .err = SigningError.XAmzSignatureHeaderInRequest },
+    .{ .name = "X-Amz-Algorithm", .err = SigningError.XAmzAlgorithmHeaderInRequest },
+    .{ .name = "X-Amz-Credential", .err = SigningError.XAmzCredentialHeaderInRequest },
+    .{ .name = "X-Amz-Date", .err = SigningError.XAmzDateHeaderInRequest },
+    .{ .name = "X-Amz-SignedHeaders", .err = SigningError.XAmzSignedHeadersHeaderInRequest },
+    .{ .name = "X-Amz-Security-Token", .err = SigningError.XAmzSecurityTokenHeaderInRequest },
+    .{ .name = "X-Amz-Expires", .err = SigningError.XAmzExpiresHeaderInRequest },
+    .{ .name = "X-Amz-Region-Set", .err = SigningError.XAmzRegionSetHeaderInRequest },
+};
+
+const skipped_headers = .{
+    "x-amzn-trace-id",
+    "User-Agent",
+    "connection",
+    "sec-websocket-key",
+    "sec-websocket-protocol",
+    "sec-websocket-version",
+    "upgrade",
+};
