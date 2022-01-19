@@ -665,11 +665,6 @@ test "canonical headers" {
         \\x-amz-date:20150830T123600Z
         \\
     ;
-    // {
-    //     // TODO: Remove block
-    //     std.testing.log_level = .debug;
-    //     _ = try std.io.getStdErr().write("\n");
-    // }
     const actual = try canonicalHeaders(allocator, headers.items);
     defer allocator.free(actual.str);
     defer allocator.free(actual.signed_headers);
@@ -681,17 +676,14 @@ test "canonical request" {
     const allocator = std.testing.allocator;
     var headers = try std.ArrayList(base.Header).initCapacity(allocator, 5);
     defer headers.deinit();
-    try headers.append(.{ .name = "Content-Type", .value = "application/x-www-form-urlencoded" });
-    try headers.append(.{ .name = "Content-Length", .value = "43" });
-    try headers.append(.{ .name = "User-Agent", .value = "zig-aws 1.0, Powered by the AWS Common Runtime." });
-    try headers.append(.{ .name = "Host", .value = "sts.us-west-2.amazonaws.com" });
-    try headers.append(.{ .name = "Accept", .value = "application/json" });
+    try headers.append(.{ .name = "User-agent", .value = "c sdk v1.0" });
+    // In contrast to AWS CRT (aws-c-auth), we add the date as part of the
+    // signing operation. They add it as part of the canonicalization
+    try headers.append(.{ .name = "X-Amz-Date", .value = "20150830T123600Z" });
+    try headers.append(.{ .name = "Host", .value = "example.amazonaws.com" });
     const req = base.Request{
         .path = "/",
-        .query = "",
-        .body = "Action=GetCallerIdentity&Version=2011-06-15",
-        .method = "POST",
-        .content_type = "application/json",
+        .method = "GET",
         .headers = headers.items,
     };
     {
@@ -715,8 +707,18 @@ test "canonical request" {
     defer allocator.free(request.headers.signed_headers);
     log.debug("canonical request:\n{s}", .{request.arr});
     log.debug("canonical request hash: {s}", .{request.hash});
-    try std.testing.expect(request.arr.len > 0); // TODO: improvify this
 
+    const expected =
+        \\GET
+        \\/
+        \\
+        \\host:example.amazonaws.com
+        \\x-amz-date:20150830T123600Z
+        \\
+        \\host;x-amz-date
+        \\e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+    ;
+    try std.testing.expectEqualStrings(expected, request.arr);
 }
 test "can sign" {
     // [debug] (aws): call: prefix sts, sigv4 sts, version 2011-06-15, action GetCallerIdentity
