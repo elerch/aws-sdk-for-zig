@@ -329,8 +329,9 @@ fn createCanonicalRequest(allocator: std.mem.Allocator, request: base.Request, c
     const canonical_url = try canonicalUri(allocator, request.path, config.flags.use_double_uri_encode);
     defer allocator.free(canonical_url);
     log.debug("final uri: {s}", .{canonical_url});
-    const canonical_query = try canonicalQueryString(allocator, request.path);
+    const canonical_query = try canonicalQueryString(allocator, request.query);
     defer allocator.free(canonical_query);
+    log.debug("canonical query: {s}", .{canonical_query});
     const canonical_headers = try canonicalHeaders(allocator, request.headers);
     const payload_hash = try hash(allocator, request.body, config.signed_body_header);
     defer allocator.free(payload_hash);
