@@ -129,14 +129,15 @@ pub const AwsHttp = struct {
         defer if (len) |l| self.allocator.free(l);
         request_cp.headers = request_headers.items;
 
-        log.debug("All Request Headers (before signing. Count: {d}):", .{request_cp.headers.len});
-        for (request_cp.headers) |h|
-            log.debug("\t{s}: {s}", .{ h.name, h.value });
-        // Signing will alter request headers
+        // log.debug("All Request Headers (before signing. Count: {d}):", .{request_cp.headers.len});
+        // for (request_cp.headers) |h| {
+        //     log.debug("\t{s}: {s}", .{ h.name, h.value });
+        // }
         if (signing_config) |opts| request_cp = try signing.signRequest(self.allocator, request_cp, opts);
-        log.debug("All Request Headers (after signing):", .{});
-        for (request_cp.headers) |h|
-            log.debug("\t{s}: {s}", .{ h.name, h.value });
+        // log.debug("All Request Headers (after signing):", .{});
+        // for (request_cp.headers) |h| {
+        //     log.debug("\t{s}: {s}", .{ h.name, h.value });
+        // }
         defer {
             if (signing_config) |opts| {
                 signing.freeSignedRequest(self.allocator, &request_cp, opts);
@@ -150,12 +151,16 @@ pub const AwsHttp = struct {
         for (request_cp.headers) |header|
             try headers.appendValue(header.name, header.value);
         log.debug("All Request Headers (zfetch):", .{});
-        for (headers.list.items) |h|
+        for (headers.list.items) |h| {
             log.debug("\t{s}: {s}", .{ h.name, h.value });
+        }
 
         // TODO: Construct URL with endpoint and request info
         // TODO: We need the certificate trust chain
-        var req = try zfetch.Request.init(self.allocator, "https://sts.us-west-2.amazonaws.com/", null);
+        const url = try std.fmt.allocPrint(self.allocator, "{s}{s}", .{ endpoint.uri, request.path });
+        defer self.allocator.free(url);
+        log.debug("Request url: {s}", .{url});
+        var req = try zfetch.Request.init(self.allocator, url, null);
         defer req.deinit();
 
         const method = std.meta.stringToEnum(zfetch.Method, request_cp.method).?;

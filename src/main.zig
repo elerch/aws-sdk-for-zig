@@ -3,7 +3,7 @@ const aws = @import("aws.zig");
 const json = @import("json.zig");
 const version = @import("git_version.zig");
 
-var verbose = true;
+var verbose: u8 = 0;
 
 pub fn log(
     comptime level: std.log.Level,
@@ -11,8 +11,11 @@ pub fn log(
     comptime format: []const u8,
     args: anytype,
 ) void {
+    // Ignore aws_signing messages
+    if (verbose < 2 and scope == .aws_signing and @enumToInt(level) >= @enumToInt(std.log.Level.debug))
+        return;
     // Ignore awshttp messages
-    if (!verbose and scope == .awshttp and @enumToInt(level) >= @enumToInt(std.log.Level.debug))
+    if (verbose < 1 and scope == .awshttp and @enumToInt(level) >= @enumToInt(std.log.Level.debug))
         return;
     const scope_prefix = "(" ++ @tagName(scope) ++ "): ";
     const prefix = "[" ++ @tagName(level) ++ "] " ++ scope_prefix;
@@ -52,7 +55,7 @@ pub fn main() anyerror!void {
             std.log.info("{s} {s}", .{ arg, version.pretty_version });
         first = false;
         if (std.mem.eql(u8, "-v", arg)) {
-            verbose = true;
+            verbose += 1;
             continue;
         }
         inline for (@typeInfo(Tests).Enum.fields) |f| {

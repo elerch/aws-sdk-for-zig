@@ -165,8 +165,6 @@ pub fn signRequest(allocator: std.mem.Allocator, request: base.Request, config: 
         .value = signing_iso8601,
     };
     rc.headers = newheaders[0 .. newheaders.len - 1];
-    for (rc.headers) |h|
-        std.log.debug("{d}/{d}", .{ h.name.len, h.value.len });
     log.debug("Signing with access key: {s}", .{config.credentials.access_key});
     const canonical_request = try createCanonicalRequest(allocator, rc, config);
     defer {
