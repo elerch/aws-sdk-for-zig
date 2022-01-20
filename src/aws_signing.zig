@@ -143,7 +143,7 @@ pub fn signRequest(allocator: std.mem.Allocator, request: base.Request, config: 
 
     const signing_iso8601 = try std.fmt.allocPrint(
         allocator,
-        "{:0>4}{:0>2}{:0>2}T{:0>2}{:0>2}{:0<2}Z",
+        "{:0>4}{:0>2}{:0>2}T{:0>2}{:0>2}{:0>2}Z",
         .{
             signed_date.year,
             signed_date.month,
