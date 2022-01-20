@@ -11,19 +11,14 @@ tweaks in the signature calculation, which is planned for a zig version
 (probably self-hosted 0.9.0) that no longer has an error triggered. Examples
 of usage are in src/main.zig.
 
-This is designed to be built statically using the `aws_c_*` libraries, so
-we inherit a lot of the goodness of the work going on there. Current
-executable size is 9.7M, about half of which is due to the SSL library.
-Running strip on the executable after compilation (it seems zig strip
-only goes so far), reduces this to 4.3M. This is for x86_linux,
-(which is all that's tested at the moment).
+Current executable size for the demo is 868k after compiling with -Drelease-safe
+and [stripping the executable after compilation](https://github.com/ziglang/zig/issues/351).
+This is for x86_linux, (which is all that's tested at the moment).
 
 ## Building
 
 `zig build` should work. It will build the code generation project, run
 the code generation, then build the main project with the generated code.
-There is also a Makefile included, but this hasn't been used in a while
-and I'm not sure that works at the moment.
 
 First time build should use `zig build -Dfetch` to fetch dependent packages
 (zfetch and friends).
