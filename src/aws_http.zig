@@ -114,8 +114,8 @@ pub const AwsHttp = struct {
     /// Otherwise, it will simply take a URL endpoint (without path information),
     /// HTTP method (e.g. GET, POST, etc.), and request body.
     ///
-    /// At the moment this does not allow the controlling of headers
-    /// This is likely to change. Current headers are:
+    /// At the moment this does not allow changing headers, but addtional
+    /// ones are possible. This is likely to change. Current headers are:
     ///
     /// Accept: application/json
     /// User-Agent: zig-aws 1.0, Powered by the AWS Common Runtime.
@@ -123,8 +123,6 @@ pub const AwsHttp = struct {
     /// Content-Length: (length of body)
     ///
     /// Return value is an HttpResult, which will need the caller to deinit().
-    /// HttpResult currently contains the body only. The addition of Headers
-    /// and return code would be a relatively minor change
     pub fn makeRequest(self: Self, endpoint: EndPoint, request: HttpRequest, signing_config: ?signing.Config) !HttpResult {
         var request_cp = request;
 
@@ -133,8 +131,6 @@ pub const AwsHttp = struct {
         log.debug("Method: {s}", .{request_cp.method});
         log.debug("body length: {d}", .{request_cp.body.len});
         log.debug("Body\n====\n{s}\n====", .{request_cp.body});
-        // End CreateRequest. This should return a struct with a deinit function that can do
-        // destroys, etc
 
         var request_headers = std.ArrayList(base.Header).init(self.allocator);
         defer request_headers.deinit();
@@ -143,15 +139,7 @@ pub const AwsHttp = struct {
         defer if (len) |l| self.allocator.free(l);
         request_cp.headers = request_headers.items;
 
-        // log.debug("All Request Headers (before signing. Count: {d}):", .{request_cp.headers.len});
-        // for (request_cp.headers) |h| {
-        //     log.debug("\t{s}: {s}", .{ h.name, h.value });
-        // }
         if (signing_config) |opts| request_cp = try signing.signRequest(self.allocator, request_cp, opts);
-        // log.debug("All Request Headers (after signing):", .{});
-        // for (request_cp.headers) |h| {
-        //     log.debug("\t{s}: {s}", .{ h.name, h.value });
-        // }
         defer {
             if (signing_config) |opts| {
                 signing.freeSignedRequest(self.allocator, &request_cp, opts);
@@ -169,8 +157,6 @@ pub const AwsHttp = struct {
             log.debug("\t{s}: {s}", .{ h.name, h.value });
         }
 
-        // TODO: Construct URL with endpoint and request info
-        // TODO: We need the certificate trust chain
         const url = try std.fmt.allocPrint(self.allocator, "{s}{s}", .{ endpoint.uri, request.path });
         defer self.allocator.free(url);
         log.debug("Request url: {s}", .{url});
@@ -207,9 +193,6 @@ pub const AwsHttp = struct {
         }
         log.debug("raw response body:\n{s}", .{resp_payload.items});
 
-        // Headers would need to be allocated/copied into HttpResult similar
-        // to RequestContext, so we'll leave this as a later excercise
-        // if it becomes necessary
         const rc = HttpResult{
             .response_code = req.status.code,
             .body = resp_payload.toOwnedSlice(),
