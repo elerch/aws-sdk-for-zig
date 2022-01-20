@@ -20,6 +20,10 @@ steps:
   - (cd codegen && zig build test)
   - zig build -Dfetch # implicitly does a codegen
   - zig build test
+  - zig build -Dtarget=arm-linux
+  - zig build -Dtarget=x86_64-windows
+  - zig build -Dtarget=aarch64-linux
+  - zig build -Dtarget=riscv64-linux
 - name: notify
   image: plugins/matrix
   when:
