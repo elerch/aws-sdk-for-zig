@@ -50,7 +50,6 @@ Only environment variable based credentials can be used at the moment.
 
 TODO List:
 
-* Move to new Docker image for CI/CD
 * Add STS key support
 * Implement credentials provider
 * Implement jitter/exponential backoff
