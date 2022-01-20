@@ -739,14 +739,14 @@ test "canonical request" {
         .method = "GET",
         .headers = headers.items,
     };
+    const access_key = try allocator.dupe(u8, "AKIDEXAMPLE");
+    const secret_key = try allocator.dupe(u8, "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY");
+    const credential = auth.Credentials.init(allocator, access_key, secret_key, null);
+    defer credential.deinit();
     const request = try createCanonicalRequest(allocator, req, .{
         .region = "us-west-2", // us-east-1
         .service = "sts", // service
-        .credentials = .{
-            .access_key = "AKIDEXAMPLE",
-            .secret_key = "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY",
-            .session_token = null,
-        },
+        .credentials = credential,
         .signing_time = 1440938160, // 20150830T123600Z
     });
     defer allocator.free(request.arr);
@@ -805,16 +805,16 @@ test "can sign" {
     //     _ = try std.io.getStdErr().write("\n");
     // }
 
+    const access_key = try allocator.dupe(u8, "AKIDEXAMPLE");
+    const secret_key = try allocator.dupe(u8, "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY");
+    const credential = auth.Credentials.init(allocator, access_key, secret_key, null);
+    defer credential.deinit();
     // we could look at sigv4 signing tests at:
     // https://github.com/awslabs/aws-c-auth/blob/ace1311f8ef6ea890b26dd376031bed2721648eb/tests/sigv4_signing_tests.c#L1478
     const config = Config{
         .region = "us-east-1",
         .service = "service",
-        .credentials = .{
-            .access_key = "AKIDEXAMPLE",
-            .secret_key = "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY",
-            .session_token = null, // TODO: add session token. I think we need X-Amz-Security-Token for that. Also, x-amz-region-set looks like part of v4a that will need to be dealt with eventually
-        },
+        .credentials = credential,
         .signing_time = 1440938160, // 20150830T123600Z
     };
     // TODO: There is an x-amz-content-sha256. Investigate
