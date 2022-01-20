@@ -2,14 +2,13 @@
 
 [![Build Status](https://drone.lerch.org/api/badges/lobo/aws-sdk-for-zig/status.svg?ref=refs/heads/zig-native)](https://drone.lerch.org/api/badges/lobo/aws-sdk-for-zig/status.svg?ref=refs/heads/zig-native)
 
-## WARNING: This branch is in development. It works, but is still brittle
+
+### NOTE: All tests pass, but credentials currently must be passed through environment
 
 This SDK currently supports all AWS services except EC2 and S3. These two
 services only support XML, and zig 0.8.0 and master both trigger compile
 errors while incorporating the XML parser. S3 also requires some plumbing
-tweaks in the signature calculation, which is planned for a zig version
-(probably self-hosted 0.9.0) that no longer has an error triggered. Examples
-of usage are in src/main.zig.
+tweaks in the signature calculation. Examples of usage are in src/main.zig.
 
 Current executable size for the demo is 868k after compiling with -Drelease-safe
 and [stripping the executable after compilation](https://github.com/ziglang/zig/issues/351).
@@ -29,7 +28,14 @@ This library mimics the aws c libraries for it's work, so it operates like most
 other 'AWS things'. main.zig gives you a handful of examples for working with services.
 For local testing or alternative endpoints, there's no real standard, so
 there is code to look for `AWS_ENDPOINT_URL` environment variable that will
-supersede all other configuration.
+supersede all other configuration. Note that an alternative endpoint may
+require passing in a client option to specify an different TLS root certificate
+(pass null to disable certificate verification).
+
+Given that credential handling is still very basic, you may want to look at
+the [old branch](https://github.com/elerch/aws-sdk-for-zig/tree/aws-crt) if
+your needs include something more robust. Note that that branch supports
+x86_64 linux only.
 
 ## Limitations
 
@@ -44,8 +50,7 @@ Only environment variable based credentials can be used at the moment.
 
 TODO List:
 
-* Fix failure on rest_json_1_work_with_lambda test
-* Add certificate verification
+* Move to new Docker image for CI/CD
 * Add STS key support
 * Implement credentials provider
 * Implement jitter/exponential backoff
