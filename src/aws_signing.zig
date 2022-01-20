@@ -694,7 +694,6 @@ test "canonical query" {
     const path = "blahblahblah?foo=bar&zed=dead&qux&equals=x=y&Action=ListUsers&Version=2010-05-08";
 
     // {
-    //     // TODO: Remove block
     //     std.testing.log_level = .debug;
     //     _ = try std.io.getStdErr().write("\n");
     // }
@@ -803,16 +802,13 @@ test "can sign" {
         .content_type = "application/json",
         .headers = headers.items,
     };
-    {
-        // TODO: Remove block
-        std.testing.log_level = .debug;
-        _ = try std.io.getStdErr().write("\n");
-    }
+    // {
+    //     std.testing.log_level = .debug;
+    //     _ = try std.io.getStdErr().write("\n");
+    // }
 
     // we could look at sigv4 signing tests at:
     // https://github.com/awslabs/aws-c-auth/blob/ace1311f8ef6ea890b26dd376031bed2721648eb/tests/sigv4_signing_tests.c#L1478
-    //
-    // for valid signatures. TODO: Get literally anything working first
     const config = Config{
         .region = "us-east-1",
         .service = "service",
@@ -824,7 +820,6 @@ test "can sign" {
         .signing_time = 1440938160, // 20150830T123600Z
     };
     // TODO: There is an x-amz-content-sha256. Investigate
-    //
     var signed_req = try signRequest(allocator, req, config);
 
     defer freeSignedRequest(allocator, &signed_req, config);
