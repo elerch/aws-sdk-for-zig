@@ -386,7 +386,7 @@ fn canonicalUri(allocator: std.mem.Allocator, path: []const u8, double_encode: b
     log.debug("encoding path: {s}", .{path});
     const encoded_once = try encodeUri(allocator, path);
     log.debug("encoded path (1): {s}", .{encoded_once});
-    if (!double_encode)
+    if (!double_encode or std.mem.indexOf(u8, path, "%") != null) // TODO: Is the indexOf condition universally true?
         return encoded_once[0 .. std.mem.lastIndexOf(u8, encoded_once, "?") orelse encoded_once.len];
     defer allocator.free(encoded_once);
     const encoded_twice = try encodeUri(allocator, encoded_once);
