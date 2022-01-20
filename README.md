@@ -2,7 +2,7 @@
 
 [![Build Status](https://drone.lerch.org/api/badges/lobo/aws-sdk-for-zig/status.svg?ref=refs/heads/zig-native)](https://drone.lerch.org/api/badges/lobo/aws-sdk-for-zig/status.svg?ref=refs/heads/zig-native)
 
-## WARNING: This branch is in development, with builds currently failing!
+## WARNING: This branch is in development. It works, but is still brittle
 
 This SDK currently supports all AWS services except EC2 and S3. These two
 services only support XML, and zig 0.8.0 and master both trigger compile
@@ -36,20 +36,31 @@ For local testing or alternative endpoints, there's no real standard, so
 there is code to look for `AWS_ENDPOINT_URL` environment variable that will
 supersede all other configuration.
 
+## Limitations
+
+There are many nuances of AWS V4 signature calculation. S3 is not supported
+because it uses many of these test cases. STS tokens using a session token
+are not yet implemented, though should be trivial. I have also seen a few
+service errors caused by discrepancies in signatures, though I don't know yet
+if this was an issue in the service itself (has not repro'd) or if there
+is a latent bug.
+
+Only environment variable based credentials can be used at the moment.
+
 TODO List:
 
+* Fix failure on rest_json_1_work_with_lambda test
+* Add certificate verification
+* Add STS key support
 * Implement credentials provider
-* Implement sigv4 signing
-* Implement jitter/exponential backoff. This appears to be configuration of
-  `aws_c_io` and should therefore be trivial
+* Implement jitter/exponential backoff
 * Implement timeouts and other TODO's in the code
-* Switch to aws-c-cal upstream once [PR for full static musl build support is merged](https://github.com/awslabs/aws-c-cal/pull/89)
-  (see Dockerfile)
 * Implement [AWS restXml protocol](https://awslabs.github.io/smithy/1.0/spec/aws/aws-restxml-protocol.html).
   Includes S3. Total service count 4. This may be blocked due to the same issue as EC2.
 * Implement [AWS EC2 query protocol](https://awslabs.github.io/smithy/1.0/spec/aws/aws-ec2-query-protocol.html).
-  Includes EC2. Total service count 1. This is currently blocked, probably on
-  self-hosted compiler coming in zig 0.9.0 (January 2022) due to compiler bug
+  Includes EC2. Total service count 1. This may be blocked on a compiler bug,
+  though has not been tested with zig 0.9.0. It may need to wait for zig 0.10.0
+  when self-hosted compiler is likely to be completed (zig 0.10.0 eta May 2022)
   discovered. More details and llvm ir log can be found in the
   [XML branch](https://git.lerch.org/lobo/aws-sdk-for-zig/src/branch/xml).
 * Implement sigv4a signing
