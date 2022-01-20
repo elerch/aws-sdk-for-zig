@@ -53,6 +53,7 @@ pub fn build(b: *Builder) !void {
     // so we'll have to keep that in sync with upstream
     // const zfetch = @import("libs/zfetch/build.zig");
     exe.addPackage(getZfetchPackage(b, "libs/zfetch") catch unreachable);
+    exe.addPackagePath("iguanaTLS", "libs/zfetch/libs/iguanaTLS/src/main.zig");
 
     const run_cmd = exe.run();
     run_cmd.step.dependOn(b.getInstallStep());

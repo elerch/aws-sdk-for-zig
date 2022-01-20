@@ -12,6 +12,7 @@ const base = @import("aws_http_base.zig");
 const signing = @import("aws_signing.zig");
 const credentials = @import("aws_credentials.zig");
 const zfetch = @import("zfetch");
+const tls = @import("iguanaTLS");
 
 const CN_NORTH_1_HASH = std.hash_map.hashString("cn-north-1");
 const CN_NORTHWEST_1_HASH = std.hash_map.hashString("cn-northwest-1");
@@ -19,6 +20,10 @@ const US_ISO_EAST_1_HASH = std.hash_map.hashString("us-iso-east-1");
 const US_ISOB_EAST_1_HASH = std.hash_map.hashString("us-isob-east-1");
 
 const log = std.log.scoped(.awshttp);
+
+const amazon_root_ca_1 = @embedFile("../Amazon_Root_CA_1.pem");
+
+pub const default_root_ca = amazon_root_ca_1;
 
 pub const AwsError = error{
     AddHeaderError,
@@ -57,20 +62,29 @@ const EndPoint = struct {
         self.allocator.free(self.uri);
     }
 };
-
 pub const AwsHttp = struct {
     allocator: std.mem.Allocator,
+    trust_chain: ?tls.x509.CertificateChain,
 
     const Self = @This();
 
-    pub fn init(allocator: std.mem.Allocator) Self {
-        return .{
+    /// Recommend usage is init(allocator, awshttp.default_root_ca)
+    /// Passing null for root_pem will result in no TLS verification
+    pub fn init(allocator: std.mem.Allocator, root_pem: ?[]const u8) !Self {
+        var trust_chain: ?tls.x509.CertificateChain = null;
+        if (root_pem) |p| {
+            var fbs = std.io.fixedBufferStream(p);
+            trust_chain = try tls.x509.CertificateChain.from_pem(allocator, fbs.reader());
+        }
+        return Self{
             .allocator = allocator,
+            .trust_chain = trust_chain,
             // .credentialsProvider = // creds provider could be useful
         };
     }
 
     pub fn deinit(self: *AwsHttp) void {
+        if (self.trust_chain) |c| c.deinit();
         _ = self;
         log.debug("Deinit complete", .{});
     }
@@ -160,7 +174,7 @@ pub const AwsHttp = struct {
         const url = try std.fmt.allocPrint(self.allocator, "{s}{s}", .{ endpoint.uri, request.path });
         defer self.allocator.free(url);
         log.debug("Request url: {s}", .{url});
-        var req = try zfetch.Request.init(self.allocator, url, null);
+        var req = try zfetch.Request.init(self.allocator, url, self.trust_chain);
         defer req.deinit();
 
         const method = std.meta.stringToEnum(zfetch.Method, request_cp.method).?;
@@ -182,8 +196,6 @@ pub const AwsHttp = struct {
                 content_length = std.fmt.parseInt(usize, h.value, 10) catch 0;
         }
         const reader = req.reader();
-        // TODO: Get content length and use that to allocate the buffer
-        // Content length can be missing, and why would we trust it anyway
         var buf: [65535]u8 = undefined;
         var resp_payload = try std.ArrayList(u8).initCapacity(self.allocator, content_length);
         defer resp_payload.deinit();

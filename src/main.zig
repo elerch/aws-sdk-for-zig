@@ -71,7 +71,7 @@ pub fn main() anyerror!void {
     }
 
     std.log.info("Start\n", .{});
-    var client = aws.Client.init(allocator);
+    var client = try aws.Client.init(allocator, .{});
     const options = aws.Options{
         .region = "us-west-2",
         .client = client,
