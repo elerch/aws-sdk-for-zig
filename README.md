@@ -1,6 +1,6 @@
 # AWS SDK for Zig
 
-[![Build Status](https://drone.lerch.org/api/badges/lobo/aws-sdk-for-zig/status.svg)](https://drone.lerch.org/lobo/aws-sdk-for-zig)
+[![Build Status](https://drone.lerch.org/api/badges/lobo/aws-sdk-for-zig/status.svg?ref=refs/heads/aws-crt)](https://drone.lerch.org/lobo/aws-sdk-for-zig)
 
 This SDK currently supports all AWS services except EC2 and S3. These two
 services only support XML, and zig 0.8.0 and master both trigger compile
