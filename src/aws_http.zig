@@ -128,13 +128,12 @@ pub const AwsHttp = struct {
         const len = try addHeaders(self.allocator, &request_headers, endpoint.host, request_cp.body, request_cp.content_type, request_cp.headers);
         defer if (len) |l| self.allocator.free(l);
         request_cp.headers = request_headers.items;
-        // defer self.allocator.free(request_cp.headers);
 
         log.debug("All Request Headers (before signing. Count: {d}):", .{request_cp.headers.len});
         for (request_cp.headers) |h|
             log.debug("\t{s}: {s}", .{ h.name, h.value });
         // Signing will alter request headers
-        if (signing_config) |opts| try signing.signRequest(self.allocator, &request_cp, opts);
+        if (signing_config) |opts| request_cp = try signing.signRequest(self.allocator, request_cp, opts);
         log.debug("All Request Headers (after signing):", .{});
         for (request_cp.headers) |h|
             log.debug("\t{s}: {s}", .{ h.name, h.value });
