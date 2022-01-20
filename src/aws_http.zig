@@ -98,7 +98,7 @@ pub const AwsHttp = struct {
         defer endpoint.deinit();
         log.debug("Calling endpoint {s}", .{endpoint.uri});
         const creds = try credentials.getCredentials(self.allocator);
-        // defer allocator.free(), except sometimes we don't need freeing...
+        defer creds.deinit();
         const signing_config: signing.Config = .{
             .region = options.region,
             .service = options.sigv4_service_name orelse service,
@@ -217,8 +217,15 @@ fn addHeaders(allocator: std.mem.Allocator, headers: *std.ArrayList(base.Header)
     return null;
 }
 
+fn getEnvironmentVariable(allocator: std.mem.Allocator, key: []const u8) !?[]const u8 {
+    return std.process.getEnvVarOwned(allocator, key) catch |e| switch (e) {
+        std.process.GetEnvVarOwnedError.EnvironmentVariableNotFound => return null,
+        else => return e,
+    };
+}
+
 fn regionSubDomain(allocator: std.mem.Allocator, service: []const u8, region: []const u8, useDualStack: bool) !EndPoint {
-    const environment_override = std.os.getenv("AWS_ENDPOINT_URL");
+    const environment_override = try getEnvironmentVariable(allocator, "AWS_ENDPOINT_URL");
     if (environment_override) |override| {
         const uri = try allocator.dupeZ(u8, override);
         return endPointFromUri(allocator, uri);

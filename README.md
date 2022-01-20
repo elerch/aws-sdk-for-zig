@@ -1,4 +1,4 @@
-# AWS SDK for Zig (zig-native branch)
+# AWS SDK for Zig (zig native branch)
 
 [![Build Status](https://drone.lerch.org/api/badges/lobo/aws-sdk-for-zig/status.svg?ref=refs/heads/master)](https://drone.lerch.org/api/badges/lobo/aws-sdk-for-zig/)
 
@@ -10,9 +10,19 @@ services only support XML, and zig 0.8.0 and master both trigger compile
 errors while incorporating the XML parser. S3 also requires some plumbing
 tweaks in the signature calculation. Examples of usage are in src/main.zig.
 
-Current executable size for the demo is 868k after compiling with -Drelease-safe
-and [stripping the executable after compilation](https://github.com/ziglang/zig/issues/351).
-This is for x86_linux, (which is all that's tested at the moment).
+Current executable size for the demo is 953k (90k of which is the AWS PEM file)
+after compiling with -Drelease-safe and
+[stripping the executable after compilation](https://github.com/ziglang/zig/issues/351).
+This is for x86_linux. Tested targets:
+
+* x86_64-linux
+* riscv64-linux
+* aarch64-linux
+* x86_64 Windows
+
+Tested/not working:
+
+* arm-linux
 
 ## Building
 
@@ -51,6 +61,7 @@ Only environment variable based credentials can be used at the moment.
 TODO List:
 
 * Add STS key support
+* Add option to cache signature keys
 * Implement credentials provider
 * Implement jitter/exponential backoff
 * Implement timeouts and other TODO's in the code
