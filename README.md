@@ -1,6 +1,6 @@
 # AWS SDK for Zig (zig-native branch)
 
-[![Build Status](https://drone.lerch.org/api/badges/lobo/aws-sdk-for-zig/status.svg?ref=refs/heads/zig-native)](https://drone.lerch.org/api/badges/lobo/aws-sdk-for-zig/status.svg?ref=refs/heads/zig-native)
+[![Build Status](https://drone.lerch.org/api/badges/lobo/aws-sdk-for-zig/status.svg?ref=refs/heads/master)](https://drone.lerch.org/api/badges/lobo/aws-sdk-for-zig/)
 
 
 ### NOTE: All tests pass, but credentials currently must be passed through environment
