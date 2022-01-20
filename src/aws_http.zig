@@ -157,7 +157,7 @@ pub const AwsHttp = struct {
             log.debug("\t{s}: {s}", .{ h.name, h.value });
         }
 
-        const url = try std.fmt.allocPrint(self.allocator, "{s}{s}", .{ endpoint.uri, request.path });
+        const url = try std.fmt.allocPrint(self.allocator, "{s}{s}{s}", .{ endpoint.uri, request.path, request.query });
         defer self.allocator.free(url);
         log.debug("Request url: {s}", .{url});
         var req = try zfetch.Request.init(self.allocator, url, self.trust_chain);
