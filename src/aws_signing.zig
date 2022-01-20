@@ -213,7 +213,6 @@ pub fn signRequest(allocator: std.mem.Allocator, request: base.Request, config: 
 
     const signing_key = try getSigningKey(allocator, scope[0..8], config);
     defer allocator.free(signing_key);
-    log.debug("key:{s}", .{std.fmt.fmtSliceHexLower(signing_key)});
 
     const signature = try hmac(allocator, signing_key, string_to_sign);
     defer allocator.free(signature);
