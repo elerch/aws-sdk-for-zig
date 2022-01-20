@@ -3,7 +3,7 @@ const expectEqualStrings = std.testing.expectEqualStrings;
 
 pub fn snakeToCamel(allocator: std.mem.Allocator, name: []const u8) ![]u8 {
     var utf8_name = (std.unicode.Utf8View.init(name) catch unreachable).iterator();
-    var target_inx: u64 = 0;
+    var target_inx: usize = 0;
     var previous_ascii: u8 = 0;
     // A single word will take the entire length plus our sentinel
     const rc = try allocator.alloc(u8, name.len + 1);

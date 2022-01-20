@@ -18,11 +18,9 @@ This is for x86_linux. Tested targets:
 * x86_64-linux
 * riscv64-linux
 * aarch64-linux
-* x86_64 Windows
-
-Tested/not working:
-
+* x86_64-windows
 * arm-linux
+
 
 ## Building
 

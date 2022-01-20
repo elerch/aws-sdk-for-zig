@@ -421,7 +421,7 @@ fn buildPath(allocator: std.mem.Allocator, raw_uri: []const u8, comptime ActionR
     // const writer = buffer.writer();
     defer buffer.deinit();
     var in_var = false;
-    var start: u64 = 0;
+    var start: usize = 0;
     for (raw_uri) |c, inx| {
         switch (c) {
             '{' => {
