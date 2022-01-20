@@ -54,7 +54,7 @@ pub fn timestampToDateTime(timestamp: i64) DateTime {
     return DateTime{ .day = day, .month = month, .year = year, .hour = hours, .minute = minutes, .second = seconds };
 }
 
-pub fn printDateTime(dt: DateTime) void {
+fn printDateTime(dt: DateTime) void {
     std.log.debug("{:0>4}-{:0>2}-{:0>2}T{:0>2}:{:0>2}:{:0<2}Z", .{
         dt.year,
         dt.month,

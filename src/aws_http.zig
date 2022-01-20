@@ -112,33 +112,55 @@ pub const AwsHttp = struct {
     /// HttpResult currently contains the body only. The addition of Headers
     /// and return code would be a relatively minor change
     pub fn makeRequest(self: Self, endpoint: EndPoint, request: HttpRequest, signing_config: ?signing.Config) !HttpResult {
-        log.debug("Path: {s}", .{request.path});
-        log.debug("Query: {s}", .{request.query});
-        log.debug("Method: {s}", .{request.method});
-        log.debug("body length: {d}", .{request.body.len});
-        log.debug("Body\n====\n{s}\n====", .{request.body});
+        var request_cp = request;
+
+        log.debug("Path: {s}", .{request_cp.path});
+        log.debug("Query: {s}", .{request_cp.query});
+        log.debug("Method: {s}", .{request_cp.method});
+        log.debug("body length: {d}", .{request_cp.body.len});
+        log.debug("Body\n====\n{s}\n====", .{request_cp.body});
         // End CreateRequest. This should return a struct with a deinit function that can do
         // destroys, etc
+
+        var request_headers = std.ArrayList(base.Header).init(self.allocator);
+        defer request_headers.deinit();
+
+        const len = try addHeaders(self.allocator, &request_headers, endpoint.host, request_cp.body, request_cp.content_type, request_cp.headers);
+        defer if (len) |l| self.allocator.free(l);
+        request_cp.headers = request_headers.items;
+        // defer self.allocator.free(request_cp.headers);
+
+        log.debug("All Request Headers (before signing. Count: {d}):", .{request_cp.headers.len});
+        for (request_cp.headers) |h|
+            log.debug("\t{s}: {s}", .{ h.name, h.value });
+        // Signing will alter request headers
+        if (signing_config) |opts| try signing.signRequest(self.allocator, &request_cp, opts);
+        log.debug("All Request Headers (after signing):", .{});
+        for (request_cp.headers) |h|
+            log.debug("\t{s}: {s}", .{ h.name, h.value });
+        defer {
+            if (signing_config) |opts| {
+                signing.freeSignedRequest(self.allocator, &request_cp, opts);
+            }
+        }
 
         try zfetch.init(); // This only does anything on Windows. Not sure how performant it is to do this on every request
         defer zfetch.deinit();
         var headers = zfetch.Headers.init(self.allocator);
         defer headers.deinit();
-        for (request.headers) |header|
+        for (request_cp.headers) |header|
             try headers.appendValue(header.name, header.value);
-        try addHeaders(self.allocator, &headers, endpoint.host, request.body, request.content_type, request.headers);
-        log.debug("All Request Headers:", .{});
+        log.debug("All Request Headers (zfetch):", .{});
         for (headers.list.items) |h|
             log.debug("\t{s}: {s}", .{ h.name, h.value });
 
-        if (signing_config) |opts| try signing.signRequest(self.allocator, request, opts);
-
         // TODO: Construct URL with endpoint and request info
-        var req = try zfetch.Request.init(self.allocator, "https://httpbin.org/post", null);
+        // TODO: We need the certificate trust chain
+        var req = try zfetch.Request.init(self.allocator, "https://sts.us-west-2.amazonaws.com/", null);
         defer req.deinit();
 
-        const method = std.meta.stringToEnum(zfetch.Method, request.method).?;
-        try req.do(method, headers, if (request.body.len == 0) null else request.body);
+        const method = std.meta.stringToEnum(zfetch.Method, request_cp.method).?;
+        try req.do(method, headers, if (request_cp.body.len == 0) null else request_cp.body);
 
         // TODO: Timeout - is this now above us?
         log.debug("request_complete. Response code {d}: {s}", .{ req.status.code, req.status.reason });
@@ -182,18 +204,18 @@ pub const AwsHttp = struct {
     }
 };
 
-fn addHeaders(allocator: std.mem.Allocator, z_headers: *zfetch.Headers, host: []const u8, body: []const u8, content_type: []const u8, additional_headers: []Header) !void {
-    try z_headers.appendValue("Accept", "application/json");
-    try z_headers.appendValue("Host", host);
-    try z_headers.appendValue("User-Agent", "zig-aws 1.0, Powered by the AWS Common Runtime.");
-    try z_headers.appendValue("Content-Type", content_type);
-    for (additional_headers) |h|
-        try z_headers.appendValue(h.name, h.value);
+fn addHeaders(allocator: std.mem.Allocator, headers: *std.ArrayList(base.Header), host: []const u8, body: []const u8, content_type: []const u8, additional_headers: []Header) !?[]const u8 {
+    try headers.append(.{ .name = "Accept", .value = "application/json" });
+    try headers.append(.{ .name = "Host", .value = host });
+    try headers.append(.{ .name = "User-Agent", .value = "zig-aws 1.0, Powered by the AWS Common Runtime." });
+    try headers.append(.{ .name = "Content-Type", .value = content_type });
+    try headers.appendSlice(additional_headers);
     if (body.len > 0) {
         const len = try std.fmt.allocPrint(allocator, "{d}", .{body.len});
-        defer allocator.free(len);
-        try z_headers.appendValue("Content-Length", len);
+        try headers.append(.{ .name = "Content-Length", .value = len });
+        return len;
     }
+    return null;
 }
 
 fn regionSubDomain(allocator: std.mem.Allocator, service: []const u8, region: []const u8, useDualStack: bool) !EndPoint {
