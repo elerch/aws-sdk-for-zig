@@ -78,7 +78,7 @@ pub fn main() anyerror!void {
     };
     defer client.deinit();
 
-    const services = aws.Services(.{ .sts, .ec2, .dynamo_db, .ecs, .lambda }){};
+    const services = aws.Services(.{ .sts, .ec2, .dynamo_db, .ecs, .lambda, .sqs }){};
 
     for (tests.items) |t| {
         std.log.info("===== Start Test: {s} =====", .{@tagName(t)});
@@ -93,12 +93,12 @@ pub fn main() anyerror!void {
                 std.log.info("requestId: {s}", .{call.response_metadata.request_id});
             },
             .query_with_input => {
-                // TODO: Find test without sensitive info
-                const call = try client.call(services.sts.get_session_token.Request{
-                    .duration_seconds = 900,
+                const call = try client.call(services.sqs.list_queues.Request{
+                    .queue_name_prefix = "s",
                 }, options);
                 defer call.deinit();
-                std.log.info("access key: {s}", .{call.response.credentials.?.access_key_id});
+                std.log.info("request id: {s}", .{call.response_metadata.request_id});
+                std.log.info("account has queues with prefix 's': {b}", .{call.response.queue_urls != null});
             },
             .json_1_0_query_with_input => {
                 const call = try client.call(services.dynamo_db.list_tables.Request{
