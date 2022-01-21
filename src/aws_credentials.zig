@@ -24,7 +24,7 @@ fn getEnvironmentCredentials(allocator: std.mem.Allocator) !?auth.Credentials {
         (try getEnvironmentVariable(allocator, "AWS_ACCESS_KEY_ID")) orelse return null,
         mutable_key,
         (try getEnvironmentVariable(allocator, "AWS_SESSION_TOKEN")) orelse
-            try getEnvironmentVariable(allocator, "AWS_SECURITY_TOKEN"),
+            try getEnvironmentVariable(allocator, "AWS_SECURITY_TOKEN"), // Security token is backward compat only
     );
 }
 
