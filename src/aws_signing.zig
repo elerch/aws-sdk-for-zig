@@ -155,9 +155,18 @@ pub fn signRequest(allocator: std.mem.Allocator, request: base.Request, config: 
     );
     errdefer freeSignedRequest(allocator, &rc, config);
 
-    const newheaders = try allocator.alloc(base.Header, rc.headers.len + 2);
+    var additional_header_count: u2 = 2;
+    if (config.credentials.session_token != null)
+        additional_header_count += 1;
+    const newheaders = try allocator.alloc(base.Header, rc.headers.len + additional_header_count);
     errdefer allocator.free(newheaders);
     const oldheaders = rc.headers;
+    if (config.credentials.session_token) |t| {
+        newheaders[newheaders.len - 3] = base.Header{
+            .name = "X-Amz-Security-Token",
+            .value = try allocator.dupe(u8, t),
+        };
+    }
     errdefer freeSignedRequest(allocator, &rc, config);
     std.mem.copy(base.Header, newheaders, oldheaders);
     newheaders[newheaders.len - 2] = base.Header{
@@ -245,7 +254,10 @@ pub fn freeSignedRequest(allocator: std.mem.Allocator, request: *base.Request, c
 
     var remove_len: u2 = 0;
     for (request.headers) |h| {
-        if (std.ascii.eqlIgnoreCase(h.name, "X-Amz-Date") or std.ascii.eqlIgnoreCase(h.name, "Authorization")) {
+        if (std.ascii.eqlIgnoreCase(h.name, "X-Amz-Date") or
+            std.ascii.eqlIgnoreCase(h.name, "Authorization") or
+            std.ascii.eqlIgnoreCase(h.name, "X-Amz-Security-Token"))
+        {
             allocator.free(h.value);
             remove_len += 1;
         }
@@ -332,7 +344,7 @@ fn createCanonicalRequest(allocator: std.mem.Allocator, request: base.Request, c
     const canonical_query = try canonicalQueryString(allocator, request.query);
     defer allocator.free(canonical_query);
     log.debug("canonical query: {s}", .{canonical_query});
-    const canonical_headers = try canonicalHeaders(allocator, request.headers);
+    const canonical_headers = try canonicalHeaders(allocator, request.headers, config.flags);
     const payload_hash = try hash(allocator, request.body, config.signed_body_header);
     defer allocator.free(payload_hash);
 
@@ -558,7 +570,7 @@ const CanonicalHeaders = struct {
     str: []const u8,
     signed_headers: []const u8,
 };
-fn canonicalHeaders(allocator: std.mem.Allocator, headers: []base.Header) !CanonicalHeaders {
+fn canonicalHeaders(allocator: std.mem.Allocator, headers: []base.Header, flags: ConfigFlags) !CanonicalHeaders {
     //
     // Doc example. Original:
     //
@@ -591,6 +603,17 @@ fn canonicalHeaders(allocator: std.mem.Allocator, headers: []base.Header) !Canon
                 skip = true;
                 break;
             }
+        }
+        // Well, this is fun (https://docs.aws.amazon.com/general/latest/gr/sigv4-add-signature-to-request.html):
+        //
+        // When you add the X-Amz-Security-Token parameter to the query string,
+        // some services require that you include this parameter in the
+        // canonical (signed) request. For other services, you add this
+        // parameter at the end, after you calculate the signature. For
+        // details, see the API reference documentation for that service.
+        if (flags.omit_session_token and std.ascii.eqlIgnoreCase(h.name, "X-Amz-Security-Token")) {
+            skip = true;
+            break;
         }
         if (skip) continue;
 
@@ -718,7 +741,7 @@ test "canonical headers" {
         \\x-amz-date:20150830T123600Z
         \\
     ;
-    const actual = try canonicalHeaders(allocator, headers.items);
+    const actual = try canonicalHeaders(allocator, headers.items, .{});
     defer allocator.free(actual.str);
     defer allocator.free(actual.signed_headers);
     try std.testing.expectEqualStrings(expected, actual.str);

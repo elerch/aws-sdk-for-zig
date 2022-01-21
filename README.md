@@ -58,7 +58,6 @@ Only environment variable based credentials can be used at the moment.
 
 TODO List:
 
-* Add STS key support
 * Add option to cache signature keys
 * Implement credentials provider
 * Implement jitter/exponential backoff
