@@ -97,7 +97,8 @@ pub const AwsHttp = struct {
         const endpoint = try regionSubDomain(self.allocator, service, options.region, options.dualstack);
         defer endpoint.deinit();
         log.debug("Calling endpoint {s}", .{endpoint.uri});
-        const creds = try credentials.getCredentials(self.allocator);
+        // TODO: Should we allow customization here?
+        const creds = try credentials.getCredentials(self.allocator, .{});
         defer creds.deinit();
         const signing_config: signing.Config = .{
             .region = options.region,
