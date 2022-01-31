@@ -284,7 +284,9 @@ fn getSigningKey(allocator: std.mem.Allocator, signing_date: []const u8, config:
     , .{ signing_date, config.region, config.service });
     var secret = try std.fmt.allocPrint(allocator, "AWS4{s}", .{config.credentials.secret_key});
     defer {
-        for (secret) |_, i| secret[i] = 0; // zero our copy of secret
+        // secureZero avoids compiler optimizations that may say
+        // "WTF are you doing this thing? Looks like nothing to me. It's silly and we will remove it"
+        std.crypto.utils.secureZero(u8, secret); // zero our copy of secret
         allocator.free(secret);
     }
     // log.debug("secret: {s}", .{secret});
