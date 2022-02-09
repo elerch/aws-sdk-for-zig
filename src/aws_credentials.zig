@@ -7,6 +7,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const auth = @import("aws_authentication.zig");
+const zfetch = @import("zfetch");
 
 const log = std.log.scoped(.aws_credentials);
 
@@ -24,23 +25,29 @@ pub const Options = struct {
 };
 
 pub fn getCredentials(allocator: std.mem.Allocator, options: Options) !auth.Credentials {
-    if (try getEnvironmentCredentials(allocator)) |cred| return cred;
+    if (try getEnvironmentCredentials(allocator)) |cred| {
+        log.debug("Found credentials in environment. Access key: {s}", .{cred.access_key});
+        return cred;
+    }
     // TODO: 2-5
     // Note that boto and Java disagree on where this fits in the order
     if (try getWebIdentityToken(allocator)) |cred| return cred;
     if (try getProfileCredentials(allocator, options.profile)) |cred| return cred;
+
+    if (try getContainerCredentials(allocator)) |cred| return cred;
+    // I don't think we need v1 at all?
+    if (try getImdsv2Credentials(allocator)) |cred| return cred;
     return error.NotImplemented;
 }
 
 fn getEnvironmentCredentials(allocator: std.mem.Allocator) !?auth.Credentials {
     const secret_key = (try getEnvironmentVariable(allocator, "AWS_SECRET_ACCESS_KEY")) orelse return null;
     defer allocator.free(secret_key); //yes, we're not zeroing. But then, the secret key is in an environment var anyway
-    const mutable_key = try allocator.dupe(u8, secret_key);
     // Use cross-platform API (requires allocation)
     return auth.Credentials.init(
         allocator,
         (try getEnvironmentVariable(allocator, "AWS_ACCESS_KEY_ID")) orelse return null,
-        mutable_key,
+        try allocator.dupe(u8, secret_key),
         (try getEnvironmentVariable(allocator, "AWS_SESSION_TOKEN")) orelse
             try getEnvironmentVariable(allocator, "AWS_SECURITY_TOKEN"), // Security token is backward compat only
     );
@@ -62,6 +69,178 @@ fn getWebIdentityToken(allocator: std.mem.Allocator) !?auth.Credentials {
     // https://github.com/aws/aws-sdk-java-v2/blob/master/core/auth/src/main/java/software/amazon/awssdk/auth/credentials/WebIdentityTokenFileCredentialsProvider.java
     // TODO: implement
     return null;
+}
+fn getContainerCredentials(allocator: std.mem.Allocator) !?auth.Credentials {
+    _ = allocator;
+    return null;
+}
+
+fn getImdsv2Credentials(allocator: std.mem.Allocator) !?auth.Credentials {
+    try zfetch.init();
+    defer zfetch.deinit();
+
+    var token: [65535]u8 = undefined;
+    var len: usize = undefined;
+    // Get token
+    {
+        var headers = zfetch.Headers.init(allocator);
+        defer headers.deinit();
+
+        try headers.appendValue("X-aws-ec2-metadata-token-ttl-seconds", "21600");
+        var req = try zfetch.Request.init(allocator, "http://169.254.169.254/latest/api/token", null);
+        defer req.deinit();
+        try req.do(.PUT, headers, "");
+        if (req.status.code != 200) {
+            log.warn("Bad status code received from IMDS v2: {}", .{req.status.code});
+            return null;
+        }
+        const reader = req.reader();
+        const read = try reader.read(&token);
+        if (read == 0 or read == 65535) {
+            log.warn("Unexpected zero or long response from IMDS v2: {s}", .{token});
+            return null;
+        }
+        len = read;
+    }
+    log.debug("Got token from IMDSv2", .{});
+    const role_name = try getImdsRoleName(allocator, token[0..len]);
+    if (role_name == null) {
+        log.info("No role is associated with this instance", .{});
+        return null;
+    }
+    defer allocator.free(role_name.?);
+    log.debug("Got role name '{s}'", .{role_name});
+    return getImdsCredentials(allocator, role_name.?, token[0..len]);
+}
+
+fn getImdsRoleName(allocator: std.mem.Allocator, imds_token: []u8) !?[]const u8 {
+    //     {
+    //   "Code" : "Success",
+    //   "LastUpdated" : "2022-02-09T05:42:09Z",
+    //   "InstanceProfileArn" : "arn:aws:iam::550620852718:instance-profile/ec2-dev",
+    //   "InstanceProfileId" : "AIPAYAM4POHXCFNKZ7HU2"
+    // }
+    var buf: [65535]u8 = undefined;
+    var headers = zfetch.Headers.init(allocator);
+    defer headers.deinit();
+    try headers.appendValue("X-aws-ec2-metadata-token", imds_token);
+
+    var req = try zfetch.Request.init(allocator, "http://169.254.169.254/latest/meta-data/iam/info", null);
+    defer req.deinit();
+
+    try req.do(.GET, headers, null);
+
+    if (req.status.code != 200 and req.status.code != 404) {
+        log.warn("Bad status code received from IMDS iam endpoint: {}", .{req.status.code});
+        return null;
+    }
+    if (req.status.code == 404) return null;
+    const reader = req.reader();
+    const read = try reader.read(&buf);
+    if (read == 65535) {
+        log.warn("Unexpected zero or long response from IMDS endpoint post token: {s}", .{buf});
+        return null;
+    }
+    if (read == 0) return null;
+
+    const ImdsResponse = struct {
+        Code: []const u8,
+        LastUpdated: []const u8,
+        InstanceProfileArn: []const u8,
+        InstanceProfileId: []const u8,
+    };
+    const imds_response = blk: {
+        var stream = std.json.TokenStream.init(buf[0..read]);
+        const res = std.json.parse(ImdsResponse, &stream, .{ .allocator = allocator }) catch |e| {
+            log.err("Unexpected Json response from IMDS endpoint: {s}", .{buf});
+            log.err("Error parsing json: {}", .{e});
+            if (@errorReturnTrace()) |trace| {
+                std.debug.dumpStackTrace(trace.*);
+            }
+
+            return null;
+        };
+        break :blk res;
+    };
+    defer std.json.parseFree(ImdsResponse, imds_response, .{ .allocator = allocator });
+
+    const role_arn = imds_response.InstanceProfileArn;
+    const first_slash = std.mem.indexOf(u8, role_arn, "/"); // I think this is valid
+    if (first_slash == null) {
+        log.err("Could not find role name in arn '{s}'", .{role_arn});
+        return null;
+    }
+    return try allocator.dupe(u8, role_arn[first_slash.? + 1 ..]);
+}
+
+/// Note - this internal function assumes zfetch is initialized prior to use
+fn getImdsCredentials(allocator: std.mem.Allocator, role_name: []const u8, imds_token: []u8) !?auth.Credentials {
+    var buf: [65535]u8 = undefined;
+    var headers = zfetch.Headers.init(allocator);
+    defer headers.deinit();
+    try headers.appendValue("X-aws-ec2-metadata-token", imds_token);
+
+    const url = try std.fmt.allocPrint(allocator, "http://169.254.169.254/latest/meta-data/iam/security-credentials/{s}/", .{role_name});
+    defer allocator.free(url);
+    var req = try zfetch.Request.init(allocator, url, null);
+    defer req.deinit();
+
+    try req.do(.GET, headers, null);
+
+    if (req.status.code != 200) {
+        log.warn("Bad status code received from IMDS role endpoint: {}", .{req.status.code});
+        return null;
+    }
+    const reader = req.reader();
+    const read = try reader.read(&buf);
+    if (read == 0 or read == 65535) {
+        log.warn("Unexpected zero or long response from IMDS role endpoint: {s}", .{buf});
+        return null;
+    }
+    const ImdsResponse = struct {
+        Code: []const u8,
+        LastUpdated: []const u8,
+        Type: []const u8,
+        AccessKeyId: []const u8,
+        SecretAccessKey: []const u8,
+        Token: []const u8,
+        Expiration: []const u8,
+    };
+    const imds_response = blk: {
+        var stream = std.json.TokenStream.init(buf[0..read]);
+        const res = std.json.parse(ImdsResponse, &stream, .{ .allocator = allocator }) catch |e| {
+            log.err("Unexpected Json response from IMDS endpoint: {s}", .{buf});
+            log.err("Error parsing json: {}", .{e});
+            if (@errorReturnTrace()) |trace| {
+                std.debug.dumpStackTrace(trace.*);
+            }
+
+            return null;
+        };
+        break :blk res;
+    };
+    defer std.json.parseFree(ImdsResponse, imds_response, .{ .allocator = allocator });
+
+    const ret = auth.Credentials.init(
+        allocator,
+        try allocator.dupe(u8, imds_response.AccessKeyId),
+        try allocator.dupe(u8, imds_response.SecretAccessKey),
+        try allocator.dupe(u8, imds_response.Token),
+    );
+    log.debug("IMDSv2 credentials found. Access key: {s}", .{ret.access_key});
+
+    return ret;
+
+    // {
+    //   "Code" : "Success",
+    //   "LastUpdated" : "2022-02-08T23:49:02Z",
+    //   "Type" : "AWS-HMAC",
+    //   "AccessKeyId" : "ASEXAMPLE",
+    //   "SecretAccessKey" : "example",
+    //   "Token" : "IQoJb==",
+    //   "Expiration" : "2022-02-09T06:02:23Z"
+    // }
+
 }
 
 fn getProfileCredentials(allocator: std.mem.Allocator, options: Profile) !?auth.Credentials {
