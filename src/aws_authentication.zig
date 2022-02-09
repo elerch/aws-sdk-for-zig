@@ -25,9 +25,9 @@ pub const Credentials = struct {
         };
     }
     pub fn deinit(self: Self) void {
-        for (self.secret_key) |_, i| self.secret_key[i] = 0;
-        self.allocator.free(self.access_key);
+        std.crypto.utils.secureZero(u8, self.secret_key);
         self.allocator.free(self.secret_key);
+        self.allocator.free(self.access_key);
         if (self.session_token) |t| self.allocator.free(t);
     }
 };
