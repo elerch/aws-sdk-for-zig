@@ -29,15 +29,16 @@ pub fn getCredentials(allocator: std.mem.Allocator, options: Options) !auth.Cred
         log.debug("Found credentials in environment. Access key: {s}", .{cred.access_key});
         return cred;
     }
-    // TODO: 2-5
     // Note that boto and Java disagree on where this fits in the order
+    // GetWebIdentity is not currently implemented. The rest are tested and gtg
+    // Note: Lambda just sets environment variables
     if (try getWebIdentityToken(allocator)) |cred| return cred;
     if (try getProfileCredentials(allocator, options.profile)) |cred| return cred;
 
     if (try getContainerCredentials(allocator)) |cred| return cred;
     // I don't think we need v1 at all?
     if (try getImdsv2Credentials(allocator)) |cred| return cred;
-    return error.NotImplemented;
+    return error.CredentialsNotFound;
 }
 
 fn getEnvironmentCredentials(allocator: std.mem.Allocator) !?auth.Credentials {
@@ -71,15 +72,106 @@ fn getWebIdentityToken(allocator: std.mem.Allocator) !?auth.Credentials {
     return null;
 }
 fn getContainerCredentials(allocator: std.mem.Allocator) !?auth.Credentials {
-    _ = allocator;
-    return null;
+    // A note on testing: The best way I have found to test this process is
+    // the following. Setup an ECS Fargate cluster and create a task definition
+    // with the command  ["/bin/bash","-c","while true; do sleep 10; done"].
+    //
+    // In the console, this would be represented as:
+    //
+    // /bin/bash,-c,while true; do sleep 10; done
+    //
+    // Then we run the task with ECS exec-command enabled. The cli for this
+    // will look something like the following:
+    //
+    // aws ecs run-task --enable-execute-command \
+    //   --cluster Fargate \
+    //   --network-configuration "awsvpcConfiguration={subnets=[subnet-1f3f4278],securityGroups=[sg-0aab58c6b2bde2105],assignPublicIp=ENABLED}" \
+    //   --launch-type FARGATE \
+    //   --task-definition zig-demo:3
+    //
+    //   Of course, subnets and security groups will be different. Public
+    //   IP is necessary or you won't be able to pull the image. I used
+    //   AL2 from the ECR public image:
+    //
+    //   public.ecr.aws/amazonlinux/amazonlinux:latest
+    //
+    // With the task running, now we need to execute it. I used CloudShell
+    // from the AWS console because everything is already installed and
+    // configured, ymmv. You need AWS CLI v2 with the session manager extension.
+    //
+    // It's good to do a pre-flight check to make sure you can run the
+    // execute command. I used this tool to do so:
+    //
+    // https://github.com/aws-containers/amazon-ecs-exec-checker
+    //
+    // A couple yellows were ok, but no red.
+    //
+    // From there, get your task id and Bob's your uncle:
+    //
+    // aws ecs execute-command --cluster Fargate --command "/bin/bash" --interactive --task ec65b4d9887b429cba5d45ec70a8afa1
+    //
+    // Compile code, copy to S3, install AWS CLI within the session, download
+    // from s3 and run
+    const container_relative_uri = (try getEnvironmentVariable(allocator, "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI")) orelse return null;
+    defer allocator.free(container_relative_uri);
+    try zfetch.init();
+    defer zfetch.deinit();
+    const container_uri = try std.fmt.allocPrint(allocator, "http://169.254.170.2{s}", .{container_relative_uri});
+    defer allocator.free(container_uri);
+
+    var req = try zfetch.Request.init(allocator, container_uri, null);
+    defer req.deinit();
+    try req.do(.GET, null, null);
+    if (req.status.code != 200 and req.status.code != 404) {
+        log.warn("Bad status code received from container credentials endpoint: {}", .{req.status.code});
+        return null;
+    }
+    if (req.status.code == 404) return null;
+    const reader = req.reader();
+    var buf: [2048]u8 = undefined;
+    const read = try reader.read(&buf);
+    if (read == 2048) {
+        log.warn("Unexpected long response from container credentials endpoint: {s}", .{buf});
+        return null;
+    }
+    log.debug("Read {d} bytes from container credentials endpoint", .{read});
+    if (read == 0) return null;
+
+    const CredsResponse = struct {
+        AccessKeyId: []const u8,
+        Expiration: []const u8,
+        RoleArn: []const u8,
+        SecretAccessKey: []const u8,
+        Token: []const u8,
+    };
+    const creds_response = blk: {
+        var stream = std.json.TokenStream.init(buf[0..read]);
+        const res = std.json.parse(CredsResponse, &stream, .{ .allocator = allocator }) catch |e| {
+            log.err("Unexpected Json response from container credentials endpoint: {s}", .{buf});
+            log.err("Error parsing json: {}", .{e});
+            if (@errorReturnTrace()) |trace| {
+                std.debug.dumpStackTrace(trace.*);
+            }
+
+            return null;
+        };
+        break :blk res;
+    };
+    defer std.json.parseFree(CredsResponse, creds_response, .{ .allocator = allocator });
+
+    return auth.Credentials.init(
+        allocator,
+        try allocator.dupe(u8, creds_response.AccessKeyId),
+        try allocator.dupe(u8, creds_response.SecretAccessKey),
+        try allocator.dupe(u8, creds_response.Token),
+    );
 }
 
 fn getImdsv2Credentials(allocator: std.mem.Allocator) !?auth.Credentials {
     try zfetch.init();
     defer zfetch.deinit();
 
-    var token: [65535]u8 = undefined;
+    var token: [1024]u8 = undefined;
     var len: usize = undefined;
     // Get token
     {
@@ -96,7 +188,7 @@ fn getImdsv2Credentials(allocator: std.mem.Allocator) !?auth.Credentials {
         }
         const reader = req.reader();
         const read = try reader.read(&token);
-        if (read == 0 or read == 65535) {
+        if (read == 0 or read == 1024) {
             log.warn("Unexpected zero or long response from IMDS v2: {s}", .{token});
             return null;
         }
@@ -120,7 +212,7 @@ fn getImdsRoleName(allocator: std.mem.Allocator, imds_token: []u8) !?[]const u8 
     //   "InstanceProfileArn" : "arn:aws:iam::550620852718:instance-profile/ec2-dev",
     //   "InstanceProfileId" : "AIPAYAM4POHXCFNKZ7HU2"
     // }
-    var buf: [65535]u8 = undefined;
+    var buf: [255]u8 = undefined;
     var headers = zfetch.Headers.init(allocator);
     defer headers.deinit();
     try headers.appendValue("X-aws-ec2-metadata-token", imds_token);
@@ -137,7 +229,7 @@ fn getImdsRoleName(allocator: std.mem.Allocator, imds_token: []u8) !?[]const u8 
     if (req.status.code == 404) return null;
     const reader = req.reader();
     const read = try reader.read(&buf);
-    if (read == 65535) {
+    if (read == 255) {
         log.warn("Unexpected zero or long response from IMDS endpoint post token: {s}", .{buf});
         return null;
     }
@@ -175,7 +267,7 @@ fn getImdsRoleName(allocator: std.mem.Allocator, imds_token: []u8) !?[]const u8 
 
 /// Note - this internal function assumes zfetch is initialized prior to use
 fn getImdsCredentials(allocator: std.mem.Allocator, role_name: []const u8, imds_token: []u8) !?auth.Credentials {
-    var buf: [65535]u8 = undefined;
+    var buf: [2048]u8 = undefined;
     var headers = zfetch.Headers.init(allocator);
     defer headers.deinit();
     try headers.appendValue("X-aws-ec2-metadata-token", imds_token);
@@ -193,10 +285,11 @@ fn getImdsCredentials(allocator: std.mem.Allocator, role_name: []const u8, imds_
     }
     const reader = req.reader();
     const read = try reader.read(&buf);
-    if (read == 0 or read == 65535) {
+    if (read == 0 or read == 2048) {
         log.warn("Unexpected zero or long response from IMDS role endpoint: {s}", .{buf});
         return null;
     }
+    // log.debug("Read {d} bytes from imds v2 credentials endpoint", .{read});
     const ImdsResponse = struct {
         Code: []const u8,
         LastUpdated: []const u8,
