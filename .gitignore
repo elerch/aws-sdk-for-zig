@@ -9,3 +9,4 @@ src/models/
 smithy/zig-out/
 libs/
 src/git_version.zig
+zig-out

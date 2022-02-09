@@ -30,7 +30,7 @@ pub fn build(b: *Builder) !void {
     exe.setTarget(target);
     exe.setBuildMode(mode);
 
-    exe.linkage = .static;
+    if (target.getOs().tag != .macos) exe.linkage = .static;
 
     // TODO: Strip doesn't actually fully strip the executable. If we're on
     //       linux we can run strip on the result, probably at the expense

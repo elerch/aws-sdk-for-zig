@@ -20,7 +20,10 @@ This is for x86_linux. Tested targets:
 * aarch64-linux
 * x86_64-windows
 * arm-linux
+* aarch64-macos
+* x86_64-macos
 
+Tested targets are built, but not continuously tested, by CI.
 
 ## Building
 

@@ -24,6 +24,8 @@ steps:
   - zig build -Dtarget=x86_64-windows
   - zig build -Dtarget=aarch64-linux
   - zig build -Dtarget=riscv64-linux
+  - zig build -Dtarget=x86_64-macos
+  - zig build -Dtarget=aarch64-macos
 - name: notify
   image: plugins/matrix
   when:
