@@ -544,12 +544,12 @@ fn generateSimpleTypeFor(_: anytype, type_name: []const u8, writer: anytype) !vo
 }
 fn generateComplexTypeFor(shape_id: []const u8, members: []smithy.TypeMember, type_type_name: []const u8, writer: anytype, state: GenerationState) anyerror!void {
     _ = shape_id;
-    const Mapping = struct { snake: []const u8, json: []const u8 };
-    var json_field_name_mappings = try std.ArrayList(Mapping).initCapacity(state.allocator, members.len);
+    const Mapping = struct { snake: []const u8, original: []const u8 };
+    var field_name_mappings = try std.ArrayList(Mapping).initCapacity(state.allocator, members.len);
     defer {
-        for (json_field_name_mappings.items) |mapping|
+        for (field_name_mappings.items) |mapping|
             state.allocator.free(mapping.snake);
-        json_field_name_mappings.deinit();
+        field_name_mappings.deinit();
     }
     // There is an httpQueryParams trait as well, but nobody is using it. API GW
     // pretends to, but it's an empty map
@@ -591,15 +591,19 @@ fn generateComplexTypeFor(shape_id: []const u8, members: []smithy.TypeMember, ty
             switch (trait) {
                 .json_name => {
                     found_name_trait = true;
-                    json_field_name_mappings.appendAssumeCapacity(.{ .snake = try state.allocator.dupe(u8, snake_case_member), .json = trait.json_name });
+                    field_name_mappings.appendAssumeCapacity(.{ .snake = try state.allocator.dupe(u8, snake_case_member), .original = trait.json_name });
                 },
-                .http_query => http_query_mappings.appendAssumeCapacity(.{ .snake = try state.allocator.dupe(u8, snake_case_member), .json = trait.http_query }),
-                .http_header => http_header_mappings.appendAssumeCapacity(.{ .snake = try state.allocator.dupe(u8, snake_case_member), .json = trait.http_header }),
+                .xml_name => {
+                    found_name_trait = true;
+                    field_name_mappings.appendAssumeCapacity(.{ .snake = try state.allocator.dupe(u8, snake_case_member), .original = trait.xml_name });
+                },
+                .http_query => http_query_mappings.appendAssumeCapacity(.{ .snake = try state.allocator.dupe(u8, snake_case_member), .original = trait.http_query }),
+                .http_header => http_header_mappings.appendAssumeCapacity(.{ .snake = try state.allocator.dupe(u8, snake_case_member), .original = trait.http_header }),
                 else => {},
             }
         }
         if (!found_name_trait)
-            json_field_name_mappings.appendAssumeCapacity(.{ .snake = try state.allocator.dupe(u8, snake_case_member), .json = member.name });
+            field_name_mappings.appendAssumeCapacity(.{ .snake = try state.allocator.dupe(u8, snake_case_member), .original = member.name });
         defer state.allocator.free(snake_case_member);
         try outputIndent(child_state, writer);
         const member_name = avoidReserved(snake_case_member);
@@ -637,11 +641,11 @@ fn generateComplexTypeFor(shape_id: []const u8, members: []smithy.TypeMember, ty
     //
     try writer.writeByte('\n');
     try outputIndent(child_state, writer);
-    _ = try writer.write("pub fn jsonFieldNameFor(_: @This(), comptime field_name: []const u8) []const u8 {\n");
+    _ = try writer.write("pub fn fieldNameFor(_: @This(), comptime field_name: []const u8) []const u8 {\n");
     var grandchild_state = child_state;
     grandchild_state.indent_level += 1;
     // We need to force output here becaseu we're referencing the field in the return statement below
-    try writeMappings(grandchild_state, "", "mappings", json_field_name_mappings, true, writer);
+    try writeMappings(grandchild_state, "", "mappings", field_name_mappings, true, writer);
     try outputIndent(grandchild_state, writer);
     _ = try writer.write("return @field(mappings, field_name);\n");
     try outputIndent(child_state, writer);
@@ -667,7 +671,7 @@ fn writeStringify(state: GenerationState, fields: [][]const u8, writer: anytype)
             try outputIndent(child_state, writer);
             try writer.print("if (std.mem.eql(u8, \"{s}\", field_name))\n", .{field});
             try outputIndent(return_state, writer);
-            try writer.print("return try serializeMap(self.{s}, self.jsonFieldNameFor(\"{s}\"), options, out_stream);\n", .{ field, field });
+            try writer.print("return try serializeMap(self.{s}, self.fieldNameFor(\"{s}\"), options, out_stream);\n", .{ field, field });
         }
         try outputIndent(child_state, writer);
         _ = try writer.write("return false;\n");
@@ -690,7 +694,7 @@ fn writeMappings(state: GenerationState, @"pub": []const u8, mapping_name: []con
     child_state.indent_level += 1;
     for (mappings.items) |mapping| {
         try outputIndent(child_state, writer);
-        try writer.print(".{s} = \"{s}\",\n", .{ avoidReserved(mapping.snake), mapping.json });
+        try writer.print(".{s} = \"{s}\",\n", .{ avoidReserved(mapping.snake), mapping.original });
     }
     try outputIndent(state, writer);
     _ = try writer.write("};\n");

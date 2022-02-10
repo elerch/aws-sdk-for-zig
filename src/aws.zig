@@ -432,7 +432,7 @@ fn buildPath(allocator: std.mem.Allocator, raw_uri: []const u8, comptime ActionR
                 in_var = false;
                 const replacement_var = raw_uri[start..inx];
                 inline for (std.meta.fields(ActionRequest)) |field| {
-                    if (std.mem.eql(u8, request.jsonFieldNameFor(field.name), replacement_var)) {
+                    if (std.mem.eql(u8, request.fieldNameFor(field.name), replacement_var)) {
                         var replacement_buffer = try std.ArrayList(u8).initCapacity(allocator, raw_uri.len);
                         defer replacement_buffer.deinit();
                         var encoded_buffer = try std.ArrayList(u8).initCapacity(allocator, raw_uri.len);

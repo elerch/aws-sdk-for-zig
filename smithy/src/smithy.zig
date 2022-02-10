@@ -96,6 +96,7 @@ pub const TraitType = enum {
     http_label,
     http_query,
     json_name,
+    xml_name,
     required,
     documentation,
     pattern,
@@ -118,6 +119,7 @@ pub const Trait = union(TraitType) {
     aws_protocol: AwsProtocol,
     ec2_query_name: []const u8,
     json_name: []const u8,
+    xml_name: []const u8,
     http: struct {
         method: []const u8,
         uri: []const u8,
@@ -565,6 +567,8 @@ fn getTrait(trait_type: []const u8, value: std.json.Value) SmithyParseError!?Tra
     }
     if (std.mem.eql(u8, trait_type, "smithy.api#jsonName"))
         return Trait{ .json_name = value.String };
+    if (std.mem.eql(u8, trait_type, "smithy.api#xmlName"))
+        return Trait{ .xml_name = value.String };
     if (std.mem.eql(u8, trait_type, "smithy.api#httpQuery"))
         return Trait{ .http_query = value.String };
     if (std.mem.eql(u8, trait_type, "smithy.api#httpHeader"))
@@ -617,7 +621,6 @@ fn getTrait(trait_type: []const u8, value: std.json.Value) SmithyParseError!?Tra
         \\smithy.api#timestampFormat
         \\smithy.api#xmlAttribute
         \\smithy.api#xmlFlattened
-        \\smithy.api#xmlName
         \\smithy.waiters#waitable
     ;
     var iterator = std.mem.split(u8, list, "\n");

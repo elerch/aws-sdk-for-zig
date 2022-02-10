@@ -2871,8 +2871,8 @@ pub fn stringify(
                     field_written = try value.jsonStringifyField(Field.name, child_options, out_stream);
 
                 if (!field_written) {
-                    if (comptime std.meta.trait.hasFn("jsonFieldNameFor")(T)) {
-                        const name = value.jsonFieldNameFor(Field.name);
+                    if (comptime std.meta.trait.hasFn("fieldNameFor")(T)) {
+                        const name = value.fieldNameFor(Field.name);
                         try stringify(name, options, out_stream);
                     } else {
                         try stringify(Field.name, options, out_stream);
