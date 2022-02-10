@@ -61,10 +61,6 @@ Only environment variable based credentials can be used at the moment.
 
 TODO List:
 
-* Add option to cache signature keys
-* Implement credentials provider
-* Implement jitter/exponential backoff
-* Implement timeouts and other TODO's in the code
 * Implement [AWS restXml protocol](https://awslabs.github.io/smithy/1.0/spec/aws/aws-restxml-protocol.html).
   Includes S3. Total service count 4. This may be blocked due to the same issue as EC2.
 * Implement [AWS EC2 query protocol](https://awslabs.github.io/smithy/1.0/spec/aws/aws-ec2-query-protocol.html).
@@ -74,6 +70,9 @@ TODO List:
   discovered. More details and llvm ir log can be found in the
   [XML branch](https://git.lerch.org/lobo/aws-sdk-for-zig/src/branch/xml).
 * Implement sigv4a signing
+* Implement jitter/exponential backoff
+* Implement timeouts and other TODO's in the code
+* Add option to cache signature keys
 
 Compiler wishlist/watchlist:
 
