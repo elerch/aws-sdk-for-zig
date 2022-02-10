@@ -69,8 +69,8 @@ pub const Element = struct {
         };
     }
 
-    pub fn findChildByTag(self: *Element, tag: []const u8) ?*Element {
-        return self.findChildrenByTag(tag).next();
+    pub fn findChildByTag(self: *Element, tag: []const u8) !?*Element {
+        return try self.findChildrenByTag(tag).next();
     }
 
     pub fn findChildrenByTag(self: *Element, tag: []const u8) FindChildrenByTagIterator {
@@ -110,13 +110,18 @@ pub const Element = struct {
         }
     };
 
+    fn strictEqual(a: []const u8, b: []const u8, _: PredicateOptions) !bool {
+        return mem.eql(u8, a, b);
+    }
     pub const FindChildrenByTagIterator = struct {
         inner: ChildElementIterator,
         tag: []const u8,
+        predicate: fn (a: []const u8, b: []const u8, options: PredicateOptions) anyerror!bool = strictEqual,
+        predicate_options: PredicateOptions = .{},
 
-        pub fn next(self: *FindChildrenByTagIterator) ?*Element {
+        pub fn next(self: *FindChildrenByTagIterator) !?*Element {
             while (self.inner.next()) |child| {
-                if (!mem.eql(u8, child.tag, self.tag)) {
+                if (!try self.predicate(child.tag, self.tag, self.predicate_options)) {
                     continue;
                 }
 
@@ -128,6 +133,9 @@ pub const Element = struct {
     };
 };
 
+pub const PredicateOptions = struct {
+    allocator: ?std.mem.Allocator = null,
+};
 pub const XmlDecl = struct {
     version: []const u8,
     encoding: ?[]const u8,
