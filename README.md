@@ -3,10 +3,9 @@
 [![Build Status](https://drone.lerch.org/api/badges/lobo/aws-sdk-for-zig/status.svg?ref=refs/heads/master)](https://drone.lerch.org/api/badges/lobo/aws-sdk-for-zig/)
 
 This SDK currently supports all AWS services except EC2 and S3. These two
-services only support XML, and zig 0.9.0 and master both trigger compile
-errors while incorporating the XML parser in conjunction with a process
-to fill the types. S3 also requires some plumbing tweaks in the signature
-calculation. Examples of usage are in src/main.zig.
+services only support XML, and more work is needed to parse and integrate
+type hydration from the base parsing. S3 also requires some plumbing tweaks
+in the signature calculation. Examples of usage are in src/main.zig.
 
 Current executable size for the demo is 953k (90k of which is the AWS PEM file)
 after compiling with -Drelease-safe and
@@ -53,11 +52,7 @@ implemented.
 
 TODO List:
 
-* To work around compiler issues, the best option may be to convert from
-  Xml to json, then parse from there. This will be pursued first. It may need
-  to wait for zig 0.10.0 when self-hosted compiler is likely to be completed
-  (zig 0.10.0 eta May 2022) discovered. If we need to wait, S3, EC2 and other
-  restXml protocols will be blocked.
+* Complete integration of Xml responses with remaining code base
 * Implement [AWS restXml protocol](https://awslabs.github.io/smithy/1.0/spec/aws/aws-restxml-protocol.html).
   Includes S3. Total service count 4. This may be blocked due to the same issue as EC2.
 * Implement [AWS EC2 query protocol](https://awslabs.github.io/smithy/1.0/spec/aws/aws-ec2-query-protocol.html).

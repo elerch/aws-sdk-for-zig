@@ -1,6 +1,8 @@
 const std = @import("std");
 const xml = @import("xml.zig");
 
+const log = std.log.scoped(.xml_shaper);
+
 fn Parsed(comptime T: type) type {
     return struct {
         allocator: std.mem.Allocator,
@@ -42,6 +44,8 @@ fn Parsed(comptime T: type) type {
                         .Many => {},
                         .C => {},
                         .Slice => {
+                            for (obj) |child|
+                                deinitObject(allocator, child);
                             allocator.free(obj);
                         },
                     }
@@ -175,11 +179,13 @@ fn parseInternal(comptime T: type, element: *xml.Element, options: ParseOptions)
             //     return error.MoreElementsThanFields;
             // }
 
+            log.debug("Processing fields in struct: {s}", .{@typeName(T)});
             inline for (struct_info.fields) |field, i| {
                 var name = field.name;
+                var found_value = false;
                 if (comptime std.meta.trait.hasFn("fieldNameFor")(T))
                     name = r.fieldNameFor(field.name);
-                std.log.debug("Field name: {s}, Element: {s}, Adjusted field name: {s}\n", .{ field.name, element.tag, name });
+                log.debug("Field name: {s}, Element: {s}, Adjusted field name: {s}", .{ field.name, element.tag, name });
                 var iterator = element.findChildrenByTag(name);
                 if (options.match_predicate) |predicate| {
                     iterator.predicate = predicate;
@@ -193,14 +199,17 @@ fn parseInternal(comptime T: type, element: *xml.Element, options: ParseOptions)
                     //         return error.UnexpectedValue;
                     //     }
                     // } else {
+                    log.debug("Found child element {s}", .{child.tag});
                     @field(r, field.name) = try parseInternal(field.field_type, child, options);
                     fields_seen[i] = true;
                     fields_set = fields_set + 1;
-                    // }
-
-                } else {
-                    return error.NoValueForField;
+                    found_value = true;
                 }
+                // Using this else clause breaks zig, so we'll use a boolean instead
+                if (!found_value) return error.NoValueForField;
+                // } else {
+                //     return error.NoValueForField;
+                // }
             }
             if (fields_set != struct_info.fields.len)
                 return error.FieldElementMismatch; // see fields_seen for details
@@ -259,14 +268,23 @@ fn parseInternal(comptime T: type, element: *xml.Element, options: ParseOptions)
                     //   <Item>bar</Item>
                     // <Items>
                     if (ptr_info.child != u8) {
-                        std.log.debug("ptr_info.child == {s}", .{@typeName(ptr_info.child)});
-                        const children = try allocator.alloc(ptr_info.child, element.children.items.len);
-                        var inx: usize = 0;
-                        while (inx < children.len) {
-                            children[inx] = try parseInternal(ptr_info.child, element.children.items[inx].Element, options);
-                            inx += 1;
+                        log.debug("type = {s}, ptr_info.child == {s}, element = {s}", .{ @typeName(T), @typeName(ptr_info.child), element.tag });
+                        var iterator = element.elements();
+                        var children = std.ArrayList(ptr_info.child).init(allocator);
+                        defer children.deinit();
+                        while (iterator.next()) |child_element| {
+                            try children.append(try parseInternal(ptr_info.child, child_element, options));
                         }
-                        return children;
+                        return children.toOwnedSlice();
+                        // var inx: usize = 0;
+                        // while (inx < children.len) {
+                        //     switch (element.children.items[inx]) {
+                        //         .Element => children[inx] = try parseInternal(ptr_info.child, element.children.items[inx].Element, options),
+                        //         .CharData => children[inx] = try allocator.dupe(u8, element.children.items[inx].CharData),
+                        //         .Comment => children[inx] = try allocator.dupe(u8, element.children.items[inx].Comment), // This might be an error...
+                        //     }
+                        //     inx += 1;
+                        // }
                     }
                     return try allocator.dupe(u8, element.children.items[0].CharData);
                 },
@@ -390,12 +408,31 @@ test "can parse an optional boolean type" {
         \\    <fooBar>true</fooBar>
         \\</Example>
     ;
-    const Example = struct {
+    const ExampleDoesNotMatter = struct {
         foo_bar: ?bool = null,
     };
-    const parsed_data = try parse(Example, data, .{ .allocator = allocator, .match_predicate = fuzzyEqual });
+    const parsed_data = try parse(ExampleDoesNotMatter, data, .{ .allocator = allocator, .match_predicate = fuzzyEqual });
     defer parsed_data.deinit();
     try testing.expectEqual(@as(?bool, true), parsed_data.parsed_value.foo_bar);
+}
+
+// This is the simplest test so far that breaks zig
+test "can parse a boolean type (two fields)" {
+    const allocator = std.testing.allocator;
+    const data =
+        \\<?xml version="1.0" encoding="UTF-8"?>
+        \\<Example xmlns="http://example.example.com/doc/2016-11-15/">
+        \\    <fooBar>true</fooBar>
+        \\    <fooBaz>true</fooBaz>
+        \\</Example>
+    ;
+    const ExampleDoesNotMatter = struct {
+        foo_bar: bool,
+        foo_baz: bool,
+    };
+    const parsed_data = try parse(ExampleDoesNotMatter, data, .{ .allocator = allocator, .match_predicate = fuzzyEqual });
+    defer parsed_data.deinit();
+    try testing.expectEqual(@as(bool, true), parsed_data.parsed_value.foo_bar);
 }
 test "can parse a nested type" {
     const allocator = std.testing.allocator;
@@ -415,6 +452,28 @@ test "can parse a nested type" {
     const parsed_data = try parse(Example, data, .{ .allocator = allocator, .match_predicate = fuzzyEqual });
     defer parsed_data.deinit();
     try testing.expectEqualStrings("baz", parsed_data.parsed_value.foo.bar);
+}
+test "can parse a nested type - two fields" {
+    const allocator = std.testing.allocator;
+    const data =
+        \\<?xml version="1.0" encoding="UTF-8"?>
+        \\<Example xmlns="http://example.example.com/doc/2016-11-15/">
+        \\    <foo>
+        \\        <bar>baz</bar>
+        \\        <qux>baz</qux>
+        \\    </foo>
+        \\</Example>
+    ;
+    const Example = struct {
+        foo: struct {
+            bar: []const u8,
+            qux: []const u8,
+        },
+    };
+    const parsed_data = try parse(Example, data, .{ .allocator = allocator, .match_predicate = fuzzyEqual });
+    defer parsed_data.deinit();
+    try testing.expectEqualStrings("baz", parsed_data.parsed_value.foo.bar);
+    try testing.expectEqualStrings("baz", parsed_data.parsed_value.foo.qux);
 }
 
 const service_metadata: struct {
@@ -450,9 +509,11 @@ const describe_regions: struct {
     },
     Response: type = struct {
         regions: ?[]struct {
+            // Having two of these causes the zig compiler bug
+            // Only one of them works fine. This leads me to believe that
+            // it has something to do with the inline for
             endpoint: ?[]const u8 = null,
             region_name: ?[]const u8 = null,
-            opt_in_status: ?[]const u8 = null,
 
             pub fn fieldNameFor(_: @This(), comptime field_name: []const u8) []const u8 {
                 const mappings = .{
@@ -473,35 +534,31 @@ const describe_regions: struct {
     },
 } = .{};
 
-// This test results in "broken LLVM module found: Operand is null"
-//   br i1 %120, label %ErrRetReturn12, <null operand!>, !dbg !10637
-//
-// This is a bug in the Zig compiler.
-// test "can parse something serious" {
-//     std.testing.log_level = .debug;
-//     std.log.debug("", .{});
-//
-//     const allocator = std.testing.allocator;
-//     const data =
-//         \\<?xml version="1.0" encoding="UTF-8"?>
-//         \\<DescribeRegionsResponse xmlns="http://ec2.amazonaws.com/doc/2016-11-15/">
-//         \\    <requestId>8d6bfc99-978b-4146-ba23-2e5fe5b65406</requestId>
-//         \\    <regionInfo>
-//         \\        <item>
-//         \\            <regionName>eu-north-1</regionName>
-//         \\            <regionEndpoint>ec2.eu-north-1.amazonaws.com</regionEndpoint>
-//         \\            <optInStatus>opt-in-not-required</optInStatus>
-//         \\        </item>
-//         \\        <item>
-//         \\            <regionName>ap-south-1</regionName>
-//         \\            <regionEndpoint>ec2.ap-south-1.amazonaws.com</regionEndpoint>
-//         \\            <optInStatus>opt-in-not-required</optInStatus>
-//         \\        </item>
-//         \\    </regionInfo>
-//         \\</DescribeRegionsResponse>
-//     ;
-//     const parsed_data = try parse(describe_regions.Response, data, .{ .allocator = allocator });
-//     defer parsed_data.deinit();
-//     try testing.expect(parsed_data.parsed_value.regions != null);
-//     // try testing.expectEqualStrings("eu-north-1", parsed_data.parsed_value.regions.?[0].region_name.?);
-// }
+test "can parse something serious" {
+    // std.testing.log_level = .debug;
+    log.debug("", .{});
+
+    const allocator = std.testing.allocator;
+    const data =
+        \\<?xml version="1.0" encoding="UTF-8"?>
+        \\<DescribeRegionsResponse xmlns="http://ec2.amazonaws.com/doc/2016-11-15/">
+        \\    <requestId>8d6bfc99-978b-4146-ba23-2e5fe5b65406</requestId>
+        \\    <regionInfo>
+        \\        <item>
+        \\            <regionName>eu-north-1</regionName>
+        \\            <regionEndpoint>ec2.eu-north-1.amazonaws.com</regionEndpoint>
+        \\        </item>
+        \\        <item>
+        \\            <regionName>ap-south-1</regionName>
+        \\            <regionEndpoint>ec2.ap-south-1.amazonaws.com</regionEndpoint>
+        \\        </item>
+        \\    </regionInfo>
+        \\</DescribeRegionsResponse>
+    ;
+    // const ServerResponse = struct { DescribeRegionsResponse: describe_regions.Response, };
+    const parsed_data = try parse(describe_regions.Response, data, .{ .allocator = allocator });
+    defer parsed_data.deinit();
+    try testing.expect(parsed_data.parsed_value.regions != null);
+    try testing.expectEqualStrings("eu-north-1", parsed_data.parsed_value.regions.?[0].region_name.?);
+    try testing.expectEqualStrings("ec2.eu-north-1.amazonaws.com", parsed_data.parsed_value.regions.?[0].endpoint.?);
+}
