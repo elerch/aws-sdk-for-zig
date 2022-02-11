@@ -193,15 +193,16 @@ pub fn Request(comptime action: anytype) type {
                 });
             defer options.client.allocator.free(query);
 
-            const body = if (Self.service_meta.aws_protocol == .query)
+            // Note: EC2 avoided the Action={s}&Version={s} in the body, but it's
+            // but it's required, so I'm not sure why that code was put in
+            // originally?
+            const body =
                 try std.fmt.allocPrint(options.client.allocator, "Action={s}&Version={s}{s}{s}", .{
-                    action.action_name,
-                    Self.service_meta.version,
-                    continuation,
-                    buffer.items,
-                })
-            else // EC2
-                try std.fmt.allocPrint(options.client.allocator, "{s}", .{buffer.items});
+                action.action_name,
+                Self.service_meta.version,
+                continuation,
+                buffer.items,
+            });
             defer options.client.allocator.free(body);
             return try Self.callAws(.{
                 .query = query,

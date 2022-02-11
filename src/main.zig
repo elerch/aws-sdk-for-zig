@@ -169,8 +169,15 @@ pub fn main() anyerror!void {
                     std.log.err("no functions to work with", .{});
                 }
             },
+            // TODO: This test fails with broken LLVM module
             .ec2_query_no_input => {
                 std.log.err("EC2 Test disabled due to compiler bug", .{});
+                // Describe regions is a simpler request and easier to debug
+                // const instances = try client.call(services.ec2.describe_regions.Request{}, options);
+                // defer instances.deinit();
+                // std.log.info("region count: {d}", .{instances.response.regions.?.len});
+
+                // Describe instances is more interesting
                 // const instances = try client.call(services.ec2.describe_instances.Request{}, options);
                 // defer instances.deinit();
                 // std.log.info("reservation count: {d}", .{instances.response.reservations.len});
