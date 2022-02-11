@@ -5,6 +5,7 @@ const json = @import("json.zig");
 const url = @import("url.zig");
 const case = @import("case.zig");
 const servicemodel = @import("servicemodel.zig");
+// const xml_shaper = @import("xml_shaper.zig");
 
 const log = std.log.scoped(.aws);
 
@@ -86,11 +87,10 @@ pub fn Request(comptime action: anytype) type {
             //    We're not doing a lot of error handling here, though.
             // 3. rest_xml: This is a one-off for S3, never used since
             switch (Self.service_meta.aws_protocol) {
-                .query => return Self.callQuery(request, options),
-                // .query, .ec2_query => return self.callQuery(request, Self.service_meta, action, options),
+                .query, .ec2_query => return Self.callQuery(request, options),
                 .json_1_0, .json_1_1 => return Self.callJson(request, options),
                 .rest_json_1 => return Self.callRestJson(request, options),
-                .ec2_query, .rest_xml => @compileError("XML responses may be blocked on a zig compiler bug scheduled to be fixed in 0.9.0"),
+                .rest_xml => @compileError("XML responses may be blocked on a zig compiler bug scheduled to be fixed in 0.10.0"),
             }
         }
 
@@ -175,6 +175,8 @@ pub fn Request(comptime action: anytype) type {
         // handle lists and maps properly anyway yet, so we'll go for it and see
         // where it breaks. PRs and/or failing test cases appreciated.
         fn callQuery(request: ActionRequest, options: Options) !FullResponseType {
+            if (Self.service_meta.aws_protocol == .ec2_query)
+                @compileError("XML responses from EC2 blocked due to zig compiler bug scheduled to be fixed no earlier than 0.10.0");
             var buffer = std.ArrayList(u8).init(options.client.allocator);
             defer buffer.deinit();
             const writer = buffer.writer();
