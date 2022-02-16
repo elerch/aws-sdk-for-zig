@@ -97,7 +97,7 @@ pub fn parseIso8601ToDateTime(data: []const u8) !DateTime {
             },
             'Z' => zulu_time = true,
             else => {
-                std.log.err("Invalid character: {c}", .{ch});
+                log.err("Invalid character: {c}", .{ch});
                 return error.InvalidCharacter;
             },
         }
@@ -197,9 +197,9 @@ fn secondsBetween(start: DateTime, end: DateTime) DateTimeToTimestampError!i64 {
     const leap_years_between = leapYearsBetween(start.year, end.year);
     var add_days: u1 = 0;
     const years_diff = end.year - start.year;
-    std.log.debug("Years from epoch: {d}, Leap years: {d}", .{ years_diff, leap_years_between });
+    log.debug("Years from epoch: {d}, Leap years: {d}", .{ years_diff, leap_years_between });
     var days_diff: i32 = (years_diff * DAYS_PER_YEAR) + leap_years_between + add_days;
-    std.log.debug("Days with leap year, without month: {d}", .{days_diff});
+    log.debug("Days with leap year, without month: {d}", .{days_diff});
 
     const seconds_into_year = secondsFromBeginningOfYear(
         end.year,
@@ -232,7 +232,7 @@ fn secondsFromBeginningOfYear(year: u16, month: u8, day: u8, hour: u8, minute: u
         days_diff += days_per_month[current_month - 1]; // months are 1-based vs array is 0-based
         current_month += 1;
     }
-    std.log.debug("Days with month, without day: {d}. Day of month {d}, will add {d} days", .{
+    log.debug("Days with month, without day: {d}. Day of month {d}, will add {d} days", .{
         days_diff,
         day,
         day - 1,
@@ -240,7 +240,7 @@ fn secondsFromBeginningOfYear(year: u16, month: u8, day: u8, hour: u8, minute: u
     // We need -1 because we're not actually including the ending day (that's up to hour/minute)
     // In other words, days in the month are 1-based, while hours/minutes are zero based
     days_diff += day - 1;
-    std.log.debug("Total days diff: {d}", .{days_diff});
+    log.debug("Total days diff: {d}", .{days_diff});
     var seconds_diff: u32 = days_diff * SECONDS_PER_DAY;
 
     // From here out, we want to get everything into seconds
@@ -261,7 +261,7 @@ fn leapYearsBetween(start_year_inclusive: u16, end_year_exclusive: u16) u16 {
     const start = std.math.min(start_year_inclusive, end_year_exclusive);
     const end = std.math.max(start_year_inclusive, end_year_exclusive);
     var current = start;
-    std.log.debug("Leap years starting from {d}, ending at {d}", .{ start, end });
+    log.debug("Leap years starting from {d}, ending at {d}", .{ start, end });
     while (current % 4 != 0 and current < end) {
         current += 1;
     }
@@ -271,7 +271,7 @@ fn leapYearsBetween(start_year_inclusive: u16, end_year_exclusive: u16) u16 {
     while (current < end) {
         if (current % 4 == 0) {
             if (current % 100 != 0) {
-                std.log.debug("Year {d} is leap year", .{current});
+                log.debug("Year {d} is leap year", .{current});
                 rc += 1;
                 current += 4;
                 continue;
@@ -279,7 +279,7 @@ fn leapYearsBetween(start_year_inclusive: u16, end_year_exclusive: u16) u16 {
             // We're on a century, which is normally not a leap year, unless
             // it's divisible by 400
             if (current % 400 == 0) {
-                std.log.debug("Year {d} is leap year", .{current});
+                log.debug("Year {d} is leap year", .{current});
                 rc += 1;
             }
         }
@@ -289,7 +289,7 @@ fn leapYearsBetween(start_year_inclusive: u16, end_year_exclusive: u16) u16 {
 }
 
 fn printDateTime(dt: DateTime) void {
-    std.log.debug("{:0>4}-{:0>2}-{:0>2}T{:0>2}:{:0>2}:{:0<2}Z", .{
+    log.debug("{:0>4}-{:0>2}-{:0>2}T{:0>2}:{:0>2}:{:0<2}Z", .{
         dt.year,
         dt.month,
         dt.day,
