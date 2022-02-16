@@ -5,7 +5,7 @@ const json = @import("json.zig");
 const url = @import("url.zig");
 const case = @import("case.zig");
 const servicemodel = @import("servicemodel.zig");
-// const xml_shaper = @import("xml_shaper.zig");
+const xml_shaper = @import("xml_shaper.zig");
 
 const log = std.log.scoped(.aws);
 
@@ -175,8 +175,6 @@ pub fn Request(comptime action: anytype) type {
         // handle lists and maps properly anyway yet, so we'll go for it and see
         // where it breaks. PRs and/or failing test cases appreciated.
         fn callQuery(request: ActionRequest, options: Options) !FullResponseType {
-            if (Self.service_meta.aws_protocol == .ec2_query)
-                @compileError("XML responses from EC2 blocked due to zig compiler bug scheduled to be fixed no earlier than 0.10.0");
             var buffer = std.ArrayList(u8).init(options.client.allocator);
             defer buffer.deinit();
             const writer = buffer.writer();
@@ -250,10 +248,9 @@ pub fn Request(comptime action: anytype) type {
                 }
             }
 
-            // TODO: Handle XML
-            if (!isJson) return error.XmlUnimplemented;
+            if (!isJson) return try xmlReturn(options, response);
 
-            const SResponse = if (Self.service_meta.aws_protocol != .query and Self.service_meta.aws_protocol != .ec2_query)
+            const SResponse = if (Self.service_meta.aws_protocol != .query)
                 action.Response
             else
                 ServerResponse(action);
@@ -272,7 +269,7 @@ pub fn Request(comptime action: anytype) type {
                     .response_metadata = .{
                         .request_id = try requestIdFromHeaders(aws_request, response, options),
                     },
-                    .parser_options = parser_options,
+                    .parser_options = .{ .json = parser_options },
                     .raw_parsed = .{ .raw = .{} },
                 };
 
@@ -294,13 +291,25 @@ pub fn Request(comptime action: anytype) type {
                 return e;
             };
 
-            if (Self.service_meta.aws_protocol != .query and Self.service_meta.aws_protocol != .ec2_query) {
+            // TODO: Figure out this hack
+            // the code setting the response about 10 lines down will trigger
+            // an error because the first field may not be a struct when
+            // XML processing is happening above, which we only know at runtime.
+            //
+            // We could simply force .ec2_query and .rest_xml above rather than
+            // isJson, but it would be nice to automatically support json if
+            // these services start returning that like we'd like them to.
+            //
+            // Otherwise, the compiler gets down here thinking this will be
+            // processed. If it is, then we have a problem when the field name
+            // may not be a struct.
+            if (Self.service_meta.aws_protocol != .query or Self.service_meta.aws_protocol == .ec2_query) {
                 return FullResponseType{
                     .response = parsed_response,
                     .response_metadata = .{
                         .request_id = try requestIdFromHeaders(aws_request, response, options),
                     },
-                    .parser_options = parser_options,
+                    .parser_options = .{ .json = parser_options },
                     .raw_parsed = .{ .raw = parsed_response },
                 };
             }
@@ -320,8 +329,51 @@ pub fn Request(comptime action: anytype) type {
                 .response_metadata = .{
                     .request_id = try options.client.allocator.dupe(u8, real_response.ResponseMetadata.RequestId),
                 },
-                .parser_options = parser_options,
+                .parser_options = .{ .json = parser_options },
                 .raw_parsed = .{ .server = parsed_response },
+            };
+        }
+
+        fn xmlReturn(options: Options, result: awshttp.HttpResult) !FullResponseType {
+            // Server shape be all like:
+            //
+            // <?xml version="1.0" encoding="UTF-8"?>
+            // <DescribeRegionsResponse xmlns="http://ec2.amazonaws.com/doc/2016-11-15/">
+            //     <requestId>0efe31c6-cad5-4882-b275-dfea478cf039</requestId>
+            //     <regionInfo>
+            //         <item>
+            //             <regionName>eu-north-1</regionName>
+            //             <regionEndpoint>ec2.eu-north-1.amazonaws.com</regionEndpoint>
+            //             <optInStatus>opt-in-not-required</optInStatus>
+            //         </item>
+            //     </regionInfo>
+            // </DescribeRegionsResponse>
+            //
+            // While our stuff be like:
+            //
+            // struct {
+            //   regions: []struct {
+            //     region_name: []const u8,
+            //   }
+            // }
+            //
+            // Big thing is that requestid, which we'll need to fetch "manually"
+            const xml_options = xml_shaper.ParseOptions{ .allocator = options.client.allocator };
+            const parsed = try xml_shaper.parse(action.Response, result.body, xml_options);
+            // This needs to get into FullResponseType somehow: defer parsed.deinit();
+            const request_id = blk: {
+                if (parsed.document.root.getCharData("requestId")) |elem|
+                    break :blk elem;
+                return error.RequestIdNotFound;
+            };
+
+            return FullResponseType{
+                .response = parsed.parsed_value,
+                .response_metadata = .{
+                    .request_id = try options.client.allocator.dupe(u8, request_id),
+                },
+                .parser_options = .{ .xml = xml_options },
+                .raw_parsed = .{ .xml = parsed },
             };
         }
     };
@@ -397,21 +449,32 @@ fn FullResponse(comptime action: anytype) type {
         response_metadata: struct {
             request_id: []u8,
         },
-        parser_options: json.ParseOptions,
+        parser_options: union(enum) {
+            json: json.ParseOptions,
+            xml: xml_shaper.ParseOptions,
+        },
         raw_parsed: union(enum) {
             server: ServerResponse(action),
             raw: action.Response,
+            xml: xml_shaper.Parsed(action.Response),
         },
-        // raw_parsed: ServerResponse(request),
 
         const Self = @This();
         pub fn deinit(self: Self) void {
             switch (self.raw_parsed) {
-                .server => json.parseFree(ServerResponse(action), self.raw_parsed.server, self.parser_options),
-                .raw => json.parseFree(action.Response, self.raw_parsed.raw, self.parser_options),
+                // Server is json only (so far)
+                .server => json.parseFree(ServerResponse(action), self.raw_parsed.server, self.parser_options.json),
+                // Raw is json only (so far)
+                .raw => json.parseFree(action.Response, self.raw_parsed.raw, self.parser_options.json),
+                .xml => |xml| xml.deinit(),
             }
 
-            self.parser_options.allocator.?.free(self.response_metadata.request_id);
+            var allocator: std.mem.Allocator = undefined;
+            switch (self.parser_options) {
+                .json => |j| allocator = j.allocator.?,
+                .xml => |x| allocator = x.allocator.?,
+            }
+            allocator.free(self.response_metadata.request_id);
         }
     };
 }

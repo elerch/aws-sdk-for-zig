@@ -45,7 +45,7 @@ pub const Element = struct {
     }
 
     pub fn getCharData(self: *Element, child_tag: []const u8) ?[]const u8 {
-        const child = self.findChildByTag(child_tag) orelse return null;
+        const child = (self.findChildByTag(child_tag) catch return null) orelse return null;
         if (child.children.items.len != 1) {
             return null;
         }

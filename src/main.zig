@@ -14,6 +14,15 @@ pub fn log(
     // Ignore aws_signing messages
     if (verbose < 2 and scope == .aws_signing and @enumToInt(level) >= @enumToInt(std.log.Level.debug))
         return;
+    // Ignore aws_credentials messages
+    if (verbose < 2 and scope == .aws_credentials and @enumToInt(level) >= @enumToInt(std.log.Level.debug))
+        return;
+    // Ignore xml_shaper messages
+    if (verbose < 2 and scope == .xml_shaper and @enumToInt(level) >= @enumToInt(std.log.Level.debug))
+        return;
+    // Ignore date messages
+    if (verbose < 2 and scope == .date and @enumToInt(level) >= @enumToInt(std.log.Level.debug))
+        return;
     // Ignore awshttp messages
     if (verbose < 1 and scope == .awshttp and @enumToInt(level) >= @enumToInt(std.log.Level.debug))
         return;
@@ -169,18 +178,17 @@ pub fn main() anyerror!void {
                     std.log.err("no functions to work with", .{});
                 }
             },
-            // TODO: This test fails with broken LLVM module
             .ec2_query_no_input => {
-                std.log.err("EC2 Test disabled due to compiler bug", .{});
                 // Describe regions is a simpler request and easier to debug
-                // const instances = try client.call(services.ec2.describe_regions.Request{}, options);
-                // defer instances.deinit();
-                // std.log.info("region count: {d}", .{instances.response.regions.?.len});
+                const result = try client.call(services.ec2.describe_regions.Request{}, options);
+                defer result.deinit();
+                std.log.info("request id: {s}", .{result.response_metadata.request_id});
+                std.log.info("region count: {d}", .{result.response.regions.?.len});
 
                 // Describe instances is more interesting
-                // const instances = try client.call(services.ec2.describe_instances.Request{}, options);
-                // defer instances.deinit();
-                // std.log.info("reservation count: {d}", .{instances.response.reservations.len});
+                const instances = try client.call(services.ec2.describe_instances.Request{}, options);
+                defer instances.deinit();
+                std.log.info("reservation count: {d}", .{instances.response.reservations.?.len});
             },
         }
         std.log.info("===== End Test: {s} =====\n", .{@tagName(t)});

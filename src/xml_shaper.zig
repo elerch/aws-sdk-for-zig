@@ -242,6 +242,7 @@ fn parseInternal(comptime T: type, element: *xml.Element, options: ParseOptions)
                 if (@typeInfo(field.field_type) == .Optional and !found_value) {
                     // @compileLog("Optional: Field name ", field.name, ", type ", field.field_type);
                     @field(r, field.name) = null;
+                    fields_set = fields_set + 1;
                     found_value = true;
                 }
                 // Using this else clause breaks zig, so we'll use a boolean instead
