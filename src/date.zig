@@ -83,29 +83,73 @@ pub fn parseIso8601Timestamp(data: []const u8) !i64 {
 }
 
 fn dateTimeToTimestamp(datetime: DateTime) !i64 {
-    if (datetime.month > 12 or
-        datetime.day > 31 or
-        datetime.hour >= 24 or
-        datetime.minute >= 60 or
-        datetime.second >= 60) return error.DateTimeOutOfRange;
-    const epoch_year = 1970;
-    if (datetime.year < epoch_year) return error.DatesBeforeEpochNotImplemented;
-    const leap_years_between = leapYearsBetween(epoch_year, datetime.year);
+    const epoch = DateTime{
+        .year = 1970,
+        .month = 1,
+        .day = 1,
+        .hour = 0,
+        .minute = 0,
+        .second = 0,
+    };
+    return secondsBetween(epoch, datetime);
+}
+
+const DateTimeToTimestampError = error{
+    DateTimeOutOfRange,
+};
+
+fn secondsBetween(start: DateTime, end: DateTime) DateTimeToTimestampError!i64 {
+    try validateDatetime(start);
+    try validateDatetime(end);
+    if (end.year < start.year) return -1 * try secondsBetween(end, start);
+    if (start.month != 1 or
+        start.day != 1 or
+        start.hour != 0 or
+        start.minute != 0 or
+        start.second != 0)
+    {
+        const seconds_into_start_year = secondsFromBeginningOfYear(
+            start.year,
+            start.month,
+            start.day,
+            start.hour,
+            start.minute,
+            start.second,
+        );
+        const new_start = DateTime{
+            .year = start.year,
+            .month = 1,
+            .day = 1,
+            .hour = 0,
+            .minute = 0,
+            .second = 0,
+        };
+        return (try secondsBetween(new_start, end)) - seconds_into_start_year;
+    }
+    const leap_years_between = leapYearsBetween(start.year, end.year);
     var add_days: u1 = 0;
-    const years_diff = std.math.absCast(@as(i17, datetime.year) - @as(i17, epoch_year));
+    const years_diff = end.year - start.year;
     std.log.debug("Years from epoch: {d}, Leap years: {d}", .{ years_diff, leap_years_between });
     var days_diff: i32 = (years_diff * DAYS_PER_YEAR) + leap_years_between + add_days;
     std.log.debug("Days with leap year, without month: {d}", .{days_diff});
 
     const seconds_into_year = secondsFromBeginningOfYear(
-        datetime.year,
-        datetime.month,
-        datetime.day,
-        datetime.hour,
-        datetime.minute,
-        datetime.second,
+        end.year,
+        end.month,
+        end.day,
+        end.hour,
+        end.minute,
+        end.second,
     );
     return (days_diff * SECONDS_PER_DAY) + @as(i64, seconds_into_year);
+}
+
+fn validateDatetime(dt: DateTime) !void {
+    if (dt.month > 12 or
+        dt.day > 31 or
+        dt.hour >= 24 or
+        dt.minute >= 60 or
+        dt.second >= 60) return error.DateTimeOutOfRange;
 }
 
 fn secondsFromBeginningOfYear(year: u16, month: u8, day: u8, hour: u8, minute: u8, second: u8) u32 {
@@ -201,8 +245,6 @@ test "Convert timestamp to datetime" {
 }
 
 test "Convert datetime to timestamp" {
-    std.testing.log_level = .debug;
-    std.log.debug("\n", .{});
     try std.testing.expectEqual(@as(i64, 1598607147), try dateTimeToTimestamp(DateTime{ .year = 2020, .month = 8, .day = 28, .hour = 9, .minute = 32, .second = 27 }));
     try std.testing.expectEqual(@as(i64, 1604207167), try dateTimeToTimestamp(DateTime{ .year = 2020, .month = 11, .day = 1, .hour = 5, .minute = 6, .second = 7 }));
     try std.testing.expectEqual(@as(i64, 1440938160), try dateTimeToTimestamp(DateTime{ .year = 2015, .month = 08, .day = 30, .hour = 12, .minute = 36, .second = 00 }));
@@ -213,17 +255,6 @@ test "Convert ISO8601 string to timestamp" {
     try std.testing.expectEqual(@as(i64, 1604207167), try dateTimeToTimestamp(DateTime{ .year = 2020, .month = 11, .day = 1, .hour = 5, .minute = 6, .second = 7 }));
     try std.testing.expectEqual(@as(i64, 1440938160), try dateTimeToTimestamp(DateTime{ .year = 2015, .month = 08, .day = 30, .hour = 12, .minute = 36, .second = 00 }));
 }
-// TODO: I think before epoch, the best approach is to flip the epoch and the
-//       input date, calculate the answer, then flip signs. However, this requires
-//       re-designing the algorithm to start from something other than midnight
-//       January 1st. This will require an overhaul, so for now, we'll leave
-//       this unimplemented.
-//
-// test "Convert datetime to timestamp before 1970" {
-//     std.testing.log_level = .debug;
-//     std.log.debug("\n", .{});
-//     try std.testing.expectEqual(@as(i64, -449392815000), try dateTimeToTimestamp(DateTime{ .year = 1955, .month = 10, .day = 05, .hour = 16, .minute = 39, .second = 45 }));
-//
-//
-//   1955.1 - .1 + x = 1970
-// }
+test "Convert datetime to timestamp before 1970" {
+    try std.testing.expectEqual(@as(i64, -449392815), try dateTimeToTimestamp(DateTime{ .year = 1955, .month = 10, .day = 05, .hour = 16, .minute = 39, .second = 45 }));
+}
