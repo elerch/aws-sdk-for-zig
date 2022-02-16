@@ -1,81 +1,71 @@
 const std = @import("std");
 const xml = @import("xml.zig");
+const date = @import("date.zig");
 
 const log = std.log.scoped(.xml_shaper);
 
-fn Parsed(comptime T: type) type {
+pub fn Parsed(comptime T: type) type {
     return struct {
-        allocator: std.mem.Allocator,
+        // Forcing an arean allocator isn't my favorite choice here, but
+        // is the simplest way to handle deallocation in the event of
+        // an error
+        allocator: std.heap.ArenaAllocator,
         parsed_value: T,
+        document: xml.Document,
 
         const Self = @This();
 
-        pub fn init(allocator: std.mem.Allocator, parsedObj: T) Self {
+        pub fn init(allocator: std.heap.ArenaAllocator, parsedObj: T, document: xml.Document) Self {
             return .{
                 .allocator = allocator,
                 .parsed_value = parsedObj,
+                .document = document,
             };
         }
 
         pub fn deinit(self: Self) void {
-            deinitObject(self.allocator, self.parsed_value);
+            self.allocator.deinit();
+            // deinitObject(self.allocator, self.parsed_value);
+            // self.document.deinit();
         }
+    };
+}
 
-        fn deinitObject(allocator: std.mem.Allocator, obj: anytype) void {
-            switch (@typeInfo(@TypeOf(obj))) {
-                .Optional => if (obj) |o| deinitObject(allocator, o),
-                .Union => |union_info| {
-                    inline for (union_info.fields) |field| {
-                        std.debug.print("{s}", field); // need to find active field and deinit it
-                    }
-                },
-                .Struct => |struct_info| {
-                    inline for (struct_info.fields) |field| {
-                        deinitObject(allocator, @field(obj, field.name));
-                    }
-                },
-                .Array => {}, // Not implemented below
-                .Pointer => |ptr_info| {
-                    switch (ptr_info.size) {
-                        .One => {
-                            deinitObject(allocator, obj.*);
-                            allocator.free(obj);
-                        },
-                        .Many => {},
-                        .C => {},
-                        .Slice => {
-                            for (obj) |child|
-                                deinitObject(allocator, child);
-                            allocator.free(obj);
-                        },
-                    }
-                },
-                //.Bool, .Float, .ComptimeFloat, .Int, .ComptimeInt, .Enum, .Opaque => {}, // no allocations here
-                else => {},
+// This is dead code and can be removed with the move to ArenaAllocator
+fn deinitObject(allocator: std.mem.Allocator, obj: anytype) void {
+    switch (@typeInfo(@TypeOf(obj))) {
+        .Optional => if (obj) |o| deinitObject(allocator, o),
+        .Union => |union_info| {
+            inline for (union_info.fields) |field| {
+                std.debug.print("{s}", field); // need to find active field and deinit it
             }
-        }
-    };
+        },
+        .Struct => |struct_info| {
+            inline for (struct_info.fields) |field| {
+                deinitObject(allocator, @field(obj, field.name));
+            }
+        },
+        .Array => {}, // Not implemented below
+        .Pointer => |ptr_info| {
+            switch (ptr_info.size) {
+                .One => {
+                    deinitObject(allocator, obj.*);
+                    allocator.free(obj);
+                },
+                .Many => {},
+                .C => {},
+                .Slice => {
+                    for (obj) |child|
+                        deinitObject(allocator, child);
+                    allocator.free(obj);
+                },
+            }
+        },
+        //.Bool, .Float, .ComptimeFloat, .Int, .ComptimeInt, .Enum, .Opaque => {}, // no allocations here
+        else => {},
+    }
 }
 
-pub fn Parser(comptime T: type) type {
-    return struct {
-        ParseType: type = T,
-        ReturnType: type = Parsed(T),
-
-        const Self = @This();
-
-        pub fn parse(source: []const u8, options: ParseOptions) !Parsed(T) {
-            if (options.allocator == null)
-                return error.AllocatorRequired; // we are only leaving it be null for compatibility with json
-            const allocator = options.allocator.?;
-            const parse_allocator = std.heap.ArenaAllocator.init(allocator);
-            const parsed = try xml.parse(allocator, source);
-            defer parsed.deinit();
-            defer parse_allocator.deinit();
-            return Parsed(T).init(allocator, try parseInternal(T, parsed.root, options));
-        }
-    };
-}
 // should we just use json parse options?
 pub const ParseOptions = struct {
     allocator: ?std.mem.Allocator = null,
@@ -86,11 +76,17 @@ pub fn parse(comptime T: type, source: []const u8, options: ParseOptions) !Parse
     if (options.allocator == null)
         return error.AllocatorRequired; // we are only leaving it be null for compatibility with json
     const allocator = options.allocator.?;
-    var parse_allocator = std.heap.ArenaAllocator.init(allocator);
-    const parsed = try xml.parse(parse_allocator.allocator(), source);
-    // defer parsed.deinit(); // Let the arena allocator whack it all
-    defer parse_allocator.deinit();
-    return Parsed(T).init(allocator, try parseInternal(T, parsed.root, options));
+    var arena_allocator = std.heap.ArenaAllocator.init(allocator);
+    const aa = arena_allocator.allocator();
+    errdefer arena_allocator.deinit();
+    const parsed = try xml.parse(aa, source);
+    errdefer parsed.deinit();
+    const opts = ParseOptions{
+        .allocator = aa,
+        .match_predicate = options.match_predicate,
+    };
+
+    return Parsed(T).init(arena_allocator, try parseInternal(T, parsed.root, opts), parsed);
 }
 
 fn parseInternal(comptime T: type, element: *xml.Element, options: ParseOptions) !T {
@@ -103,10 +99,47 @@ fn parseInternal(comptime T: type, element: *xml.Element, options: ParseOptions)
             return error.UnexpectedToken;
         },
         .Float, .ComptimeFloat => {
-            return try std.fmt.parseFloat(T, element.children.items[0].CharData);
+            return std.fmt.parseFloat(T, element.children.items[0].CharData) catch |e| {
+                if (log_parse_traces) {
+                    std.log.err(
+                        "Could not parse '{s}' as float in element '{s}': {s}",
+                        .{
+                            element.children.items[0].CharData,
+                            element.tag,
+                            e,
+                        },
+                    );
+                    if (@errorReturnTrace()) |trace| {
+                        std.debug.dumpStackTrace(trace.*);
+                    }
+                }
+                return e;
+            };
         },
         .Int, .ComptimeInt => {
-            return try std.fmt.parseInt(T, element.children.items[0].CharData, 10);
+            // 2021-10-05T16:39:45.000Z
+            return std.fmt.parseInt(T, element.children.items[0].CharData, 10) catch |e| {
+                if (element.children.items[0].CharData[element.children.items[0].CharData.len - 1] == 'Z') {
+                    // We have an iso8601 in an integer field (we think)
+                    // Try to coerce this into our type
+                    const timestamp = try date.parseIso8601ToTimestamp(element.children.items[0].CharData);
+                    return try std.math.cast(T, timestamp);
+                }
+                if (log_parse_traces) {
+                    std.log.err(
+                        "Could not parse '{s}' as integer in element '{s}': {s}",
+                        .{
+                            element.children.items[0].CharData,
+                            element.tag,
+                            e,
+                        },
+                    );
+                    if (@errorReturnTrace()) |trace| {
+                        std.debug.dumpStackTrace(trace.*);
+                    }
+                }
+                return e;
+            };
         },
         .Optional => |optional_info| {
             if (element.children.items.len == 0) {
@@ -200,13 +233,22 @@ fn parseInternal(comptime T: type, element: *xml.Element, options: ParseOptions)
                     //     }
                     // } else {
                     log.debug("Found child element {s}", .{child.tag});
+                    // TODO: how do we errdefer this?
                     @field(r, field.name) = try parseInternal(field.field_type, child, options);
                     fields_seen[i] = true;
                     fields_set = fields_set + 1;
                     found_value = true;
                 }
+                if (@typeInfo(field.field_type) == .Optional and !found_value) {
+                    // @compileLog("Optional: Field name ", field.name, ", type ", field.field_type);
+                    @field(r, field.name) = null;
+                    found_value = true;
+                }
                 // Using this else clause breaks zig, so we'll use a boolean instead
-                if (!found_value) return error.NoValueForField;
+                if (!found_value) {
+                    log.err("Could not find a value for field {s}. Looking for {s} in element {s}", .{ field.name, name, element.tag });
+                    return error.NoValueForField;
+                }
                 // } else {
                 //     return error.NoValueForField;
                 // }
@@ -416,6 +458,21 @@ test "can parse an optional boolean type" {
     try testing.expectEqual(@as(?bool, true), parsed_data.parsed_value.foo_bar);
 }
 
+test "can coerce 8601 date to integer" {
+    const allocator = std.testing.allocator;
+    const data =
+        \\<?xml version="1.0" encoding="UTF-8"?>
+        \\<Example xmlns="http://example.example.com/doc/2016-11-15/">
+        \\    <fooBar>2021-10-05T16:39:45.000Z</fooBar>
+        \\</Example>
+    ;
+    const ExampleDoesNotMatter = struct {
+        foo_bar: ?i64 = null,
+    };
+    const parsed_data = try parse(ExampleDoesNotMatter, data, .{ .allocator = allocator, .match_predicate = fuzzyEqual });
+    defer parsed_data.deinit();
+    try testing.expectEqual(@as(i64, 1633451985), parsed_data.parsed_value.foo_bar.?);
+}
 // This is the simplest test so far that breaks zig
 test "can parse a boolean type (two fields)" {
     const allocator = std.testing.allocator;
@@ -434,6 +491,28 @@ test "can parse a boolean type (two fields)" {
     defer parsed_data.deinit();
     try testing.expectEqual(@as(bool, true), parsed_data.parsed_value.foo_bar);
 }
+var log_parse_traces = true;
+test "can error without leaking memory" {
+    const allocator = std.testing.allocator;
+    const data =
+        \\<?xml version="1.0" encoding="UTF-8"?>
+        \\<Example xmlns="http://example.example.com/doc/2016-11-15/">
+        \\    <fooBar>true</fooBar>
+        \\    <fooBaz>12.345</fooBaz>
+        \\</Example>
+    ;
+    const ExampleDoesNotMatter = struct {
+        foo_bar: bool,
+        foo_baz: u64,
+    };
+    log_parse_traces = false;
+    defer log_parse_traces = true;
+    try std.testing.expectError(
+        error.InvalidCharacter,
+        parse(ExampleDoesNotMatter, data, .{ .allocator = allocator, .match_predicate = fuzzyEqual }),
+    );
+}
+
 test "can parse a nested type" {
     const allocator = std.testing.allocator;
     const data =
