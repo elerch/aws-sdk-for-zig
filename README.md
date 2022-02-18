@@ -1,4 +1,4 @@
-# AWS SDK for Zig (zig native branch)
+# AWS SDK for Zig
 
 [![Build Status](https://drone.lerch.org/api/badges/lobo/aws-sdk-for-zig/status.svg?ref=refs/heads/master)](https://drone.lerch.org/api/badges/lobo/aws-sdk-for-zig/)
 
