@@ -51,6 +51,7 @@ TODO List:
 
 * Implement [AWS restXml protocol](https://awslabs.github.io/smithy/1.0/spec/aws/aws-restxml-protocol.html).
   Includes S3. Total service count 4.
+* Bump to zig 0.9.1. iguanaTLS, used in zFetch is still [working out 0.9.1 issues](https://github.com/alexnask/iguanaTLS/pull/29)
 * Implement sigv4a signing
 * Implement jitter/exponential backoff
 * Implement timeouts and other TODO's in the code
