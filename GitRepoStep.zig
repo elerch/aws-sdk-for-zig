@@ -96,7 +96,9 @@ fn make(step: *std.build.Step) !void {
             defer args.deinit();
             try args.append("git");
             try args.append("clone");
-            try args.append("--recurse-submodules");
+            // This is a bad idea, because we really want to get to the correct
+            // revision before we go updating submodules
+            // try args.append("--recurse-submodules");
             try args.append(self.url);
             // TODO: clone it to a temporary location in case of failure
             //       also, remove that temporary location before running
@@ -115,6 +117,17 @@ fn make(step: *std.build.Step) !void {
             self.sha,
             "-b",
             "fordep",
+        });
+
+        // Now that we're on the correct revision, we can update submodules
+        try run(self.builder, &[_][]const u8{
+            "git",
+            "-C",
+            self.path,
+            "submodule",
+            "update",
+            "--init",
+            "--recursive",
         });
     };
 
@@ -171,7 +184,7 @@ fn run(builder: *std.build.Builder, argv: []const []const u8) !void {
             try writer.print("{s}\"{s}\"", .{ prefix, arg });
             prefix = " ";
         }
-        std.log.info("[RUN] {s}", .{msg.items});
+        std.log.debug("[RUN] {s}", .{msg.items});
     }
 
     const child = try std.ChildProcess.init(argv, builder.allocator);
