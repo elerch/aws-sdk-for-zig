@@ -6,16 +6,19 @@ steps:
 - name: make
   image: alpine:3.15.0
   environment:
-    USERNAME:
-      from_secret: docker_username
-    PASSWORD:
-      from_secret: docker_password
-    REGISTRY:
-      from_secret: docker_registry
+    ZIG_VERSION: 0.9.1
   commands:
-  - wget https://ziglang.org/download/0.9.0/zig-linux-x86_64-0.9.0.tar.xz
-  - tar x -C /usr/local -f zig-linux-x86_64-0.9.0.tar.xz
-  - ln -s /usr/local/zig-linux-x86_64-0.9.0/zig /usr/local/bin/zig
+  # DRONE_STAGE_ARCH is fine, but we can't substitute directly because zig
+  # uses x86_64 instead of amd64. They also use aarch64 instead of arm64.
+  #
+  # However, arm64/linux isn't quite fully tier 1 yet, so this is more of a
+  # TODO: https://github.com/ziglang/zig/issues/2443
+  #
+  # DRONE_STAGE_ARCH=amd64
+  # DRONE_STAGE_ARCH=arm64
+  - wget https://ziglang.org/download/$${ZIG_VERSION}/zig-linux-x86_64-$${ZIG_VERSION}.tar.xz
+  - tar x -C /usr/local -f zig-linux-x86_64-$${ZIG_VERSION}.tar.xz
+  - ln -s /usr/local/zig-linux-x86_64-$${ZIG_VERSION}/zig /usr/local/bin/zig
   - apk add git
   - (cd codegen && zig build test)
   - zig build -Dfetch # implicitly does a codegen
