@@ -2,10 +2,10 @@
 
 [![Build Status](https://drone.lerch.org/api/badges/lobo/aws-sdk-for-zig/status.svg?ref=refs/heads/master)](https://drone.lerch.org/api/badges/lobo/aws-sdk-for-zig/)
 
-This SDK currently supports all AWS services except services using the restXml
-protocol (4 services including S3). See TODO list below.
+This SDK currently supports all AWS services. restXml protocol support (4
+services including S3), is still new, with lots of gaps. See TODO list below.
 
-Current executable size for the demo is 1.6M (90k of which is the AWS PEM file,
+Current executable size for the demo is 1.7M (90k of which is the AWS PEM file,
 and approximately 600K for XML services) after compiling with -Drelease-safe and
 [stripping the executable after compilation](https://github.com/ziglang/zig/issues/351).
 This is for x86_linux, and will vary based on services used. Tested targets:
@@ -43,13 +43,13 @@ for posterity, and supports x86_64 linux. The old branch is deprecated.
 
 ## Limitations
 
-There are many nuances of AWS V4 signature calculation. S3 is not supported
+There are many nuances of AWS V4 signature calculation. Parts of S3 are not supported
 because it uses many of these test cases. WebIdentityToken is not yet
 implemented.
 
 TODO List:
 
-* Implement [AWS restXml protocol](https://awslabs.github.io/smithy/1.0/spec/aws/aws-restxml-protocol.html).
+* Complete development of [AWS restXml protocol](https://awslabs.github.io/smithy/1.0/spec/aws/aws-restxml-protocol.html).
   Includes S3. Total service count 4.
 * Bump to zig 0.9.1. iguanaTLS, used in zFetch is still [working out 0.9.1 issues](https://github.com/alexnask/iguanaTLS/pull/29)
 * Implement sigv4a signing
