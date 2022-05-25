@@ -48,6 +48,7 @@ const Tests = enum {
     rest_json_1_query_no_input,
     rest_json_1_query_with_input,
     rest_json_1_work_with_lambda,
+    rest_xml_no_input,
 };
 
 pub fn main() anyerror!void {
@@ -88,7 +89,7 @@ pub fn main() anyerror!void {
     };
     defer client.deinit();
 
-    const services = aws.Services(.{ .sts, .ec2, .dynamo_db, .ecs, .lambda, .sqs }){};
+    const services = aws.Services(.{ .sts, .ec2, .dynamo_db, .ecs, .lambda, .sqs, .s3 }){};
 
     for (tests.items) |t| {
         std.log.info("===== Start Test: {s} =====", .{@tagName(t)});
@@ -213,6 +214,12 @@ pub fn main() anyerror!void {
                     std.log.info("total items count: {d}", .{items});
                     next = more.response.next_token;
                 }
+            },
+            .rest_xml_no_input => {
+                const result = try client.call(services.s3.list_buckets.Request{}, options);
+                defer result.deinit();
+                std.log.info("request id: {s}", .{result.response_metadata.request_id});
+                std.log.info("bucket count: {d}", .{result.response.buckets.?.len});
             },
         }
         std.log.info("===== End Test: {s} =====\n", .{@tagName(t)});

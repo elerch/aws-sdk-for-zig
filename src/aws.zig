@@ -89,36 +89,47 @@ pub fn Request(comptime action: anytype) type {
             switch (Self.service_meta.aws_protocol) {
                 .query, .ec2_query => return Self.callQuery(request, options),
                 .json_1_0, .json_1_1 => return Self.callJson(request, options),
-                .rest_json_1 => return Self.callRestJson(request, options),
-                .rest_xml => @compileError("XML responses may be blocked on a zig compiler bug scheduled to be fixed in 0.10.0"),
+                .rest_json_1, .rest_xml => return Self.callRest(request, options),
             }
         }
 
         /// Rest Json is the most complex and so we handle this seperately
-        fn callRestJson(request: ActionRequest, options: Options) !FullResponseType {
+        /// Oddly, Xml is similar enough we can route rest_xml through here as well
+        fn callRest(request: ActionRequest, options: Options) !FullResponseType {
+            // TODO: Does it work to merge restXml into this?
             const Action = @TypeOf(action);
             var aws_request: awshttp.HttpRequest = .{
                 .method = Action.http_config.method,
                 .content_type = "application/json",
                 .path = Action.http_config.uri,
             };
+            if (Self.service_meta.aws_protocol == .rest_xml) {
+                aws_request.content_type = "application/xml";
+            }
 
-            log.debug("Rest JSON v1 method: '{s}'", .{aws_request.method});
-            log.debug("Rest JSON v1 success code: '{d}'", .{Action.http_config.success_code});
-            log.debug("Rest JSON v1 raw uri: '{s}'", .{Action.http_config.uri});
+            log.debug("Rest method: '{s}'", .{aws_request.method});
+            log.debug("Rest success code: '{d}'", .{Action.http_config.success_code});
+            log.debug("Rest raw uri: '{s}'", .{Action.http_config.uri});
             aws_request.path = try buildPath(options.client.allocator, Action.http_config.uri, ActionRequest, request);
             defer options.client.allocator.free(aws_request.path);
-            log.debug("Rest JSON v1 processed uri: '{s}'", .{aws_request.path});
+            log.debug("Rest processed uri: '{s}'", .{aws_request.path});
             aws_request.query = try buildQuery(options.client.allocator, request);
-            log.debug("Rest JSON v1 query: '{s}'", .{aws_request.query});
+            log.debug("Rest query: '{s}'", .{aws_request.query});
             defer options.client.allocator.free(aws_request.query);
             // We don't know if we need a body...guessing here, this should cover most
             var buffer = std.ArrayList(u8).init(options.client.allocator);
             defer buffer.deinit();
             var nameAllocator = std.heap.ArenaAllocator.init(options.client.allocator);
             defer nameAllocator.deinit();
-            if (std.mem.eql(u8, "PUT", aws_request.method) or std.mem.eql(u8, "POST", aws_request.method)) {
-                try json.stringify(request, .{ .whitespace = .{} }, buffer.writer());
+            if (Self.service_meta.aws_protocol == .rest_json_1) {
+                if (std.mem.eql(u8, "PUT", aws_request.method) or std.mem.eql(u8, "POST", aws_request.method)) {
+                    try json.stringify(request, .{ .whitespace = .{} }, buffer.writer());
+                }
+            }
+            if (Self.service_meta.aws_protocol == .rest_xml) {
+                if (std.mem.eql(u8, "PUT", aws_request.method) or std.mem.eql(u8, "POST", aws_request.method)) {
+                    return error.NotImplemented;
+                }
             }
             aws_request.body = buffer.items;
 
@@ -240,6 +251,8 @@ pub fn Request(comptime action: anytype) type {
                         isJson = true;
                     } else if (std.mem.startsWith(u8, h.value, "text/xml")) {
                         isJson = false;
+                    } else if (std.mem.startsWith(u8, h.value, "application/xml")) {
+                        isJson = false;
                     } else {
                         log.err("Unexpected content type: {s}", .{h.value});
                         return error.UnexpectedContentType;
@@ -360,12 +373,40 @@ pub fn Request(comptime action: anytype) type {
             // Big thing is that requestid, which we'll need to fetch "manually"
             const xml_options = xml_shaper.ParseOptions{ .allocator = options.client.allocator };
             const parsed = try xml_shaper.parse(action.Response, result.body, xml_options);
+            errdefer parsed.deinit();
+            var free_rid = false;
             // This needs to get into FullResponseType somehow: defer parsed.deinit();
             const request_id = blk: {
                 if (parsed.document.root.getCharData("requestId")) |elem|
                     break :blk elem;
+                var rid: ?[]const u8 = null;
+                // This "thing" is called:
+                // * Host ID
+                // * Extended Request ID
+                // * Request ID 2
+                //
+                // I suspect it identifies the S3 frontend server and they are
+                // trying to obscure that fact. But several SDKs go with host id,
+                // so we'll use that
+                var host_id: ?[]const u8 = null;
+                for (result.headers) |header| {
+                    if (std.ascii.eqlIgnoreCase(header.name, "x-amz-request-id")) {
+                        rid = header.value;
+                    }
+                    if (std.ascii.eqlIgnoreCase(header.name, "x-amz-id-2")) {
+                        host_id = header.value;
+                    }
+                }
+                if (rid) |r| {
+                    if (host_id) |h| {
+                        free_rid = true;
+                        break :blk try std.fmt.allocPrint(options.client.allocator, "{s}, host_id: {s}", .{ r, h });
+                    }
+                    break :blk r;
+                }
                 return error.RequestIdNotFound;
             };
+            defer if (free_rid) options.client.allocator.free(request_id);
 
             return FullResponseType{
                 .response = parsed.parsed_value,
