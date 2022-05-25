@@ -5,24 +5,32 @@ const date = @import("date.zig");
 
 const log = std.log.scoped(.aws_signing);
 
+// TODO: Remove this?! This is an aws_signing, so we should know a thing
+//       or two about aws. So perhaps the right level of abstraction here
+//       is to have our service signing idiosyncracies dealt with in this
+//       code base. Pretty much all these flags are specific to use with S3
+//       except omit_session_token, which will likely apply to serveral services,
+//       just not sure which one yet. I'll leave this here, commented for now
+//       in case we need to revisit the decision
+//
 // see https://github.com/awslabs/aws-c-auth/blob/ace1311f8ef6ea890b26dd376031bed2721648eb/include/aws/auth/signing_config.h#L186-L207
-pub const ConfigFlags = packed struct {
-    // We assume the uri will be encoded once in preparation for transmission.  Certain services
-    // do not decode before checking signature, requiring us to actually double-encode the uri in the canonical
-    // request in order to pass a signature check.
-
-    use_double_uri_encode: bool = true,
-
-    // Controls whether or not the uri paths should be normalized when building the canonical request
-    should_normalize_uri_path: bool = true,
-
-    // Controls whether "X-Amz-Security-Token" is omitted from the canonical request.
-    // "X-Amz-Security-Token" is added during signing, as a header or
-    // query param, when credentials have a session token.
-    // If false (the default), this parameter is included in the canonical request.
-    // If true, this parameter is still added, but omitted from the canonical request.
-    omit_session_token: bool = true,
-};
+// pub const ConfigFlags = packed struct {
+//     // We assume the uri will be encoded once in preparation for transmission.  Certain services
+//     // do not decode before checking signature, requiring us to actually double-encode the uri in the canonical
+//     // request in order to pass a signature check.
+//
+//     use_double_uri_encode: bool = true,
+//
+//     // Controls whether or not the uri paths should be normalized when building the canonical request
+//     should_normalize_uri_path: bool = true,
+//
+//     // Controls whether "X-Amz-Security-Token" is omitted from the canonical request.
+//     // "X-Amz-Security-Token" is added during signing, as a header or
+//     // query param, when credentials have a session token.
+//     // If false (the default), this parameter is included in the canonical request.
+//     // If true, this parameter is still added, but omitted from the canonical request.
+//     omit_session_token: bool = true,
+// };
 
 pub const Config = struct {
     // These two should be all you need to set most of the time
@@ -66,7 +74,7 @@ pub const Config = struct {
     // this parameter has no effect.
     expiration_in_seconds: u64 = 0,
 
-    flags: ConfigFlags = .{},
+    // flags: ConfigFlags = .{},
 };
 
 pub const SignatureType = enum { sha256, none };
@@ -155,27 +163,38 @@ pub fn signRequest(allocator: std.mem.Allocator, request: base.Request, config: 
     );
     errdefer freeSignedRequest(allocator, &rc, config);
 
-    var additional_header_count: u2 = 2;
+    var additional_header_count: u3 = 3;
     if (config.credentials.session_token != null)
         additional_header_count += 1;
     const newheaders = try allocator.alloc(base.Header, rc.headers.len + additional_header_count);
     errdefer allocator.free(newheaders);
     const oldheaders = rc.headers;
     if (config.credentials.session_token) |t| {
-        newheaders[newheaders.len - 3] = base.Header{
+        newheaders[newheaders.len - 4] = base.Header{
             .name = "X-Amz-Security-Token",
             .value = try allocator.dupe(u8, t),
         };
     }
     errdefer freeSignedRequest(allocator, &rc, config);
     std.mem.copy(base.Header, newheaders, oldheaders);
-    newheaders[newheaders.len - 2] = base.Header{
+    newheaders[newheaders.len - 3] = base.Header{
         .name = "X-Amz-Date",
         .value = signing_iso8601,
     };
+    // From the AWS nitro enclaves SDK, it appears that there is no reason
+    // to avoid *ALWAYS* adding the x-amz-content-sha256 header
+    // https://github.com/aws/aws-nitro-enclaves-sdk-c/blob/9ecb83d07fe953636e3c0b861d6dac0a15d00f82/source/rest.c#L464
+    const payload_hash = try hash(allocator, request.body, config.signed_body_header);
+    // This will be freed in freeSignedRequest
+    // defer allocator.free(payload_hash);
+    newheaders[newheaders.len - 2] = base.Header{
+        .name = "x-amz-content-sha256",
+        .value = payload_hash,
+    };
+
     rc.headers = newheaders[0 .. newheaders.len - 1];
     log.debug("Signing with access key: {s}", .{config.credentials.access_key});
-    const canonical_request = try createCanonicalRequest(allocator, rc, config);
+    const canonical_request = try createCanonicalRequest(allocator, rc, payload_hash, config);
     defer {
         allocator.free(canonical_request.arr);
         allocator.free(canonical_request.hash);
@@ -252,11 +271,12 @@ pub fn freeSignedRequest(allocator: std.mem.Allocator, request: *base.Request, c
         return;
     };
 
-    var remove_len: u2 = 0;
+    var remove_len: u3 = 0;
     for (request.headers) |h| {
         if (std.ascii.eqlIgnoreCase(h.name, "X-Amz-Date") or
             std.ascii.eqlIgnoreCase(h.name, "Authorization") or
-            std.ascii.eqlIgnoreCase(h.name, "X-Amz-Security-Token"))
+            std.ascii.eqlIgnoreCase(h.name, "X-Amz-Security-Token") or
+            std.ascii.eqlIgnoreCase(h.name, "x-amz-content-sha256"))
         {
             allocator.free(h.value);
             remove_len += 1;
@@ -303,10 +323,7 @@ fn validateConfig(config: Config) SigningError!void {
     if (config.signature_type != .headers or
         config.signed_body_header != .sha256 or
         config.expiration_in_seconds != 0 or
-        config.algorithm != .v4 or
-        !config.flags.omit_session_token or
-        !config.flags.should_normalize_uri_path or
-        !config.flags.use_double_uri_encode)
+        config.algorithm != .v4)
         return SigningError.NotImplemented;
 }
 
@@ -321,7 +338,7 @@ const Hashed = struct {
     headers: CanonicalHeaders,
 };
 
-fn createCanonicalRequest(allocator: std.mem.Allocator, request: base.Request, config: Config) !Hashed {
+fn createCanonicalRequest(allocator: std.mem.Allocator, request: base.Request, payload_hash: []const u8, config: Config) !Hashed {
     // CanonicalRequest =
     // HTTPRequestMethod + '\n' +
     // CanonicalURI + '\n' +
@@ -340,15 +357,13 @@ fn createCanonicalRequest(allocator: std.mem.Allocator, request: base.Request, c
 
     // TODO: This is all better as a writer - less allocations/copying
     const canonical_method = canonicalRequestMethod(request.method);
-    const canonical_url = try canonicalUri(allocator, request.path, config.flags.use_double_uri_encode);
+    const canonical_url = try canonicalUri(allocator, request.path, true); // TODO: set false for s3
     defer allocator.free(canonical_url);
     log.debug("final uri: {s}", .{canonical_url});
     const canonical_query = try canonicalQueryString(allocator, request.query);
     defer allocator.free(canonical_query);
     log.debug("canonical query: {s}", .{canonical_query});
-    const canonical_headers = try canonicalHeaders(allocator, request.headers, config.flags);
-    const payload_hash = try hash(allocator, request.body, config.signed_body_header);
-    defer allocator.free(payload_hash);
+    const canonical_headers = try canonicalHeaders(allocator, request.headers, config.service);
 
     const canonical_request = try std.fmt.allocPrint(allocator, fmt, .{
         canonical_method,
@@ -572,7 +587,7 @@ const CanonicalHeaders = struct {
     str: []const u8,
     signed_headers: []const u8,
 };
-fn canonicalHeaders(allocator: std.mem.Allocator, headers: []base.Header, flags: ConfigFlags) !CanonicalHeaders {
+fn canonicalHeaders(allocator: std.mem.Allocator, headers: []base.Header, service: []const u8) !CanonicalHeaders {
     //
     // Doc example. Original:
     //
@@ -613,9 +628,8 @@ fn canonicalHeaders(allocator: std.mem.Allocator, headers: []base.Header, flags:
         // canonical (signed) request. For other services, you add this
         // parameter at the end, after you calculate the signature. For
         // details, see the API reference documentation for that service.
-        if (flags.omit_session_token and std.ascii.eqlIgnoreCase(h.name, "X-Amz-Security-Token")) {
+        if (!std.mem.eql(u8, service, "s3") and std.ascii.eqlIgnoreCase(h.name, "X-Amz-Security-Token")) {
             skip = true;
-            break;
         }
         if (skip) continue;
 
@@ -743,7 +757,7 @@ test "canonical headers" {
         \\x-amz-date:20150830T123600Z
         \\
     ;
-    const actual = try canonicalHeaders(allocator, headers.items, .{});
+    const actual = try canonicalHeaders(allocator, headers.items, "dummy");
     defer allocator.free(actual.str);
     defer allocator.free(actual.signed_headers);
     try std.testing.expectEqualStrings(expected, actual.str);
@@ -768,7 +782,7 @@ test "canonical request" {
     const secret_key = try allocator.dupe(u8, "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY");
     const credential = auth.Credentials.init(allocator, access_key, secret_key, null);
     defer credential.deinit();
-    const request = try createCanonicalRequest(allocator, req, .{
+    const request = try createCanonicalRequest(allocator, req, "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", .{
         .region = "us-west-2", // us-east-1
         .service = "sts", // service
         .credentials = credential,
@@ -846,12 +860,15 @@ test "can sign" {
     var signed_req = try signRequest(allocator, req, config);
 
     defer freeSignedRequest(allocator, &signed_req, config);
-    try std.testing.expectEqualStrings("X-Amz-Date", signed_req.headers[signed_req.headers.len - 2].name);
-    try std.testing.expectEqualStrings("20150830T123600Z", signed_req.headers[signed_req.headers.len - 2].value);
+    try std.testing.expectEqualStrings("X-Amz-Date", signed_req.headers[signed_req.headers.len - 3].name);
+    try std.testing.expectEqualStrings("20150830T123600Z", signed_req.headers[signed_req.headers.len - 3].value);
+
+    try std.testing.expectEqualStrings("x-amz-content-sha256", signed_req.headers[signed_req.headers.len - 2].name);
+    try std.testing.expectEqualStrings("9095672bbd1f56dfc5b65f3e153adc8731a4a654192329106275f4c7b24d0b6e", signed_req.headers[signed_req.headers.len - 2].value);
 
     // c_aws_auth tests don't seem to have valid data. Live endpoint is
     // accepting what we're doing
-    const expected_auth = "AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/20150830/us-east-1/service/aws4_request, SignedHeaders=content-length;content-type;host;x-amz-date, Signature=2b9566917226a17022b710430a367d343cbff33af7ee50b0ff8f44d75a4a46d8";
+    const expected_auth = "AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/20150830/us-east-1/service/aws4_request, SignedHeaders=content-length;content-type;host;x-amz-content-sha256;x-amz-date, Signature=328d1b9eaadca9f5818ef05e8392801e091653bafec24fcab71e7344e7f51422";
 
     try std.testing.expectEqualStrings("Authorization", signed_req.headers[signed_req.headers.len - 1].name);
     try std.testing.expectEqualStrings(expected_auth, signed_req.headers[signed_req.headers.len - 1].value);
