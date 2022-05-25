@@ -40,6 +40,7 @@ const Tests = enum {
     query_no_input,
     query_with_input,
     ec2_query_no_input,
+    ec2_query_with_input,
     json_1_0_query_with_input,
     json_1_0_query_no_input,
     json_1_1_query_with_input,
@@ -184,11 +185,34 @@ pub fn main() anyerror!void {
                 defer result.deinit();
                 std.log.info("request id: {s}", .{result.response_metadata.request_id});
                 std.log.info("region count: {d}", .{result.response.regions.?.len});
-
+            },
+            .ec2_query_with_input => {
                 // Describe instances is more interesting
-                const instances = try client.call(services.ec2.describe_instances.Request{}, options);
-                defer instances.deinit();
-                std.log.info("reservation count: {d}", .{instances.response.reservations.?.len});
+                const result = try client.call(services.ec2.describe_instances.Request{ .max_results = 6 }, options);
+                defer result.deinit();
+                std.log.info("reservation count: {d}", .{result.response.reservations.?.len});
+                var items: usize = 0;
+                for (result.response.reservations.?) |reservation| {
+                    items += reservation.instances.?.len;
+                }
+                std.log.info("items count: {d}", .{items});
+                var next = result.response.next_token;
+                while (next) |next_token| {
+                    std.log.info("more results available: fetching again", .{});
+
+                    const more = try aws.Request(services.ec2.describe_instances)
+                        .call(.{ .next_token = next_token, .max_results = 6 }, options);
+                    defer more.deinit();
+                    std.log.info("reservation count: {d}", .{more.response.reservations.?.len});
+                    var batch_items: usize = 0;
+                    for (more.response.reservations.?) |reservation| {
+                        batch_items += reservation.instances.?.len;
+                    }
+                    std.log.info("items count: {d}", .{batch_items});
+                    items += batch_items;
+                    std.log.info("total items count: {d}", .{items});
+                    next = more.response.next_token;
+                }
             },
         }
         std.log.info("===== End Test: {s} =====\n", .{@tagName(t)});
