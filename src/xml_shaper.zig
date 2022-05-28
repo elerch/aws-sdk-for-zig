@@ -479,7 +479,8 @@ test "can coerce 8601 date to integer" {
     defer parsed_data.deinit();
     try testing.expectEqual(@as(i64, 1633451985), parsed_data.parsed_value.foo_bar.?);
 }
-// This is the simplest test so far that breaks zig
+// This is the simplest test so far that breaks zig (circa 0.9.0)
+// See "Using this else clause breaks zig, so we'll use a boolean instead"
 test "can parse a boolean type (two fields)" {
     const allocator = std.testing.allocator;
     const data =
