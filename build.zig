@@ -67,11 +67,13 @@ pub fn build(b: *Builder) !void {
     var test_step = try tst.addTestStep(b, mode, exe.packages.items);
     test_step.dependOn(&version.step);
 
+    var codegen: ?*std.build.Step = null;
     if (target.getOs().tag == .linux) {
         // TODO: Support > linux with RunStep
         // std.build.RunStep.create(null,null).cwd(std.fs.path.resolve(b.build_root, "codegen")).addArgs(...)
-        const codegen = b.step("gen", "Generate zig service code from smithy models");
-        codegen.dependOn(&b.addSystemCommand(&.{ "/bin/sh", "-c", "cd codegen && zig build" }).step);
+        codegen = b.step("gen", "Generate zig service code from smithy models");
+        const cg = codegen.?;
+        cg.dependOn(&b.addSystemCommand(&.{ "/bin/sh", "-c", "cd codegen && zig build" }).step);
 
         // This can probably be triggered instead by GitRepoStep cloning the repo
         // with models
@@ -79,20 +81,19 @@ pub fn build(b: *Builder) !void {
         // service manifest we know it needs to be regenerated. So this step
         // will remove the service manifest if codegen has been touched, thereby
         // triggering the re-gen
-        codegen.dependOn(&b.addSystemCommand(&.{
+        cg.dependOn(&b.addSystemCommand(&.{
             "/bin/sh", "-c",
             \\ [ ! -f src/models/service_manifest.zig ] || \
-            \\ [ src/models/service_manifest.zig -nt codegen/codegen ] || \
+            \\ [ $(find codegen -type f -newer src/models/service_manifest.zig -print -quit |wc -c) = '0' ] || \
             \\ rm src/models/service_manifest.zig
         }).step);
-        codegen.dependOn(&b.addSystemCommand(&.{
+        cg.dependOn(&b.addSystemCommand(&.{
             "/bin/sh", "-c",
             \\ mkdir -p src/models/ && \
             \\ [ -f src/models/service_manifest.zig ] || \
             \\ ( cd codegen/models && ../codegen *.json && mv *.zig ../../src/models )
         }).step);
-        b.getInstallStep().dependOn(codegen);
-        test_step.dependOn(codegen);
+        exe.step.dependOn(cg);
     }
 
     exe.install();
