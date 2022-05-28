@@ -239,11 +239,16 @@ fn parseInternal(comptime T: type, element: *xml.Element, options: ParseOptions)
                     fields_set = fields_set + 1;
                     found_value = true;
                 }
-                if (@typeInfo(field.field_type) == .Optional and !found_value) {
-                    // @compileLog("Optional: Field name ", field.name, ", type ", field.field_type);
-                    @field(r, field.name) = null;
-                    fields_set = fields_set + 1;
-                    found_value = true;
+                if (@typeInfo(field.field_type) == .Optional) {
+                    // Test "compiler assertion failure 2"
+                    // Zig compiler bug circa 0.9.0. Using "and !found_value"
+                    // in the if statement above will trigger assertion failure
+                    if (!found_value) {
+                        // @compileLog("Optional: Field name ", field.name, ", type ", field.field_type);
+                        @field(r, field.name) = null;
+                        fields_set = fields_set + 1;
+                        found_value = true;
+                    }
                 }
                 // Using this else clause breaks zig, so we'll use a boolean instead
                 if (!found_value) {
@@ -641,4 +646,44 @@ test "can parse something serious" {
     try testing.expect(parsed_data.parsed_value.regions != null);
     try testing.expectEqualStrings("eu-north-1", parsed_data.parsed_value.regions.?[0].region_name.?);
     try testing.expectEqualStrings("ec2.eu-north-1.amazonaws.com", parsed_data.parsed_value.regions.?[0].endpoint.?);
+}
+
+test "compiler assertion failure 2" {
+    // std.testing.log_level = .debug;
+    // log.debug("", .{});
+    // Actually, we only care here that the code compiles
+    const allocator = std.testing.allocator;
+    const Response: type = struct {
+        key_group_list: ?struct {
+            quantity: i64, // Making this optional will make the code compile
+            items: ?[]struct {
+                key_group: []const u8,
+            } = null,
+            pub fn fieldNameFor(_: @This(), comptime field_name: []const u8) []const u8 {
+                const mappings = .{
+                    .quantity = "Quantity",
+                    .items = "Items",
+                };
+                return @field(mappings, field_name);
+            }
+        } = null,
+
+        pub fn fieldNameFor(_: @This(), comptime field_name: []const u8) []const u8 {
+            const mappings = .{
+                .key_group_list = "KeyGroupList",
+            };
+            return @field(mappings, field_name);
+        }
+    };
+    const data =
+        \\<?xml version="1.0" encoding="UTF-8"?>
+        \\<AnythingAtAll xmlns="http://ec2.amazonaws.com/doc/2016-11-15/">
+        \\    <KeyGroupList>
+        \\        <Quantity>42</Quantity>
+        \\    </KeyGroupList>
+        \\</AnythingAtAll>
+    ;
+    const parsed_data = try parse(Response, data, .{ .allocator = allocator });
+    defer parsed_data.deinit();
+    try testing.expect(parsed_data.parsed_value.key_group_list.?.quantity == 42);
 }
