@@ -145,7 +145,8 @@ fn parseInternal(comptime T: type, element: *xml.Element, options: ParseOptions)
             if (element.children.items.len == 0) {
                 // This is almost certainly incomplete. Empty strings? xsi:nil?
                 return null;
-            } else {
+            }
+            if (element.children.items.len > 0) {
                 // return try parseInternal(optional_info.child, element.elements().next().?, options);
                 return try parseInternal(optional_info.child, element, options);
             }
@@ -180,9 +181,8 @@ fn parseInternal(comptime T: type, element: *xml.Element, options: ParseOptions)
                 //     }
                 // }
                 return error.NoUnionMembersMatched;
-            } else {
-                @compileError("Unable to parse into untagged union '" ++ @typeName(T) ++ "'");
             }
+            @compileError("Unable to parse into untagged union '" ++ @typeName(T) ++ "'");
         },
         .Struct => |struct_info| {
             var r: T = undefined;
