@@ -60,6 +60,7 @@ const EndPoint = struct {
 
     fn deinit(self: EndPoint) void {
         self.allocator.free(self.uri);
+        self.allocator.free(self.host);
     }
 };
 pub const AwsHttp = struct {
@@ -94,14 +95,31 @@ pub const AwsHttp = struct {
     /// service called, and will set up the signing options. The return
     /// value is simply a raw HttpResult
     pub fn callApi(self: Self, service: []const u8, request: HttpRequest, options: Options) !HttpResult {
-        const endpoint = try regionSubDomain(self.allocator, service, options.region, options.dualstack);
+        // This function or regionSubDomain needs altering for virtual host
+        // addressing (for S3). Botocore, and I suspect other SDKs, have
+        // hardcoded exceptions for S3:
+        // https://github.com/boto/botocore/blob/f2b0dbb800b8dc2a3541334d5ca1190faf900150/botocore/utils.py#L2160-L2181
+        // Boto assumes virtual host addressing unless the endpoint url is configured
+        //
+        // NOTE: There are 4 rest_xml services. They are:
+        // * CloudFront
+        // * Route53
+        // * S3
+        // * S3 control
+        //
+        // All 4 are non-standard. Route53 and CloudFront are global endpoints
+        // S3 uses virtual host addressing (except when it doesn't), and
+        // S3 control uses <account-id>.s3-control.<region>.amazonaws.com
+        //
+        // So this regionSubDomain call needs to handle generic customization
+        const endpoint = try endpointForRequest(self.allocator, service, options.region, options.dualstack);
         defer endpoint.deinit();
         log.debug("Calling endpoint {s}", .{endpoint.uri});
         // TODO: Should we allow customization here?
         const creds = try credentials.getCredentials(self.allocator, .{});
         defer creds.deinit();
         const signing_config: signing.Config = .{
-            .region = options.region,
+            .region = getRegion(service, options.region),
             .service = options.sigv4_service_name orelse service,
             .credentials = creds,
         };
@@ -161,6 +179,11 @@ pub const AwsHttp = struct {
         const url = try std.fmt.allocPrint(self.allocator, "{s}{s}{s}", .{ endpoint.uri, request.path, request.query });
         defer self.allocator.free(url);
         log.debug("Request url: {s}", .{url});
+        // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+        // PLEASE READ!! IF YOU ARE LOOKING AT THIS LINE OF CODE DUE TO A
+        // SEGFAULT IN INIT, IT IS PROBABLY BECAUSE THE HOST DOES NOT EXIST
+        // https://github.com/ziglang/zig/issues/11358
+        // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
         var req = try zfetch.Request.init(self.allocator, url, self.trust_chain);
         defer req.deinit();
 
@@ -168,7 +191,7 @@ pub const AwsHttp = struct {
         try req.do(method, headers, if (request_cp.body.len == 0) null else request_cp.body);
 
         // TODO: Timeout - is this now above us?
-        log.debug("request_complete. Response code {d}: {s}", .{ req.status.code, req.status.reason });
+        log.debug("Request Complete. Response code {d}: {s}", .{ req.status.code, req.status.reason });
         log.debug("Response headers:", .{});
         var resp_headers = try std.ArrayList(Header).initCapacity(self.allocator, req.headers.list.items.len);
         defer resp_headers.deinit();
@@ -204,6 +227,11 @@ pub const AwsHttp = struct {
     }
 };
 
+fn getRegion(service: []const u8, region: []const u8) []const u8 {
+    if (std.mem.eql(u8, service, "cloudfront")) return "us-east-1";
+    return region;
+}
+
 fn addHeaders(allocator: std.mem.Allocator, headers: *std.ArrayList(base.Header), host: []const u8, body: []const u8, content_type: []const u8, additional_headers: []Header) !?[]const u8 {
     try headers.append(.{ .name = "Accept", .value = "application/json" });
     try headers.append(.{ .name = "Host", .value = host });
@@ -225,15 +253,24 @@ fn getEnvironmentVariable(allocator: std.mem.Allocator, key: []const u8) !?[]con
     };
 }
 
-fn regionSubDomain(allocator: std.mem.Allocator, service: []const u8, region: []const u8, useDualStack: bool) !EndPoint {
+fn endpointForRequest(allocator: std.mem.Allocator, service: []const u8, region: []const u8, use_dual_stack: bool) !EndPoint {
     const environment_override = try getEnvironmentVariable(allocator, "AWS_ENDPOINT_URL");
     if (environment_override) |override| {
         const uri = try allocator.dupeZ(u8, override);
         return endPointFromUri(allocator, uri);
     }
+    if (std.mem.eql(u8, service, "cloudfront")) {
+        return EndPoint{
+            .uri = try allocator.dupe(u8, "https://cloudfront.amazonaws.com"),
+            .host = try allocator.dupe(u8, "cloudfront.amazonaws.com"),
+            .scheme = "https",
+            .port = 443,
+            .allocator = allocator,
+        };
+    }
     // Fallback to us-east-1 if global endpoint does not exist.
     const realregion = if (std.mem.eql(u8, region, "aws-global")) "us-east-1" else region;
-    const dualstack = if (useDualStack) ".dualstack" else "";
+    const dualstack = if (use_dual_stack) ".dualstack" else "";
 
     const domain = switch (std.hash_map.hashString(region)) {
         US_ISO_EAST_1_HASH => "c2s.ic.gov",
@@ -243,7 +280,7 @@ fn regionSubDomain(allocator: std.mem.Allocator, service: []const u8, region: []
     };
 
     const uri = try std.fmt.allocPrintZ(allocator, "https://{s}{s}.{s}.{s}", .{ service, dualstack, realregion, domain });
-    const host = uri["https://".len..];
+    const host = try allocator.dupe(u8, uri["https://".len..]);
     log.debug("host: {s}, scheme: {s}, port: {}", .{ host, "https", 443 });
     return EndPoint{
         .uri = uri,
@@ -291,7 +328,7 @@ fn endPointFromUri(allocator: std.mem.Allocator, uri: []const u8) !EndPoint {
     if (host_end == 0) {
         host_end = uri.len;
     }
-    host = uri[host_start..host_end];
+    host = try allocator.dupe(u8, uri[host_start..host_end]);
 
     log.debug("host: {s}, scheme: {s}, port: {}", .{ host, scheme, port });
     return EndPoint{
@@ -301,4 +338,26 @@ fn endPointFromUri(allocator: std.mem.Allocator, uri: []const u8) !EndPoint {
         .allocator = allocator,
         .port = port,
     };
+}
+
+test "endpointForRequest standard operation" {
+    const allocator = std.testing.allocator;
+    const service = "dynamodb";
+    const region = "us-west-2";
+    const use_dual_stack = false;
+
+    const endpoint = try endpointForRequest(allocator, service, region, use_dual_stack);
+    defer endpoint.deinit();
+    try std.testing.expectEqualStrings("https://dynamodb.us-west-2.amazonaws.com", endpoint.uri);
+}
+
+test "endpointForRequest for cloudfront" {
+    const allocator = std.testing.allocator;
+    const service = "cloudfront";
+    const region = "us-west-2";
+    const use_dual_stack = false;
+
+    const endpoint = try endpointForRequest(allocator, service, region, use_dual_stack);
+    defer endpoint.deinit();
+    try std.testing.expectEqualStrings("https://cloudfront.amazonaws.com", endpoint.uri);
 }
