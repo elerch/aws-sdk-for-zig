@@ -257,9 +257,10 @@ fn constantName(allocator: std.mem.Allocator, id: []const u8) ![]const u8 {
 
     // This one might be a bug in snake, but it's the only example so HPDL
     if (std.mem.eql(u8, id, "SESv2")) return try std.fmt.allocPrint(allocator, "ses_v2", .{});
+    if (std.mem.eql(u8, id, "CloudFront")) return try std.fmt.allocPrint(allocator, "cloudfront", .{});
     // IoT is an acryonym, but snake wouldn't know that. Interestingly not all
     // iot services are capitalizing that way.
-    if (std.mem.eql(u8, id, "IoTSiteWise")) return try std.fmt.allocPrint(allocator, "iot_site_wise", .{}); //sitewise?
+    if (std.mem.eql(u8, id, "IoTSiteWise")) return try std.fmt.allocPrint(allocator, "iot_sitewise", .{});
     if (std.mem.eql(u8, id, "IoTFleetHub")) return try std.fmt.allocPrint(allocator, "iot_fleet_hub", .{});
     if (std.mem.eql(u8, id, "IoTSecureTunneling")) return try std.fmt.allocPrint(allocator, "iot_secure_tunneling", .{});
     if (std.mem.eql(u8, id, "IoTThingsGraph")) return try std.fmt.allocPrint(allocator, "iot_things_graph", .{});
