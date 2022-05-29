@@ -372,7 +372,16 @@ pub fn Request(comptime action: anytype) type {
             //
             // Big thing is that requestid, which we'll need to fetch "manually"
             const xml_options = xml_shaper.ParseOptions{ .allocator = options.client.allocator };
-            const parsed = try xml_shaper.parse(action.Response, result.body, xml_options);
+            var body: []const u8 = result.body;
+            var free_body = false;
+            if (std.mem.lastIndexOf(u8, result.body[result.body.len - 20 ..], "Response>") == null) {
+                free_body = true;
+                // chop the "<?xml version="1.0"?>" from the front
+                const start = if (std.mem.indexOf(u8, result.body, "?>")) |i| i else 0;
+                body = try std.fmt.allocPrint(options.client.allocator, "<ActionResponse>{s}</ActionResponse>", .{body[start..]});
+            }
+            defer if (free_body) options.client.allocator.free(body);
+            const parsed = try xml_shaper.parse(action.Response, body, xml_options);
             errdefer parsed.deinit();
             var free_rid = false;
             // This needs to get into FullResponseType somehow: defer parsed.deinit();
