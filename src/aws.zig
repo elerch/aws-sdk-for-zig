@@ -237,29 +237,8 @@ pub fn Request(comptime action: anytype) type {
                 try reportTraffic(options.client.allocator, "Call Failed", aws_request, response, log.err);
                 return error.HttpFailure;
             }
-            // EC2 ignores our accept type, but technically query protocol only
-            // returns XML as well. So, we'll ignore the protocol here and just
-            // look at the return type
-            var isJson: bool = undefined;
-            for (response.headers) |h| {
-                if (std.ascii.eqlIgnoreCase("Content-Type", h.name)) {
-                    if (std.mem.startsWith(u8, h.value, "application/json")) {
-                        isJson = true;
-                    } else if (std.mem.startsWith(u8, h.value, "application/x-amz-json-1.0")) {
-                        isJson = true;
-                    } else if (std.mem.startsWith(u8, h.value, "application/x-amz-json-1.1")) {
-                        isJson = true;
-                    } else if (std.mem.startsWith(u8, h.value, "text/xml")) {
-                        isJson = false;
-                    } else if (std.mem.startsWith(u8, h.value, "application/xml")) {
-                        isJson = false;
-                    } else {
-                        log.err("Unexpected content type: {s}", .{h.value});
-                        return error.UnexpectedContentType;
-                    }
-                    break;
-                }
-            }
+
+            const isJson = try isJsonResponse(response.headers);
 
             if (!isJson) return try xmlReturn(options, response);
 
@@ -478,6 +457,33 @@ pub fn Request(comptime action: anytype) type {
     };
 }
 
+fn isJsonResponse(headers: []awshttp.Header) !bool {
+    // EC2 ignores our accept type, but technically query protocol only
+    // returns XML as well. So, we'll ignore the protocol here and just
+    // look at the return type
+    var isJson: ?bool = null;
+    for (headers) |h| {
+        if (std.ascii.eqlIgnoreCase("Content-Type", h.name)) {
+            if (std.mem.startsWith(u8, h.value, "application/json")) {
+                isJson = true;
+            } else if (std.mem.startsWith(u8, h.value, "application/x-amz-json-1.0")) {
+                isJson = true;
+            } else if (std.mem.startsWith(u8, h.value, "application/x-amz-json-1.1")) {
+                isJson = true;
+            } else if (std.mem.startsWith(u8, h.value, "text/xml")) {
+                isJson = false;
+            } else if (std.mem.startsWith(u8, h.value, "application/xml")) {
+                isJson = false;
+            } else {
+                log.err("Unexpected content type: {s}", .{h.value});
+                return error.UnexpectedContentType;
+            }
+            break;
+        }
+    }
+    if (isJson == null) return error.ContentTypeNotFound;
+    return isJson.?;
+}
 /// Get request ID from headers. Caller responsible for freeing memory
 fn requestIdFromHeaders(request: awshttp.HttpRequest, response: awshttp.HttpResult, options: Options) ![]u8 {
     var request_id: []u8 = undefined;
