@@ -580,6 +580,7 @@ fn generateComplexTypeFor(shape_id: []const u8, members: []smithy.TypeMember, ty
     _ = try writer.write(" {\n");
     var child_state = state;
     child_state.indent_level += 1;
+    var payload: ?[]const u8 = null;
     for (members) |member| {
         // This is our mapping
         const snake_case_member = try snake.fromPascalCase(state.allocator, member.name);
@@ -600,6 +601,14 @@ fn generateComplexTypeFor(shape_id: []const u8, members: []smithy.TypeMember, ty
                 },
                 .http_query => http_query_mappings.appendAssumeCapacity(.{ .snake = try state.allocator.dupe(u8, snake_case_member), .original = trait.http_query }),
                 .http_header => http_header_mappings.appendAssumeCapacity(.{ .snake = try state.allocator.dupe(u8, snake_case_member), .original = trait.http_header }),
+                .http_payload => {
+                    // Don't assert as that will be optimized for Release* builds
+                    // We'll continue here and treat the above as a warning
+                    if (payload) |first| {
+                        std.log.err("Found multiple httpPayloads in violation of smithy spec! Ignoring '{s}' and using '{s}'", .{ first, snake_case_member });
+                    }
+                    payload = try state.allocator.dupe(u8, snake_case_member);
+                },
                 else => {},
             }
         }
@@ -640,6 +649,12 @@ fn generateComplexTypeFor(shape_id: []const u8, members: []smithy.TypeMember, ty
     //     return @field(mappings, field_name);
     // }
     //
+    if (payload) |load| {
+        try writer.writeByte('\n');
+        try outputIndent(child_state, writer);
+        try writer.print("pub const http_payload: []const u8 = \"{s}\";", .{load});
+    }
+
     try writer.writeByte('\n');
     try outputIndent(child_state, writer);
     _ = try writer.write("pub fn fieldNameFor(_: @This(), comptime field_name: []const u8) []const u8 {\n");

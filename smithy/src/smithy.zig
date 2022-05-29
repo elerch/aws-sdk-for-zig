@@ -95,6 +95,7 @@ pub const TraitType = enum {
     http_header,
     http_label,
     http_query,
+    http_payload,
     json_name,
     xml_name,
     required,
@@ -128,6 +129,7 @@ pub const Trait = union(TraitType) {
     http_header: []const u8,
     http_label: []const u8,
     http_query: []const u8,
+    http_payload: struct {},
     required: struct {},
     documentation: []const u8,
     pattern: []const u8,
@@ -573,6 +575,8 @@ fn getTrait(trait_type: []const u8, value: std.json.Value) SmithyParseError!?Tra
         return Trait{ .http_query = value.String };
     if (std.mem.eql(u8, trait_type, "smithy.api#httpHeader"))
         return Trait{ .http_header = value.String };
+    if (std.mem.eql(u8, trait_type, "smithy.api#httpPayload"))
+        return Trait{ .http_payload = .{} };
 
     // TODO: Maybe care about these traits?
     if (std.mem.eql(u8, trait_type, "smithy.api#title"))
@@ -600,7 +604,6 @@ fn getTrait(trait_type: []const u8, value: std.json.Value) SmithyParseError!?Tra
         \\smithy.api#httpError
         \\smithy.api#httpChecksumRequired
         \\smithy.api#httpLabel
-        \\smithy.api#httpPayload
         \\smithy.api#httpPrefixHeaders
         \\smithy.api#httpQueryParams
         \\smithy.api#httpResponseCode
