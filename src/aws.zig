@@ -399,10 +399,13 @@ pub fn Request(comptime action: anytype) type {
                 // so we'll use that
                 var host_id: ?[]const u8 = null;
                 for (result.headers) |header| {
-                    if (std.ascii.eqlIgnoreCase(header.name, "x-amz-request-id")) {
+                    if (std.ascii.eqlIgnoreCase(header.name, "x-amzn-requestid")) { // CloudFront
                         rid = header.value;
                     }
-                    if (std.ascii.eqlIgnoreCase(header.name, "x-amz-id-2")) {
+                    if (std.ascii.eqlIgnoreCase(header.name, "x-amz-request-id")) { // S3
+                        rid = header.value;
+                    }
+                    if (std.ascii.eqlIgnoreCase(header.name, "x-amz-id-2")) { // S3
                         host_id = header.value;
                     }
                 }
