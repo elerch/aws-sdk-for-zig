@@ -399,7 +399,9 @@ pub fn Request(comptime action: anytype) type {
             const xml_options = xml_shaper.ParseOptions{ .allocator = options.client.allocator };
             var body: []const u8 = result.body;
             var free_body = false;
-            if (std.mem.lastIndexOf(u8, result.body[result.body.len - 20 ..], "Response>") == null) {
+            if (std.mem.lastIndexOf(u8, result.body[result.body.len - 20 ..], "Response>") == null and
+                std.mem.lastIndexOf(u8, result.body[result.body.len - 20 ..], "Result>") == null)
+            {
                 free_body = true;
                 // chop the "<?xml version="1.0"?>" from the front
                 const start = if (std.mem.indexOf(u8, result.body, "?>")) |i| i else 0;
