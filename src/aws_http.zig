@@ -56,11 +56,13 @@ const EndPoint = struct {
     host: []const u8,
     scheme: []const u8,
     port: u16,
+    path: []const u8,
     allocator: std.mem.Allocator,
 
     fn deinit(self: EndPoint) void {
         self.allocator.free(self.uri);
         self.allocator.free(self.host);
+        self.allocator.free(self.path);
     }
 };
 pub const AwsHttp = struct {
@@ -112,7 +114,7 @@ pub const AwsHttp = struct {
         // S3 control uses <account-id>.s3-control.<region>.amazonaws.com
         //
         // So this regionSubDomain call needs to handle generic customization
-        const endpoint = try endpointForRequest(self.allocator, service, options.region, options.dualstack);
+        const endpoint = try endpointForRequest(self.allocator, service, request, options);
         defer endpoint.deinit();
         log.debug("Calling endpoint {s}", .{endpoint.uri});
         // TODO: Should we allow customization here?
@@ -145,11 +147,16 @@ pub const AwsHttp = struct {
     pub fn makeRequest(self: Self, endpoint: EndPoint, request: HttpRequest, signing_config: ?signing.Config) !HttpResult {
         var request_cp = request;
 
-        log.debug("Path: {s}", .{request_cp.path});
+        log.debug("Request Path: {s}", .{request_cp.path});
+        log.debug("Endpoint Path (actually used): {s}", .{endpoint.path});
         log.debug("Query: {s}", .{request_cp.query});
         log.debug("Method: {s}", .{request_cp.method});
         log.debug("body length: {d}", .{request_cp.body.len});
         log.debug("Body\n====\n{s}\n====", .{request_cp.body});
+
+        // Endpoint calculation might be different from the request (e.g. S3 requests)
+        // We will use endpoint instead
+        request_cp.path = endpoint.path;
 
         var request_headers = std.ArrayList(base.Header).init(self.allocator);
         defer request_headers.deinit();
@@ -176,7 +183,7 @@ pub const AwsHttp = struct {
             log.debug("\t{s}: {s}", .{ h.name, h.value });
         }
 
-        const url = try std.fmt.allocPrint(self.allocator, "{s}{s}{s}", .{ endpoint.uri, request.path, request.query });
+        const url = try std.fmt.allocPrint(self.allocator, "{s}{s}{s}", .{ endpoint.uri, request_cp.path, request_cp.query });
         defer self.allocator.free(url);
         log.debug("Request url: {s}", .{url});
         // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -253,31 +260,25 @@ fn getEnvironmentVariable(allocator: std.mem.Allocator, key: []const u8) !?[]con
     };
 }
 
-fn endpointForRequest(allocator: std.mem.Allocator, service: []const u8, region: []const u8, use_dual_stack: bool) !EndPoint {
+fn endpointForRequest(allocator: std.mem.Allocator, service: []const u8, request: HttpRequest, options: Options) !EndPoint {
     const environment_override = try getEnvironmentVariable(allocator, "AWS_ENDPOINT_URL");
     if (environment_override) |override| {
         const uri = try allocator.dupeZ(u8, override);
         return endPointFromUri(allocator, uri);
     }
-    if (std.mem.eql(u8, service, "cloudfront")) {
-        return EndPoint{
-            .uri = try allocator.dupe(u8, "https://cloudfront.amazonaws.com"),
-            .host = try allocator.dupe(u8, "cloudfront.amazonaws.com"),
-            .scheme = "https",
-            .port = 443,
-            .allocator = allocator,
-        };
-    }
     // Fallback to us-east-1 if global endpoint does not exist.
-    const realregion = if (std.mem.eql(u8, region, "aws-global")) "us-east-1" else region;
-    const dualstack = if (use_dual_stack) ".dualstack" else "";
+    const realregion = if (std.mem.eql(u8, options.region, "aws-global")) "us-east-1" else options.region;
+    const dualstack = if (options.dualstack) ".dualstack" else "";
 
-    const domain = switch (std.hash_map.hashString(region)) {
+    const domain = switch (std.hash_map.hashString(options.region)) {
         US_ISO_EAST_1_HASH => "c2s.ic.gov",
         CN_NORTH_1_HASH, CN_NORTHWEST_1_HASH => "amazonaws.com.cn",
         US_ISOB_EAST_1_HASH => "sc2s.sgov.gov",
         else => "amazonaws.com",
     };
+
+    if (try endpointException(allocator, service, request, options, realregion, dualstack, domain)) |e|
+        return e;
 
     const uri = try std.fmt.allocPrintZ(allocator, "https://{s}{s}.{s}.{s}", .{ service, dualstack, realregion, domain });
     const host = try allocator.dupe(u8, uri["https://".len..]);
@@ -288,9 +289,68 @@ fn endpointForRequest(allocator: std.mem.Allocator, service: []const u8, region:
         .scheme = "https",
         .port = 443,
         .allocator = allocator,
+        .path = try allocator.dupe(u8, request.path),
     };
 }
 
+fn endpointException(
+    allocator: std.mem.Allocator,
+    service: []const u8,
+    request: HttpRequest,
+    options: Options,
+    realregion: []const u8,
+    dualstack: []const u8,
+    domain: []const u8,
+) !?EndPoint {
+    if (std.mem.eql(u8, service, "cloudfront")) {
+        return EndPoint{
+            .uri = try allocator.dupe(u8, "https://cloudfront.amazonaws.com"),
+            .host = try allocator.dupe(u8, "cloudfront.amazonaws.com"),
+            .scheme = "https",
+            .port = 443,
+            .allocator = allocator,
+            .path = try allocator.dupe(u8, request.path),
+        };
+    }
+    if (std.mem.eql(u8, service, "s3")) {
+        if (request.path.len == 1 or std.mem.indexOf(u8, request.path[1..], "/") == null)
+            return null;
+
+        // We need to adjust the host and the path to accomodate virtual
+        // host addressing. This only applies to bucket operations, but
+        // right now I'm hoping that bucket operations do not include a path
+        // component, so will be handled by the return null statement above.
+        const bucket_name = s3BucketFromPath(request.path);
+        const rest_of_path = request.path[bucket_name.len + 1 ..];
+        // TODO: Implement
+        _ = options;
+        const uri = try std.fmt.allocPrintZ(allocator, "https://{s}.{s}{s}.{s}.{s}", .{ bucket_name, service, dualstack, realregion, domain });
+        const host = try allocator.dupe(u8, uri["https://".len..]);
+        log.debug("S3 host: {s}, scheme: {s}, port: {}", .{ host, "https", 443 });
+        return EndPoint{
+            .uri = uri,
+            .host = host,
+            .scheme = "https",
+            .port = 443,
+            .allocator = allocator,
+            .path = try allocator.dupe(u8, rest_of_path),
+        };
+    }
+    return null;
+}
+
+fn s3BucketFromPath(path: []const u8) []const u8 {
+    var in_bucket = false;
+    var start: usize = 0;
+    for (path) |c, inx| {
+        if (c == '/') {
+            if (in_bucket) return path[start..inx];
+            start = inx + 1;
+            in_bucket = true;
+        }
+    }
+    unreachable;
+}
 /// creates an endpoint from a uri string.
 ///
 /// allocator: Will be used only to construct the EndPoint struct
@@ -337,27 +397,68 @@ fn endPointFromUri(allocator: std.mem.Allocator, uri: []const u8) !EndPoint {
         .scheme = scheme,
         .allocator = allocator,
         .port = port,
+        .path = try allocator.dupe(u8, "/"),
     };
 }
 
 test "endpointForRequest standard operation" {
+    const request: HttpRequest = .{};
+    const options: Options = .{
+        .region = "us-west-2",
+        .dualstack = false,
+        .sigv4_service_name = null,
+    };
     const allocator = std.testing.allocator;
     const service = "dynamodb";
-    const region = "us-west-2";
-    const use_dual_stack = false;
 
-    const endpoint = try endpointForRequest(allocator, service, region, use_dual_stack);
+    const endpoint = try endpointForRequest(allocator, service, request, options);
     defer endpoint.deinit();
     try std.testing.expectEqualStrings("https://dynamodb.us-west-2.amazonaws.com", endpoint.uri);
 }
 
 test "endpointForRequest for cloudfront" {
+    const request = HttpRequest{};
+    const options = Options{
+        .region = "us-west-2",
+        .dualstack = false,
+        .sigv4_service_name = null,
+    };
     const allocator = std.testing.allocator;
     const service = "cloudfront";
-    const region = "us-west-2";
-    const use_dual_stack = false;
 
-    const endpoint = try endpointForRequest(allocator, service, region, use_dual_stack);
+    const endpoint = try endpointForRequest(allocator, service, request, options);
     defer endpoint.deinit();
     try std.testing.expectEqualStrings("https://cloudfront.amazonaws.com", endpoint.uri);
+}
+
+test "endpointForRequest for s3" {
+    const request = HttpRequest{};
+    const options = Options{
+        .region = "us-east-2",
+        .dualstack = false,
+        .sigv4_service_name = null,
+    };
+    const allocator = std.testing.allocator;
+    const service = "s3";
+
+    const endpoint = try endpointForRequest(allocator, service, request, options);
+    defer endpoint.deinit();
+    try std.testing.expectEqualStrings("https://s3.us-east-2.amazonaws.com", endpoint.uri);
+}
+test "endpointForRequest for s3 - specific bucket" {
+    const request = HttpRequest{
+        .path = "/bucket/key",
+    };
+    const options = Options{
+        .region = "us-east-2",
+        .dualstack = false,
+        .sigv4_service_name = null,
+    };
+    const allocator = std.testing.allocator;
+    const service = "s3";
+
+    const endpoint = try endpointForRequest(allocator, service, request, options);
+    defer endpoint.deinit();
+    try std.testing.expectEqualStrings("https://bucket.s3.us-east-2.amazonaws.com", endpoint.uri);
+    try std.testing.expectEqualStrings("/key", endpoint.path);
 }
