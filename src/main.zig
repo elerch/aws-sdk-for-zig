@@ -49,6 +49,7 @@ const Tests = enum {
     rest_json_1_query_with_input,
     rest_json_1_work_with_lambda,
     rest_xml_no_input,
+    rest_xml_anything_but_s3,
 };
 
 pub fn main() anyerror!void {
@@ -89,7 +90,7 @@ pub fn main() anyerror!void {
     };
     defer client.deinit();
 
-    const services = aws.Services(.{ .sts, .ec2, .dynamo_db, .ecs, .lambda, .sqs, .s3 }){};
+    const services = aws.Services(.{ .sts, .ec2, .dynamo_db, .ecs, .lambda, .sqs, .s3, .cloudfront }){};
 
     for (tests.items) |t| {
         std.log.info("===== Start Test: {s} =====", .{@tagName(t)});
@@ -220,6 +221,14 @@ pub fn main() anyerror!void {
                 defer result.deinit();
                 std.log.info("request id: {s}", .{result.response_metadata.request_id});
                 std.log.info("bucket count: {d}", .{result.response.buckets.?.len});
+            },
+            .rest_xml_anything_but_s3 => {
+                const result = try client.call(services.cloudfront.list_key_groups.Request{}, options);
+                defer result.deinit();
+                std.log.info("request id: {s}", .{result.response_metadata.request_id});
+                const list = result.response.key_group_list.?;
+                std.log.info("key group list max: {d}", .{list.max_items});
+                std.log.info("key group quantity: {d}", .{list.quantity});
             },
         }
         std.log.info("===== End Test: {s} =====\n", .{@tagName(t)});

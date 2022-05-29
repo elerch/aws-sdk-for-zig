@@ -268,6 +268,13 @@ pub fn Request(comptime action: anytype) type {
             else
                 ServerResponse(action);
 
+            const NullType: type = u0; // This is a small hack, yes...
+            const SRawResponse = if (Self.service_meta.aws_protocol != .query and
+                std.meta.fields(SResponse).len == 1)
+                std.meta.fields(SResponse)[0].field_type
+            else
+                NullType;
+
             const parser_options = json.ParseOptions{
                 .allocator = options.client.allocator,
                 .allow_camel_case_conversion = true, // new option
@@ -288,21 +295,60 @@ pub fn Request(comptime action: anytype) type {
 
             var stream = json.TokenStream.init(response.body);
 
-            const parsed_response = json.parse(SResponse, &stream, parser_options) catch |e| {
-                log.err(
-                    \\Call successful, but unexpected response from service.
-                    \\This could be the result of a bug or a stale set of code generated
-                    \\service models.
-                    \\
-                    \\Model Type: {s}
-                    \\
-                    \\Response from server:
-                    \\
-                    \\{s}
-                    \\
-                , .{ SResponse, response.body });
-                return e;
+            const start = std.mem.indexOf(u8, response.body, "\"") orelse 0; // Should never be 0
+            if (start == 0) log.warn("Response body missing json key?!", .{});
+            var end = std.mem.indexOf(u8, response.body[start + 1 ..], "\"") orelse 0;
+            if (end == 0) log.warn("Response body only has one double quote?!", .{});
+            end = end + start + 1;
+
+            const key = response.body[start + 1 .. end];
+            log.debug("First json key: {s}", .{key});
+            const foundNormalJsonResponse = std.mem.eql(u8, key, action.action_name ++ "Response");
+            const parsed_response_ptr = blk: {
+                if (SRawResponse == NullType or foundNormalJsonResponse)
+                    break :blk &(json.parse(SResponse, &stream, parser_options) catch |e| {
+                        log.err(
+                            \\Call successful, but unexpected response from service.
+                            \\This could be the result of a bug or a stale set of code generated
+                            \\service models.
+                            \\
+                            \\Model Type: {s}
+                            \\
+                            \\Response from server:
+                            \\
+                            \\{s}
+                            \\
+                        , .{ SResponse, response.body });
+                        return e;
+                    });
+
+                log.debug("Appears server has provided a raw response", .{});
+                const ptr = try options.client.allocator.create(SResponse);
+                @field(ptr.*, std.meta.fields(SResponse)[0].name) =
+                    json.parse(SRawResponse, &stream, parser_options) catch |e| {
+                    log.err(
+                        \\Call successful, but unexpected response from service.
+                        \\This could be the result of a bug or a stale set of code generated
+                        \\service models.
+                        \\
+                        \\Model Type: {s}
+                        \\
+                        \\Response from server:
+                        \\
+                        \\{s}
+                        \\
+                    , .{ SResponse, response.body });
+                    return e;
+                };
+                break :blk ptr;
             };
+
+            // This feels like it should result in a use after free, but it
+            // seems to be working?
+            defer if (!(SRawResponse == NullType or foundNormalJsonResponse))
+                options.client.allocator.destroy(parsed_response_ptr);
+
+            const parsed_response = parsed_response_ptr.*;
 
             // TODO: Figure out this hack
             // the code setting the response about 10 lines down will trigger
