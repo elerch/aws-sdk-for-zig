@@ -202,7 +202,7 @@ fn run(allocator: std.mem.Allocator, argv: []const []const u8, cwd: ?[]const u8,
             try writer.print("{s}\"{s}\"", .{ prefix, arg });
             prefix = " ";
         }
-        std.log.info("[RUN] {s}", .{msg.items});
+        // std.log.debug("[RUN] {s}", .{msg.items});
     }
 
     const result = try std.ChildProcess.exec(.{
