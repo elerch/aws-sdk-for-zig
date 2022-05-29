@@ -239,21 +239,11 @@ pub fn Request(comptime action: anytype) type {
             }
 
             const isJson = try isJsonResponse(response.headers);
-
             if (!isJson) return try xmlReturn(options, response);
+            return try jsonReturn(aws_request, options, response);
+        }
 
-            const SResponse = if (Self.service_meta.aws_protocol != .query)
-                action.Response
-            else
-                ServerResponse(action);
-
-            const NullType: type = u0; // This is a small hack, yes...
-            const SRawResponse = if (Self.service_meta.aws_protocol != .query and
-                std.meta.fields(SResponse).len == 1)
-                std.meta.fields(SResponse)[0].field_type
-            else
-                NullType;
-
+        fn jsonReturn(aws_request: awshttp.HttpRequest, options: Options, response: awshttp.HttpResult) !FullResponseType {
             const parser_options = json.ParseOptions{
                 .allocator = options.client.allocator,
                 .allow_camel_case_conversion = true, // new option
@@ -261,7 +251,10 @@ pub fn Request(comptime action: anytype) type {
                 .allow_unknown_fields = true, // new option. Cannot yet handle non-struct fields though
                 .allow_missing_fields = false, // new option. Cannot yet handle non-struct fields though
             };
-            if (std.meta.fields(SResponse).len == 0) // We don't care about the body if there are no fields
+
+            // If the expected result has no fields, there's no sense in
+            // doing any more work. Let's bail early
+            if (std.meta.fields(action.Response).len == 0) // We don't care about the body if there are no fields
                 // Do we care if an unexpected body comes in?
                 return FullResponseType{
                     .response = .{},
@@ -272,76 +265,45 @@ pub fn Request(comptime action: anytype) type {
                     .raw_parsed = .{ .raw = .{} },
                 };
 
-            var stream = json.TokenStream.init(response.body);
+            // Get our possible response types. There are 3:
+            //
+            // 1. A result wrapped with metadata like request ID. This is ServerResponse(action)
+            // 2. A "Normal" result, which starts with { "MyActionResponse": {...} }
+            // 3. A "Raw" result, which is simply {...} without decoration
+            const response_types = jsonResponseTypesForAction();
 
-            const start = std.mem.indexOf(u8, response.body, "\"") orelse 0; // Should never be 0
-            if (start == 0) log.warn("Response body missing json key?!", .{});
-            var end = std.mem.indexOf(u8, response.body[start + 1 ..], "\"") orelse 0;
-            if (end == 0) log.warn("Response body only has one double quote?!", .{});
-            end = end + start + 1;
+            // Parse the server data. Function will determine which of the three
+            // responses we have, and do the right thing
+            const parsed_data = try parseJsonData(response_types, response.body, options, parser_options);
+            defer parsed_data.deinit();
 
-            const key = response.body[start + 1 .. end];
-            log.debug("First json key: {s}", .{key});
-            const foundNormalJsonResponse = std.mem.eql(u8, key, action.action_name ++ "Response");
-            const parsed_response_ptr = blk: {
-                if (SRawResponse == NullType or foundNormalJsonResponse)
-                    break :blk &(json.parse(SResponse, &stream, parser_options) catch |e| {
-                        log.err(
-                            \\Call successful, but unexpected response from service.
-                            \\This could be the result of a bug or a stale set of code generated
-                            \\service models.
-                            \\
-                            \\Model Type: {s}
-                            \\
-                            \\Response from server:
-                            \\
-                            \\{s}
-                            \\
-                        , .{ SResponse, response.body });
-                        return e;
-                    });
+            const parsed_response = parsed_data.parsed_response_ptr.*;
 
-                log.debug("Appears server has provided a raw response", .{});
-                const ptr = try options.client.allocator.create(SResponse);
-                @field(ptr.*, std.meta.fields(SResponse)[0].name) =
-                    json.parse(SRawResponse, &stream, parser_options) catch |e| {
-                    log.err(
-                        \\Call successful, but unexpected response from service.
-                        \\This could be the result of a bug or a stale set of code generated
-                        \\service models.
-                        \\
-                        \\Model Type: {s}
-                        \\
-                        \\Response from server:
-                        \\
-                        \\{s}
-                        \\
-                    , .{ SResponse, response.body });
-                    return e;
+            if (response_types.NormalResponse == ServerResponse(action)) {
+                // This should only apply to query results, but we're in comptime
+                // type land, so the only thing that matters is whether our
+                // response is a ServerResponse
+                //
+                // Grab the first (and only) object from the data. Server shape expected to be:
+                // { ActionResponse: {ActionResult: {...}, ResponseMetadata: {...} } }
+                //                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                //                          Next line of code pulls this portion
+                //
+                //
+                // And the response property below will pull whatever is the ActionResult object
+                // We can grab index [0] as structs are guaranteed by zig to be returned in the order
+                // declared, and we're declaring in that order in ServerResponse().
+                const real_response = @field(parsed_response, @typeInfo(response_types.NormalResponse).Struct.fields[0].name);
+                return FullResponseType{
+                    .response = @field(real_response, @typeInfo(@TypeOf(real_response)).Struct.fields[0].name),
+                    .response_metadata = .{
+                        .request_id = try options.client.allocator.dupe(u8, real_response.ResponseMetadata.RequestId),
+                    },
+                    .parser_options = .{ .json = parser_options },
+                    .raw_parsed = .{ .server = parsed_response },
                 };
-                break :blk ptr;
-            };
-
-            // This feels like it should result in a use after free, but it
-            // seems to be working?
-            defer if (!(SRawResponse == NullType or foundNormalJsonResponse))
-                options.client.allocator.destroy(parsed_response_ptr);
-
-            const parsed_response = parsed_response_ptr.*;
-
-            // TODO: Figure out this hack
-            // the code setting the response about 10 lines down will trigger
-            // an error because the first field may not be a struct when
-            // XML processing is happening above, which we only know at runtime.
-            //
-            // We could simply force .ec2_query and .rest_xml above rather than
-            // isJson, but it would be nice to automatically support json if
-            // these services start returning that like we'd like them to.
-            //
-            // Otherwise, the compiler gets down here thinking this will be
-            // processed. If it is, then we have a problem when the field name
-            // may not be a struct.
-            if (Self.service_meta.aws_protocol != .query or Self.service_meta.aws_protocol == .ec2_query) {
+            } else {
+                // Conditions 2 or 3 (no wrapping)
                 return FullResponseType{
                     .response = parsed_response,
                     .response_metadata = .{
@@ -351,25 +313,6 @@ pub fn Request(comptime action: anytype) type {
                     .raw_parsed = .{ .raw = parsed_response },
                 };
             }
-
-            // Grab the first (and only) object from the server. Server shape expected to be:
-            // { ActionResponse: {ActionResult: {...}, ResponseMetadata: {...} } }
-            //                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-            //                          Next line of code pulls this portion
-            //
-            //
-            // And the response property below will pull whatever is the ActionResult object
-            // We can grab index [0] as structs are guaranteed by zig to be returned in the order
-            // declared, and we're declaring in that order in ServerResponse().
-            const real_response = @field(parsed_response, @typeInfo(SResponse).Struct.fields[0].name);
-            return FullResponseType{
-                .response = @field(real_response, @typeInfo(@TypeOf(real_response)).Struct.fields[0].name),
-                .response_metadata = .{
-                    .request_id = try options.client.allocator.dupe(u8, real_response.ResponseMetadata.RequestId),
-                },
-                .parser_options = .{ .json = parser_options },
-                .raw_parsed = .{ .server = parsed_response },
-            };
         }
 
         fn xmlReturn(options: Options, result: awshttp.HttpResult) !FullResponseType {
@@ -456,9 +399,150 @@ pub fn Request(comptime action: anytype) type {
                 .raw_parsed = .{ .xml = parsed },
             };
         }
+        const ServerResponseTypes = struct {
+            NormalResponse: type,
+            RawResponse: type,
+            isRawPossible: bool,
+        };
+
+        fn jsonResponseTypesForAction() ServerResponseTypes {
+            // The shape of the data coming back from the server will
+            // vary quite a bit based on the exact protocol being used,
+            // age of the service, etc. Before we parse the data, we need
+            // to understand what we're expecting. Because types are handled
+            // at comptime, we are restricted in how we handle them. They must
+            // be constants, so first we'll set up an unreasonable "NullType"
+            // we can use in our conditionals below
+            const NullType: type = u0;
+
+            // Next, we'll provide a "SResponse", or Server Response, for a
+            // "normal" return that modern AWS services provide, that includes
+            // meta information and a result inside it. This could be the
+            // response as described in our models, or it could be a wrapped
+            // response that's only applicable to aws_query smithy protocol
+            // services
+            const SResponse = if (Self.service_meta.aws_protocol != .query)
+                action.Response
+            else
+                ServerResponse(action);
+
+            // Now, we want to also establish a "SRawResponse", or a raw
+            // response. Some older services (like CloudFront) respect
+            // that we desire application/json data even though they're
+            // considered "rest_xml" protocol. However, they don't wrap
+            // anything, so we actually want to parse the only field in
+            // the response structure. In this case we have to manually
+            // create the type, parse, then set the field. For example:
+            //
+            // Response: type = struct {
+            //     key_group_list: ?struct {...
+            //
+            // Normal responses would start parsing on the Response type,
+            // but raw responses need to create an instance of the response
+            // type, and parse "key_group_list" directly before attaching.
+            //
+            // Because we cannot change types at runtime, we need to create
+            // both a SResponse and SRawResponse type in anticipation of either
+            // scenario, then parse as appropriate later
+            const SRawResponse = if (Self.service_meta.aws_protocol != .query and
+                std.meta.fields(action.Response).len == 1)
+                std.meta.fields(action.Response)[0].field_type
+            else
+                NullType;
+
+            return .{
+                .NormalResponse = SResponse,
+                .RawResponse = SRawResponse,
+                .isRawPossible = SRawResponse != NullType,
+            };
+        }
+
+        fn ParsedJsonData(comptime T: type) type {
+            return struct {
+                raw_response_parsed: bool,
+                parsed_response_ptr: *T,
+                allocator: std.mem.Allocator,
+
+                const MySelf = @This();
+
+                pub fn deinit(self: MySelf) void {
+                    // This feels like it should result in a use after free, but it
+                    // seems to be working?
+                    if (self.raw_response_parsed)
+                        self.allocator.destroy(self.parsed_response_ptr);
+                }
+            };
+        }
+
+        fn parseJsonData(comptime response_types: ServerResponseTypes, data: []const u8, options: Options, parser_options: json.ParseOptions) !ParsedJsonData(response_types.NormalResponse) {
+            // Now it's time to start looking at the actual data. Job 1 will
+            // be to figure out if this is a raw response or wrapped
+
+            // Extract the first json key
+            const key = firstJsonKey(data);
+            const found_normal_json_response = std.mem.eql(u8, key, action.action_name ++ "Response") or
+                std.mem.eql(u8, key, action.action_name ++ "Result");
+            var raw_response_parsed = false;
+            var stream = json.TokenStream.init(data);
+            const parsed_response_ptr = blk: {
+                if (!response_types.isRawPossible or found_normal_json_response)
+                    break :blk &(json.parse(response_types.NormalResponse, &stream, parser_options) catch |e| {
+                        log.err(
+                            \\Call successful, but unexpected response from service.
+                            \\This could be the result of a bug or a stale set of code generated
+                            \\service models.
+                            \\
+                            \\Model Type: {s}
+                            \\
+                            \\Response from server:
+                            \\
+                            \\{s}
+                            \\
+                        , .{ action.Response, data });
+                        return e;
+                    });
+
+                log.debug("Appears server has provided a raw response", .{});
+                raw_response_parsed = true;
+                const ptr = try options.client.allocator.create(response_types.NormalResponse);
+                @field(ptr.*, std.meta.fields(action.Response)[0].name) =
+                    json.parse(response_types.RawResponse, &stream, parser_options) catch |e| {
+                    log.err(
+                        \\Call successful, but unexpected response from service.
+                        \\This could be the result of a bug or a stale set of code generated
+                        \\service models.
+                        \\
+                        \\Model Type: {s}
+                        \\
+                        \\Response from server:
+                        \\
+                        \\{s}
+                        \\
+                    , .{ action.Response, data });
+                    return e;
+                };
+                break :blk ptr;
+            };
+            return ParsedJsonData(response_types.NormalResponse){
+                .raw_response_parsed = raw_response_parsed,
+                .parsed_response_ptr = parsed_response_ptr,
+                .allocator = options.client.allocator,
+            };
+        }
     };
 }
 
+fn firstJsonKey(data: []const u8) []const u8 {
+    const start = std.mem.indexOf(u8, data, "\"") orelse 0; // Should never be 0
+    if (start == 0) log.warn("Response body missing json key?!", .{});
+    var end = std.mem.indexOf(u8, data[start + 1 ..], "\"") orelse 0;
+    if (end == 0) log.warn("Response body only has one double quote?!", .{});
+    end = end + start + 1;
+
+    const key = data[start + 1 .. end];
+    log.debug("First json key: {s}", .{key});
+    return key;
+}
 fn isJsonResponse(headers: []awshttp.Header) !bool {
     // EC2 ignores our accept type, but technically query protocol only
     // returns XML as well. So, we'll ignore the protocol here and just
