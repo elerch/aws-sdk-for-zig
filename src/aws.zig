@@ -539,19 +539,23 @@ fn buildPath(allocator: std.mem.Allocator, raw_uri: []const u8, comptime ActionR
     var buffer = try std.ArrayList(u8).initCapacity(allocator, raw_uri.len);
     // const writer = buffer.writer();
     defer buffer.deinit();
-    var in_var = false;
+    var in_label = false;
     var start: usize = 0;
     for (raw_uri) |c, inx| {
         switch (c) {
             '{' => {
-                in_var = true;
+                in_label = true;
                 start = inx + 1;
             },
             '}' => {
-                in_var = false;
-                const replacement_var = raw_uri[start..inx];
+                in_label = false;
+                // The label may be "greedy" (uses a '+' at the end), but
+                // it's not clear if that effects this processing
+                var end = inx;
+                if (raw_uri[inx - 1] == '+') end -= 1;
+                const replacement_label = raw_uri[start..end];
                 inline for (std.meta.fields(ActionRequest)) |field| {
-                    if (std.mem.eql(u8, request.fieldNameFor(field.name), replacement_var)) {
+                    if (std.mem.eql(u8, request.fieldNameFor(field.name), replacement_label)) {
                         var replacement_buffer = try std.ArrayList(u8).initCapacity(allocator, raw_uri.len);
                         defer replacement_buffer.deinit();
                         var encoded_buffer = try std.ArrayList(u8).initCapacity(allocator, raw_uri.len);
@@ -569,7 +573,7 @@ fn buildPath(allocator: std.mem.Allocator, raw_uri: []const u8, comptime ActionR
                     }
                 }
             },
-            else => if (!in_var) {
+            else => if (!in_label) {
                 try buffer.append(c);
             } else {},
         }
