@@ -150,6 +150,7 @@ pub const AwsHttp = struct {
         log.debug("Request Path: {s}", .{request_cp.path});
         log.debug("Endpoint Path (actually used): {s}", .{endpoint.path});
         log.debug("Query: {s}", .{request_cp.query});
+        log.debug("Request additional header count: {d}", .{request_cp.headers.len});
         log.debug("Method: {s}", .{request_cp.method});
         log.debug("body length: {d}", .{request_cp.body.len});
         log.debug("Body\n====\n{s}\n====", .{request_cp.body});
@@ -240,10 +241,18 @@ fn getRegion(service: []const u8, region: []const u8) []const u8 {
 }
 
 fn addHeaders(allocator: std.mem.Allocator, headers: *std.ArrayList(base.Header), host: []const u8, body: []const u8, content_type: []const u8, additional_headers: []Header) !?[]const u8 {
+    var has_content_type = false;
+    for (additional_headers) |h| {
+        if (std.ascii.eqlIgnoreCase(h.name, "Content-Type")) {
+            has_content_type = true;
+            break;
+        }
+    }
     try headers.append(.{ .name = "Accept", .value = "application/json" });
     try headers.append(.{ .name = "Host", .value = host });
     try headers.append(.{ .name = "User-Agent", .value = "zig-aws 1.0, Powered by the AWS Common Runtime." });
-    try headers.append(.{ .name = "Content-Type", .value = content_type });
+    if (!has_content_type)
+        try headers.append(.{ .name = "Content-Type", .value = content_type });
     try headers.appendSlice(additional_headers);
     if (body.len > 0) {
         const len = try std.fmt.allocPrint(allocator, "{d}", .{body.len});

@@ -357,7 +357,9 @@ fn createCanonicalRequest(allocator: std.mem.Allocator, request: base.Request, p
 
     // TODO: This is all better as a writer - less allocations/copying
     const canonical_method = canonicalRequestMethod(request.method);
-    const canonical_url = try canonicalUri(allocator, request.path, true); // TODO: set false for s3
+    // Let's not mess around here...s3 is the oddball
+    const double_encode = !std.mem.eql(u8, config.service, "s3");
+    const canonical_url = try canonicalUri(allocator, request.path, double_encode);
     defer allocator.free(canonical_url);
     log.debug("final uri: {s}", .{canonical_url});
     const canonical_query = try canonicalQueryString(allocator, request.query);
@@ -408,8 +410,6 @@ fn canonicalUri(allocator: std.mem.Allocator, path: []const u8, double_encode: b
     //
     // For now, we will "Remove redundant and relative path components". This
     // doesn't apply to S3 anyway, and we'll make it the callers's problem
-    if (!double_encode)
-        return SigningError.S3NotImplemented;
     if (path.len == 0 or path[0] == '?' or path[0] == '#')
         return try allocator.dupe(u8, "/");
     log.debug("encoding path: {s}", .{path});
