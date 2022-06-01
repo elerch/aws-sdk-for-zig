@@ -50,7 +50,7 @@ const Tests = enum {
     rest_json_1_work_with_lambda,
     rest_xml_no_input,
     rest_xml_anything_but_s3,
-    rest_xml_work_with_s3,
+    // rest_xml_work_with_s3,
 };
 
 pub fn main() anyerror!void {
