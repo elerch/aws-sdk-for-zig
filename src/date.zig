@@ -57,6 +57,86 @@ pub fn timestampToDateTime(timestamp: i64) DateTime {
     return DateTime{ .day = day, .month = month, .year = year, .hour = hours, .minute = minutes, .second = seconds };
 }
 
+pub fn parseEnglishToTimestamp(data: []const u8) !i64 {
+    return try dateTimeToTimestamp(try parseEnglishToDateTime(data));
+}
+
+const EnglishParsingState = enum { Start, Day, Month, Year, Hour, Minute, Second, End };
+/// Converts a string to a timestamp value. May not handle dates before the
+/// epoch. Dates should look like "Fri, 03 Jun 2022 18:12:36 GMT"
+pub fn parseEnglishToDateTime(data: []const u8) !DateTime {
+    // Fri, 03 Jun 2022 18:12:36 GMT
+    if (!std.mem.endsWith(u8, data, "GMT")) return error.InvalidFormat;
+
+    var start: usize = 0;
+    var state = EnglishParsingState.Start;
+    // Anything not explicitly set by our string would be 0
+    var rc = DateTime{ .year = 0, .month = 0, .day = 0, .hour = 0, .minute = 0, .second = 0 };
+    for (data) |ch, i| {
+        _ = i;
+        switch (ch) {
+            ',' => {},
+            ' ', ':' => {
+                // State transition
+
+                // We're going to coerce and this might not go well, but we
+                // want the compiler to create checks, so we'll turn on
+                // runtime safety for this block, forcing checks in ReleaseSafe
+                // ReleaseFast modes.
+                const next_state = try endEnglishState(state, &rc, data[start..i]);
+                state = next_state;
+                start = i + 1;
+            },
+            else => {}, // We need to be pretty trusting on this format...
+        }
+    }
+    return rc;
+}
+
+fn endEnglishState(current_state: EnglishParsingState, date: *DateTime, prev_data: []const u8) !EnglishParsingState {
+    var next_state: EnglishParsingState = undefined;
+    log.debug("endEnglishState. Current state '{s}', data: {s}", .{ current_state, prev_data });
+
+    // Using two switches is slightly less efficient, but more readable
+    switch (current_state) {
+        .End => return error.IllegalStateTransition,
+        .Start => next_state = .Day,
+        .Day => next_state = .Month,
+        .Month => next_state = .Year,
+        .Year => next_state = .Hour,
+        .Hour => next_state = .Minute,
+        .Minute => next_state = .Second,
+        .Second => next_state = .End,
+    }
+
+    switch (current_state) {
+        .Year => date.year = try std.fmt.parseUnsigned(u16, prev_data, 10),
+        .Month => date.month = try parseEnglishMonth(prev_data),
+        .Day => date.day = try std.fmt.parseUnsigned(u8, prev_data, 10),
+        .Hour => date.hour = try std.fmt.parseUnsigned(u8, prev_data, 10),
+        .Minute => date.minute = try std.fmt.parseUnsigned(u8, prev_data, 10),
+        .Second => date.second = try std.fmt.parseUnsigned(u8, prev_data, 10),
+        .Start => {},
+        .End => return error.InvalidState,
+    }
+    return next_state;
+}
+
+fn parseEnglishMonth(data: []const u8) !u8 {
+    if (std.ascii.startsWithIgnoreCase(data, "Jan")) return 1;
+    if (std.ascii.startsWithIgnoreCase(data, "Feb")) return 2;
+    if (std.ascii.startsWithIgnoreCase(data, "Mar")) return 3;
+    if (std.ascii.startsWithIgnoreCase(data, "Apr")) return 4;
+    if (std.ascii.startsWithIgnoreCase(data, "May")) return 5;
+    if (std.ascii.startsWithIgnoreCase(data, "Jun")) return 6;
+    if (std.ascii.startsWithIgnoreCase(data, "Jul")) return 7;
+    if (std.ascii.startsWithIgnoreCase(data, "Aug")) return 8;
+    if (std.ascii.startsWithIgnoreCase(data, "Sep")) return 9;
+    if (std.ascii.startsWithIgnoreCase(data, "Oct")) return 10;
+    if (std.ascii.startsWithIgnoreCase(data, "Nov")) return 11;
+    if (std.ascii.startsWithIgnoreCase(data, "Dec")) return 12;
+    return error.InvalidMonth;
+}
 pub fn parseIso8601ToTimestamp(data: []const u8) !i64 {
     return try dateTimeToTimestamp(try parseIso8601ToDateTime(data));
 }
@@ -326,4 +406,9 @@ test "Convert ISO8601 string to timestamp" {
 }
 test "Convert datetime to timestamp before 1970" {
     try std.testing.expectEqual(@as(i64, -449392815), try dateTimeToTimestamp(DateTime{ .year = 1955, .month = 10, .day = 05, .hour = 16, .minute = 39, .second = 45 }));
+}
+
+test "Convert whatever AWS is sending us to timestamp" {
+    const string_date = "Fri, 03 Jun 2022 18:12:36 GMT";
+    try std.testing.expectEqual(DateTime{ .year = 2022, .month = 06, .day = 03, .hour = 18, .minute = 12, .second = 36 }, try parseEnglishToDateTime(string_date));
 }
