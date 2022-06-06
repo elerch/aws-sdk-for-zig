@@ -12,19 +12,22 @@ pub fn log(
     args: anytype,
 ) void {
     // Ignore aws_signing messages
-    if (verbose < 2 and scope == .aws_signing and @enumToInt(level) >= @enumToInt(std.log.Level.debug))
+    if (verbose < 3 and scope == .aws_signing and @enumToInt(level) >= @enumToInt(std.log.Level.debug))
         return;
     // Ignore aws_credentials messages
-    if (verbose < 2 and scope == .aws_credentials and @enumToInt(level) >= @enumToInt(std.log.Level.debug))
+    if (verbose < 3 and scope == .aws_credentials and @enumToInt(level) >= @enumToInt(std.log.Level.debug))
         return;
     // Ignore xml_shaper messages
-    if (verbose < 2 and scope == .xml_shaper and @enumToInt(level) >= @enumToInt(std.log.Level.debug))
+    if (verbose < 3 and scope == .xml_shaper and @enumToInt(level) >= @enumToInt(std.log.Level.debug))
         return;
     // Ignore date messages
-    if (verbose < 2 and scope == .date and @enumToInt(level) >= @enumToInt(std.log.Level.debug))
+    if (verbose < 3 and scope == .date and @enumToInt(level) >= @enumToInt(std.log.Level.debug))
         return;
     // Ignore awshttp messages
-    if (verbose < 1 and scope == .awshttp and @enumToInt(level) >= @enumToInt(std.log.Level.debug))
+    if (verbose < 2 and scope == .awshttp and @enumToInt(level) >= @enumToInt(std.log.Level.debug))
+        return;
+
+    if (verbose < 1 and scope == .aws and @enumToInt(level) >= @enumToInt(std.log.Level.debug))
         return;
     const scope_prefix = "(" ++ @tagName(scope) ++ "): ";
     const prefix = "[" ++ @tagName(level) ++ "] " ++ scope_prefix;
