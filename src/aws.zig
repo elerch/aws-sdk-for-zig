@@ -345,6 +345,26 @@ pub fn Request(comptime action: anytype) type {
             var expected_body_field_len = std.meta.fields(action.Response).len;
             if (@hasDecl(action.Response, "http_header"))
                 expected_body_field_len -= std.meta.fields(@TypeOf(action.Response.http_header)).len;
+            if (@hasDecl(action.Response, "http_payload")) {
+                var rc = FullResponseType{
+                    .response = .{},
+                    .response_metadata = .{
+                        .request_id = try requestIdFromHeaders(aws_request, response, options),
+                    },
+                    .parser_options = .{ .json = .{} },
+                    .raw_parsed = .{ .raw = .{} },
+                    .allocator = options.client.allocator,
+                };
+                var body_field = @field(rc.response, action.Response.http_payload);
+                const BodyField = @TypeOf(body_field);
+                if (BodyField == []const u8 or BodyField == ?[]const u8) {
+                    expected_body_field_len = 0;
+                    // We can't use body_field for this set - only @field will work
+                    @field(rc.response, action.Response.http_payload) = try options.client.allocator.dupe(u8, response.body);
+                    return rc;
+                }
+                rc.deinit();
+            }
 
             // We don't care about the body if there are no fields we expect there...
             if (std.meta.fields(action.Response).len == 0 or expected_body_field_len == 0) {
@@ -843,6 +863,17 @@ fn FullResponse(comptime action: anytype) type {
                             self.allocator.free(@field(self.response, f.name).?);
                         }
                     }
+                }
+            }
+            if (@hasDecl(Response, "http_payload")) {
+                var body_field = @field(self.response, Response.http_payload);
+                const BodyField = @TypeOf(body_field);
+                if (BodyField == []const u8) {
+                    self.allocator.free(body_field);
+                }
+                if (BodyField == ?[]const u8) {
+                    if (body_field) |f|
+                        self.allocator.free(f);
                 }
             }
         }
