@@ -53,7 +53,7 @@ const Tests = enum {
     rest_json_1_work_with_lambda,
     rest_xml_no_input,
     rest_xml_anything_but_s3,
-    // rest_xml_work_with_s3,
+    rest_xml_work_with_s3,
 };
 
 pub fn main() anyerror!void {
@@ -233,6 +233,77 @@ pub fn main() anyerror!void {
                 const list = result.response.key_group_list.?;
                 std.log.info("key group list max: {d}", .{list.max_items});
                 std.log.info("key group quantity: {d}", .{list.quantity});
+            },
+            .rest_xml_work_with_s3 => {
+                // TODO: Fix signature calculation mismatch with slashes
+                // const key = "i/am/a/teapot/foo";
+                const key = "foo";
+
+                const bucket = blk: {
+                    const result = try client.call(services.s3.list_buckets.Request{}, options);
+                    defer result.deinit();
+                    const bucket = result.response.buckets.?[result.response.buckets.?.len - 1];
+                    std.log.info("ListBuckets request id: {s}", .{result.response_metadata.request_id});
+                    std.log.info("bucket name: {s}", .{bucket.name.?});
+                    break :blk try allocator.dupe(u8, bucket.name.?);
+                };
+                defer allocator.free(bucket);
+                const location = blk: {
+                    const result = try aws.Request(services.s3.get_bucket_location).call(.{
+                        .bucket = bucket,
+                    }, options);
+                    defer result.deinit();
+                    const location = result.response.location_constraint.?;
+                    std.log.info("GetBucketLocation request id: {s}", .{result.response_metadata.request_id});
+                    std.log.info("location: {s}", .{location});
+                    break :blk try allocator.dupe(u8, location);
+                };
+                defer allocator.free(location);
+                const s3opts = aws.Options{
+                    .region = location,
+                    .client = client,
+                };
+                {
+                    const result = try aws.Request(services.s3.put_object).call(.{
+                        .bucket = bucket,
+                        .key = key,
+                        .content_type = "text/plain",
+                        .body = "bar",
+                        .storage_class = "STANDARD",
+                    }, s3opts);
+                    std.log.info("PutObject Request id: {s}", .{result.response_metadata.request_id});
+                    std.log.info("PutObject etag: {s}", .{result.response.e_tag.?});
+                    defer result.deinit();
+                }
+                {
+                    // Note that boto appears to redirect by default, but java
+                    // does not. We will not
+                    const result = try aws.Request(services.s3.get_object).call(.{
+                        .bucket = bucket,
+                        .key = key,
+                    }, s3opts);
+                    std.log.info("GetObject Request id: {s}", .{result.response_metadata.request_id});
+                    std.log.info("GetObject Body: {s}", .{result.response.body});
+                    std.log.info("GetObject etag: {s}", .{result.response.e_tag.?});
+                    std.log.info("GetObject last modified (seconds since epoch): {d}", .{result.response.last_modified.?});
+                    defer result.deinit();
+                }
+                {
+                    const result = try aws.Request(services.s3.delete_object).call(.{
+                        .bucket = bucket,
+                        .key = key,
+                    }, s3opts);
+                    std.log.info("DeleteObject Request id: {s}", .{result.response_metadata.request_id});
+                    defer result.deinit();
+                }
+                {
+                    const result = try aws.Request(services.s3.list_objects).call(.{
+                        .bucket = bucket,
+                    }, s3opts);
+                    std.log.info("ListObject Request id: {s}", .{result.response_metadata.request_id});
+                    std.log.info("Object count: {d}", .{result.response.contents.?.len});
+                    defer result.deinit();
+                }
             },
         }
         std.log.info("===== End Test: {s} =====\n", .{@tagName(t)});
