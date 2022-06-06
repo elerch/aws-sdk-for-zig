@@ -4,6 +4,7 @@ const awshttp = @import("aws_http.zig");
 const json = @import("json.zig");
 const url = @import("url.zig");
 const case = @import("case.zig");
+const date = @import("date.zig");
 const servicemodel = @import("servicemodel.zig");
 const xml_shaper = @import("xml_shaper.zig");
 
@@ -263,31 +264,78 @@ pub fn Request(comptime action: anytype) type {
                 return error.HttpFailure;
             }
 
-            var fullResponse = try getFullResponseFromBody(aws_request, response, options);
+            var full_response = try getFullResponseFromBody(aws_request, response, options);
+            errdefer full_response.deinit();
+
             // Fill in any fields that require a header. Note doing it post-facto
             // assumes all response header fields are optional, which may be incorrect
             if (@hasDecl(action.Response, "http_header")) {
-                inline for (std.meta.fields(@TypeOf(action.Response.http_header))) |f| {
-                    const header_name = @field(action.Response.http_header, f.name);
-                    for (response.headers) |h| {
-                        if (std.ascii.eqlIgnoreCase(h.name, header_name)) {
-                            log.debug("Response header {s} configured for field. Setting {s} = {s}", .{ h.name, f.name, h.value });
-                            const field_type = @TypeOf(@field(fullResponse.response, f.name));
-                            // TODO: Fix this. We need to make this much more robust
-                            // The deal is we have to do the dupe though
-                            // Also, this is a memory leak atm
-                            if (field_type == ?[]const u8) {
-                                @field(fullResponse.response, f.name) = try options.client.allocator.dupe(u8, (try coerceFromString(field_type, h.value)).?);
-                            } else {
-                                @field(fullResponse.response, f.name) = try coerceFromString(field_type, h.value);
-                            }
+                log.debug("Checking headers based on type: {s}", .{@typeName(action.Response)});
+                const HeaderInfo = struct {
+                    name: []const u8,
+                    T: type,
+                    header_name: []const u8,
+                };
+                comptime var fields = [_]?HeaderInfo{null} ** std.meta.fields(@TypeOf(action.Response.http_header)).len;
+                inline for (std.meta.fields(@TypeOf(action.Response.http_header))) |f, inx| {
+                    fields[inx] = HeaderInfo{
+                        .name = f.name,
+                        .T = @TypeOf(@field(full_response.response, f.name)),
+                        .header_name = @field(action.Response.http_header, f.name),
+                    };
+                }
+                inline for (fields) |f| {
+                    for (response.headers) |header| {
+                        if (std.mem.eql(u8, header.name, f.?.header_name)) {
+                            log.debug("Response header {s} configured for field. Setting {s} = {s}", .{ header.name, f.?.name, header.value });
+                            // TODO: Revisit return for this function. At the moment, there
+                            // is something in the compiler that is causing the inline for
+                            // surrounding this to start repeating elements
+                            //
+                            // https://github.com/ziglang/zig/issues/10507
+                            //
+                            // This bug is also relevant to some of the many,
+                            // many different methods used to try to work around:
+                            // https://github.com/ziglang/zig/issues/10029
+                            //
+                            // Note: issues found on zig 0.9.0
+                            setHeaderValue(
+                                options.client.allocator,
+                                &full_response.response,
+                                f.?.name,
+                                f.?.T,
+                                header.value,
+                            ) catch |e| {
+                                log.err("Could not set header value: Response header {s}. Field {s}. Value {s}", .{ header.name, f.?.name, header.value });
+                                log.err("Error: {}", .{e});
+                                if (@errorReturnTrace()) |trace| {
+                                    std.debug.dumpStackTrace(trace.*);
+                                }
+                            };
 
                             break;
                         }
                     }
                 }
             }
-            return fullResponse;
+            return full_response;
+        }
+
+        fn setHeaderValue(
+            allocator: std.mem.Allocator,
+            response: anytype,
+            comptime field_name: []const u8,
+            comptime field_type: type,
+            value: []const u8,
+        ) !void {
+            // TODO: Fix this. We need to make this much more robust
+            // The deal is we have to do the dupe though
+            // Also, this is a memory leak atm
+            if (field_type == ?[]const u8) {
+                @field(response, field_name) = try allocator.dupe(u8, value);
+            } else {
+                @field(response, field_name) = try coerceFromString(field_type, value);
+            }
         }
 
         fn getFullResponseFromBody(aws_request: awshttp.HttpRequest, response: awshttp.HttpResult, options: Options) !FullResponseType {
@@ -568,14 +616,30 @@ pub fn Request(comptime action: anytype) type {
     };
 }
 
-fn coerceFromString(comptime T: type, val: []const u8) !T {
+fn coerceFromString(comptime T: type, val: []const u8) anyerror!T {
     if (@typeInfo(T) == .Optional) return try coerceFromString(@typeInfo(T).Optional.child, val);
     // TODO: This is terrible...fix it
     switch (T) {
         bool => return std.ascii.eqlIgnoreCase(val, "true"),
-        i64 => return try std.fmt.parseInt(T, val, 10),
+        i64 => return parseInt(T, val) catch |e| {
+            log.err("Invalid string representing i64: {s}", .{val});
+            return e;
+        },
         else => return val,
     }
+}
+fn parseInt(comptime T: type, val: []const u8) !T {
+    const rc = std.fmt.parseInt(T, val, 10);
+    if (!std.meta.isError(rc)) return rc;
+
+    if (T == i64) {
+        return date.parseEnglishToTimestamp(val) catch |e| {
+            log.err("Error coercing date string '{s}' to timestamp value", .{val});
+            return e;
+        };
+    }
+    log.err("Error parsing string '{s}' to integer", .{val});
+    return rc;
 }
 
 fn generalAllocPrint(allocator: std.mem.Allocator, val: anytype) !?[]const u8 {
