@@ -127,7 +127,7 @@ pub fn Request(comptime action: anytype) type {
                     // query string. TODO: RTFM on zig to figure out why
                     aws_request.query = try options.client.allocator.dupe(u8, aws_request.path[inx..]);
                     aws_request.path = try options.client.allocator.dupe(u8, aws_request.path[0..inx]);
-                    log.debug("inx: {d}\n\tnew path: {s}\n\tnew query: {s}", .{ inx, aws_request.path, aws_request.query });
+                    // log.debug("inx: {d}\n\tnew path: {s}\n\tnew query: {s}", .{ inx, aws_request.path, aws_request.query });
                     options.client.allocator.free(orig_path);
                     options.client.allocator.free(orig_query);
                 }
