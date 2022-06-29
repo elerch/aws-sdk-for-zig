@@ -2,8 +2,6 @@
 
 [![Build Status](https://drone.lerch.org/api/badges/lobo/aws-sdk-for-zig/status.svg?ref=refs/heads/master)](https://drone.lerch.org/api/badges/lobo/aws-sdk-for-zig/)
 
-This SDK currently supports all AWS services. S3 has basic support
-
 Current executable size for the demo is 1.7M (90k of which is the AWS PEM file,
 and approximately 600K for XML services) after compiling with -Drelease-safe and
 [stripping the executable after compilation](https://github.com/ziglang/zig/issues/351).
@@ -42,13 +40,10 @@ for posterity, and supports x86_64 linux. The old branch is deprecated.
 
 ## Limitations
 
-There are many nuances of AWS V4 signature calculation, and not all edge cases
-of S3 are handled. WebIdentityToken is not yet implemented.
+WebIdentityToken is not yet implemented.
 
 TODO List:
 
-* Implement more robust S3 support. Keys with slashes in the name are currently
-  causing a SignatureDoesNotMatch error
 * Bump to zig 0.9.1. iguanaTLS, used in zFetch is still [working out 0.9.1 issues](https://github.com/alexnask/iguanaTLS/pull/29)
 * Implement sigv4a signing
 * Implement jitter/exponential backoff

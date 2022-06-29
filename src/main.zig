@@ -235,9 +235,8 @@ pub fn main() anyerror!void {
                 std.log.info("key group quantity: {d}", .{list.quantity});
             },
             .rest_xml_work_with_s3 => {
-                // TODO: Fix signature calculation mismatch with slashes
-                // const key = "i/am/a/teapot/foo";
-                const key = "foo";
+                const key = "i/am/a/teapot/foo";
+                // const key = "foo";
 
                 const bucket = blk: {
                     const result = try client.call(services.s3.list_buckets.Request{}, options);

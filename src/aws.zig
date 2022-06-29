@@ -110,7 +110,13 @@ pub fn Request(comptime action: anytype) type {
             log.debug("Rest method: '{s}'", .{aws_request.method});
             log.debug("Rest success code: '{d}'", .{Action.http_config.success_code});
             log.debug("Rest raw uri: '{s}'", .{Action.http_config.uri});
-            aws_request.path = try buildPath(options.client.allocator, Action.http_config.uri, ActionRequest, request);
+            aws_request.path = try buildPath(
+                options.client.allocator,
+                Action.http_config.uri,
+                ActionRequest,
+                request,
+                !std.mem.eql(u8, Self.service_meta.sdk_id, "S3"),
+            );
             defer options.client.allocator.free(aws_request.path);
             log.debug("Rest processed uri: '{s}'", .{aws_request.path});
             // TODO: Make sure this doesn't get escaped here for S3
@@ -883,7 +889,13 @@ fn queryFieldTransformer(field_name: []const u8, encoding_options: url.EncodingO
     return try case.snakeToPascal(encoding_options.allocator.?, field_name);
 }
 
-fn buildPath(allocator: std.mem.Allocator, raw_uri: []const u8, comptime ActionRequest: type, request: anytype) ![]const u8 {
+fn buildPath(
+    allocator: std.mem.Allocator,
+    raw_uri: []const u8,
+    comptime ActionRequest: type,
+    request: anytype,
+    encode_slash: bool,
+) ![]const u8 {
     var buffer = try std.ArrayList(u8).initCapacity(allocator, raw_uri.len);
     // const writer = buffer.writer();
     defer buffer.deinit();
@@ -916,7 +928,7 @@ fn buildPath(allocator: std.mem.Allocator, raw_uri: []const u8, comptime ActionR
                             replacement_writer,
                         );
                         const trimmed_replacement_val = std.mem.trim(u8, replacement_buffer.items, "\"");
-                        try uriEncode(trimmed_replacement_val, encoded_buffer.writer());
+                        try uriEncode(trimmed_replacement_val, encoded_buffer.writer(), encode_slash);
                         try buffer.appendSlice(encoded_buffer.items);
                     }
                 }
@@ -929,12 +941,12 @@ fn buildPath(allocator: std.mem.Allocator, raw_uri: []const u8, comptime ActionR
     return buffer.toOwnedSlice();
 }
 
-fn uriEncode(input: []const u8, writer: anytype) !void {
+fn uriEncode(input: []const u8, writer: anytype, encode_slash: bool) !void {
     for (input) |c|
-        try uriEncodeByte(c, writer);
+        try uriEncodeByte(c, writer, encode_slash);
 }
 
-fn uriEncodeByte(char: u8, writer: anytype) !void {
+fn uriEncodeByte(char: u8, writer: anytype, encode_slash: bool) !void {
     switch (char) {
         '!' => _ = try writer.write("%21"),
         '#' => _ = try writer.write("%23"),
@@ -946,7 +958,7 @@ fn uriEncodeByte(char: u8, writer: anytype) !void {
         '*' => _ = try writer.write("%2A"),
         '+' => _ = try writer.write("%2B"),
         ',' => _ = try writer.write("%2C"),
-        '/' => _ = try writer.write("%2F"),
+        '/' => _ = if (encode_slash) try writer.write("%2F") else try writer.write("/"),
         ':' => _ = try writer.write("%3A"),
         ';' => _ = try writer.write("%3B"),
         '=' => _ = try writer.write("%3D"),
@@ -1030,7 +1042,7 @@ fn addQueryArg(comptime ValueType: type, prefix: []const u8, key: []const u8, va
 fn addBasicQueryArg(prefix: []const u8, key: []const u8, value: anytype, writer: anytype) !bool {
     _ = try writer.write(prefix);
     // TODO: url escaping
-    try uriEncode(key, writer);
+    try uriEncode(key, writer, true);
     _ = try writer.write("=");
     try json.stringify(value, .{}, ignoringWriter(uriEncodingWriter(writer).writer(), '"').writer());
     return true;
@@ -1050,7 +1062,7 @@ pub fn UriEncodingWriter(comptime WriterType: type) type {
         const Self = @This();
 
         pub fn write(self: *Self, bytes: []const u8) Error!usize {
-            try uriEncode(bytes, self.child_stream);
+            try uriEncode(bytes, self.child_stream, true);
             return bytes.len; // We say that all bytes are "written", even if they're not, as caller may be retrying
         }
 
@@ -1193,7 +1205,7 @@ test "REST Json v1 buildpath substitutes" {
         .max_items = 1,
     };
     const input_path = "https://myhost/{MaxItems}/";
-    const output_path = try buildPath(allocator, input_path, @TypeOf(request), request);
+    const output_path = try buildPath(allocator, input_path, @TypeOf(request), request, true);
     defer allocator.free(output_path);
     try std.testing.expectEqualStrings("https://myhost/1/", output_path);
 }
@@ -1204,7 +1216,7 @@ test "REST Json v1 buildpath handles restricted characters" {
         .marker = ":",
     };
     const input_path = "https://myhost/{Marker}/";
-    const output_path = try buildPath(allocator, input_path, @TypeOf(request), request);
+    const output_path = try buildPath(allocator, input_path, @TypeOf(request), request, true);
     defer allocator.free(output_path);
     try std.testing.expectEqualStrings("https://myhost/%3A/", output_path);
 }
