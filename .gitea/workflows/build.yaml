@@ -1,0 +1,42 @@
+name: AWS-Zig Build
+run-name: ${{ github.actor }} building AWS Zig SDK
+on: [push]
+jobs:
+  build-zig-0.9-amd64-host:
+    runs-on: ubuntu-latest
+    # Need to use the default container with node and all that, so we can
+    # use JS-based actions like actions/checkout@v3...
+    # container:
+    #   image: alpine:3.15.0
+    env:
+      ZIG_VERSION: 0.9.0
+      ARCH: x86_64
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v3
+      # ARCH is fine, but we can't substitute directly because zig
+      # uses x86_64 instead of amd64. They also use aarch64 instead of arm64.
+      #
+      # However, arm64/linux isn't quite fully tier 1 yet, so this is more of a
+      # TODO: https://github.com/ziglang/zig/issues/2443
+      - run: wget https://ziglang.org/download/${ZIG_VERSION}/zig-linux-${ARCH}-${ZIG_VERSION}.tar.xz
+      - run: tar x -C /usr/local -f zig-linux-${ARCH}-${ZIG_VERSION}.tar.xz
+      - run: ln -s /usr/local/zig-linux-${ARCH}-${ZIG_VERSION}/zig /usr/local/bin/zig
+      - run: apt update && apt install --no-install-recommends git
+      - run: (cd codegen && zig build test)
+      - run: zig build -Dfetch # implicitly does a codegen
+      - run: zig build test
+      - run: zig build -Dtarget=arm-linux
+      - run: zig build -Dtarget=x86_64-windows
+      - run: zig build -Dtarget=aarch64-linux
+      - run: zig build -Dtarget=riscv64-linux
+      - run: zig build -Dtarget=x86_64-macos
+      - run: zig build -Dtarget=aarch64-macos
+      - name: Notification
+        if: always()
+        uses: https://github.com/elerch/Matrix-Message@v0.0.4
+        with:
+         room_id: ${{ secrets.MATRIX_ROOM_ID }}
+         access_token: ${{ secrets.MATRIX_ACCESS_TOKEN }}
+         message: "Job ${{ job.status }}. ${{ github.repository }}/${{ github.ref }}"
+         server: "${{ secrets.MATRIX_HOME_SERVER }}"
