@@ -44,13 +44,14 @@ WebIdentityToken is not yet implemented.
 
 TODO List:
 
-* Bump to zig 0.9.1. iguanaTLS, used in zFetch is still [working out 0.9.1 issues](https://github.com/alexnask/iguanaTLS/pull/29)
+* Bump to zig 0.11 and replace zFetch with [std.http.Client](https://github.com/ziglang/zig/blob/master/lib/std/http/Client.zig)
+* Verify strip on static builds in 0.11
 * Implement sigv4a signing
 * Implement jitter/exponential backoff
 * Implement timeouts and other TODO's in the code
 * Add option to cache signature keys
+* Move CI to github actions based on [gittea's implementation](https://blog.gitea.io/2022/12/feature-preview-gitea-actions/)
 
 Compiler wishlist/watchlist:
 
-* [Merge PR to allow stripping -static](https://github.com/ziglang/zig/pull/8248)
 * [comptime allocations](https://github.com/ziglang/zig/issues/1291) so we can read files, etc (or is there another way)
