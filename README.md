@@ -1,6 +1,6 @@
 # AWS SDK for Zig
 
-[![Build Status](https://drone.lerch.org/api/badges/lobo/aws-sdk-for-zig/status.svg?ref=refs/heads/master)](https://drone.lerch.org/api/badges/lobo/aws-sdk-for-zig/)
+[![Build Status](https://actions-status.lerch.org/lobo/aws-sdk-for-zig/build)](https://git.lerch.org/lobo/aws-sdk-for-zig/actions?workflow=build.yaml&state=closed)
 
 Current executable size for the demo is 1.7M (90k of which is the AWS PEM file,
 and approximately 600K for XML services) after compiling with -Drelease-safe and
