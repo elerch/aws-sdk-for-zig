@@ -19,7 +19,7 @@ jobs:
       #
       # However, arm64/linux isn't quite fully tier 1 yet, so this is more of a
       # TODO: https://github.com/ziglang/zig/issues/2443
-      - run: wget https://ziglang.org/download/${ZIG_VERSION}/zig-linux-${ARCH}-${ZIG_VERSION}.tar.xz
+      - run: wget -q https://ziglang.org/download/${ZIG_VERSION}/zig-linux-${ARCH}-${ZIG_VERSION}.tar.xz
       - run: tar x -C /usr/local -f zig-linux-${ARCH}-${ZIG_VERSION}.tar.xz
       - run: ln -s /usr/local/zig-linux-${ARCH}-${ZIG_VERSION}/zig /usr/local/bin/zig
       - run: apt update && apt install --no-install-recommends git
@@ -32,11 +32,20 @@ jobs:
       - run: zig build -Dtarget=riscv64-linux
       - run: zig build -Dtarget=x86_64-macos
       - run: zig build -Dtarget=aarch64-macos
-      - name: Notification
-        if: always()
-        uses: https://github.com/elerch/Matrix-Message@v0.0.4
-        with:
-         room_id: ${{ secrets.MATRIX_ROOM_ID }}
-         access_token: ${{ secrets.MATRIX_ACCESS_TOKEN }}
-         message: "Job ${{ job.status }}. ${{ github.repository }}/${{ github.ref }}"
-         server: "${{ secrets.MATRIX_HOME_SERVER }}"
+      - name: Success Notification
+        if: success()
+        run: |
+               curl -u '${{ secrets.NTFY_USER }}:${{ secrets.NTFY_PASSWORD }}' \
+               -H 'Title: Job Succeeded. ${{ github.repository }}/${{ github.ref }}' \
+               -H "Tags: +1" \
+               -d 'Job succeeded. See '$GITHUB_SERVER_URL'/${{ github.repository }}/actions/runs/${{ github.run_number }} for details' \
+               '${{ secrets.NTFY_HOST }}${{ secrets.NTFY_TOPIC }}'               
+      - name: Failure Notification
+        if: failure()
+        run: |
+               curl -u '${{ secrets.NTFY_USER }}:${{ secrets.NTFY_PASSWORD }}' \
+               -H "Priority: high" \
+               -H 'Title: Job FAILED. ${{ github.repository }}/${{ github.ref }}' \
+               -H "Tags: warning" \
+               -d 'Job failed. See '$GITHUB_SERVER_URL'/${{ github.repository }}/actions/runs/${{ github.run_number }} for details' \
+               '${{ secrets.NTFY_HOST }}${{ secrets.NTFY_TOPIC }}'
