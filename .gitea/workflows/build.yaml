@@ -32,20 +32,11 @@ jobs:
       - run: zig build -Dtarget=riscv64-linux
       - run: zig build -Dtarget=x86_64-macos
       - run: zig build -Dtarget=aarch64-macos
-      - name: Success Notification
-        if: success()
-        run: |
-               curl -u '${{ secrets.NTFY_USER }}:${{ secrets.NTFY_PASSWORD }}' \
-               -H 'Title: Job Succeeded. ${{ github.repository }}/${{ github.ref }}' \
-               -H "Tags: +1" \
-               -d 'Job succeeded. See '$GITHUB_SERVER_URL'/${{ github.repository }}/actions/runs/${{ github.run_number }} for details' \
-               '${{ secrets.NTFY_HOST }}${{ secrets.NTFY_TOPIC }}'               
-      - name: Failure Notification
-        if: failure()
-        run: |
-               curl -u '${{ secrets.NTFY_USER }}:${{ secrets.NTFY_PASSWORD }}' \
-               -H "Priority: high" \
-               -H 'Title: Job FAILED. ${{ github.repository }}/${{ github.ref }}' \
-               -H "Tags: warning" \
-               -d 'Job failed. See '$GITHUB_SERVER_URL'/${{ github.repository }}/actions/runs/${{ github.run_number }} for details' \
-               '${{ secrets.NTFY_HOST }}${{ secrets.NTFY_TOPIC }}'
+      - name: Notify
+        uses: https://git.lerch.org/lobo/action-notify-ntfy@v1
+        if: always()
+        with:
+          host: ${{ secrets.NTFY_HOST }}
+          topic: ${{ secrets.NTFY_TOPIC }}
+          user: ${{ secrets.NTFY_USER }}
+          password: ${{ secrets.NTFY_PASSWORD }}
