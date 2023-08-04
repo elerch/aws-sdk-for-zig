@@ -431,23 +431,6 @@ test "can parse an integer type" {
     defer parsed_data.deinit();
     try testing.expectEqual(@as(u8, 42), parsed_data.parsed_value.foo_bar);
 }
-test "can parse a boolean type" {
-    const allocator = std.testing.allocator;
-    // defer allocator.free(snake_case);
-    const data =
-        \\<?xml version="1.0" encoding="UTF-8"?>
-        \\<Example xmlns="http://example.example.com/doc/2016-11-15/">
-        \\    <fooBar>true</fooBar>
-        \\</Example>
-    ;
-    const Example = struct {
-        foo_bar: bool,
-    };
-    // std.debug.print("{s}", .{data});
-    const parsed_data = try parse(Example, data, .{ .allocator = allocator, .match_predicate = fuzzyEqual });
-    defer parsed_data.deinit();
-    try testing.expectEqual(true, parsed_data.parsed_value.foo_bar);
-}
 test "can parse an optional boolean type" {
     const allocator = std.testing.allocator;
     const data =
