@@ -213,7 +213,7 @@ fn parseInternal(comptime T: type, element: *xml.Element, options: ParseOptions)
             // }
 
             log.debug("Processing fields in struct: {s}", .{@typeName(T)});
-            inline for (struct_info.fields) |field, i| {
+            inline for (struct_info.fields, 0..) |field, i| {
                 var name = field.name;
                 var found_value = false;
                 if (comptime std.meta.trait.hasFn("fieldNameFor")(T))
@@ -368,7 +368,7 @@ pub fn fuzzyEqual(a: []const u8, b: []const u8, options: xml.PredicateOptions) !
 
 fn normalize(val: []u8) []u8 {
     var underscores: u64 = 0;
-    for (val) |ch, i| {
+    for (val, 0..) |ch, i| {
         if (ch == '_') {
             underscores = underscores + 1;
         } else {

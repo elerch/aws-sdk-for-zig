@@ -283,7 +283,7 @@ pub fn Request(comptime request_action: anytype) type {
                     header_name: []const u8,
                 };
                 comptime var fields = [_]?HeaderInfo{null} ** std.meta.fields(@TypeOf(action.Response.http_header)).len;
-                inline for (std.meta.fields(@TypeOf(action.Response.http_header))) |f, inx| {
+                inline for (std.meta.fields(@TypeOf(action.Response.http_header)), 0..) |f, inx| {
                     fields[inx] = HeaderInfo{
                         .name = f.name,
                         .T = @TypeOf(@field(full_response.response, f.name)),
@@ -901,7 +901,7 @@ fn buildPath(
     defer buffer.deinit();
     var in_label = false;
     var start: usize = 0;
-    for (raw_uri) |c, inx| {
+    for (raw_uri, 0..) |c, inx| {
         switch (c) {
             '{' => {
                 in_label = true;

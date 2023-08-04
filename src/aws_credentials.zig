@@ -449,7 +449,7 @@ const LineIterator = struct {
         if (self.inx >= self.text.len) return null;
         var current = self.inx;
         var start = self.inx;
-        for (self.text[self.inx..]) |c, i| {
+        for (self.text[self.inx..], 0..) |c, i| {
             if (c == '\n') {
                 // log.debug("got \\n: {d}", .{i});
                 current += i + 1;
@@ -475,7 +475,7 @@ fn credsForText(text: []const u8, profile: []const u8) !PartialCredentials {
     while (lines.next()) |line| {
         // log.debug("line: {s}", .{line});
         var section_start: ?usize = 0;
-        for (line) |c, i| {
+        for (line, 0..) |c, i| {
             switch (c) {
                 '#' => break,
                 '[' => section_start = i + 1,
@@ -500,7 +500,7 @@ fn credsForText(text: []const u8, profile: []const u8) !PartialCredentials {
                     for (&[_][]const u8{
                         "aws_access_key_id",
                         "aws_secret_access_key",
-                    }) |needle, inx| {
+                    }, 0..) |needle, inx| {
                         if (std.ascii.eqlIgnoreCase(key, needle)) {
                             // TODO: Trim this out
                             creds[inx] = trim(line[i + 1 ..]);
@@ -527,7 +527,7 @@ fn trim(text: []const u8) []const u8 {
     var start: ?usize = null;
     var end: ?usize = null;
 
-    for (text) |c, i| switch (c) {
+    for (text, 0..) |c, i| switch (c) {
         ' ', '\t' => {},
         '#' => return trimmed(text, start, end),
         else => {
@@ -584,7 +584,7 @@ fn getHomeDir(allocator: std.mem.Allocator) ![]const u8 {
                 &dir_path_ptr,
             )) {
                 std.os.windows.S_OK => {
-                    defer std.os.windows.ole32.CoTaskMemFree(@ptrCast(*anyopaque, dir_path_ptr));
+                    defer std.os.windows.ole32.CoTaskMemFree(@as(*anyopaque, @ptrCast(dir_path_ptr)));
                     const global_dir = std.unicode.utf16leToUtf8Alloc(allocator, std.mem.sliceTo(dir_path_ptr, 0)) catch |err| switch (err) {
                         error.UnexpectedSecondSurrogateHalf => return error.HomeDirUnavailable,
                         error.ExpectedSecondSurrogateHalf => return error.HomeDirUnavailable,

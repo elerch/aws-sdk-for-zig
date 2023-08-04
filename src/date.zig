@@ -14,7 +14,7 @@ const DAYS_PER_YEAR = 365; //* Normal year (no leap year) */
 pub fn timestampToDateTime(timestamp: i64) DateTime {
 
     // aus https://de.wikipedia.org/wiki/Unixzeit
-    const unixtime = @intCast(u64, timestamp);
+    const unixtime = @as(u64, @intCast(timestamp));
     const DAYS_IN_4_YEARS = 1461; //*   4*365 +   1 */
     const DAYS_IN_100_YEARS = 36524; //* 100*365 +  25 - 1 */
     const DAYS_IN_400_YEARS = 146097; //* 400*365 + 100 - 4 + 1 */
@@ -27,17 +27,17 @@ pub fn timestampToDateTime(timestamp: i64) DateTime {
     // Leap year rules for Gregorian Calendars
     // Any year divisible by 100 is not a leap year unless also divisible by 400
     temp = 4 * (dayN + DAYS_IN_100_YEARS + 1) / DAYS_IN_400_YEARS - 1;
-    var year = @intCast(u16, 100 * temp);
+    var year = @as(u16, @intCast(100 * temp));
     dayN -= DAYS_IN_100_YEARS * temp + temp / 4;
 
     // For Julian calendars, each year divisible by 4 is a leap year
     temp = 4 * (dayN + DAYS_PER_YEAR + 1) / DAYS_IN_4_YEARS - 1;
-    year += @intCast(u16, temp);
+    year += @as(u16, @intCast(temp));
     dayN -= DAYS_PER_YEAR * temp + temp / 4;
 
     // dayN calculates the days of the year in relation to March 1
-    var month = @intCast(u8, (5 * dayN + 2) / 153);
-    var day = @intCast(u8, dayN - (@intCast(u64, month) * 153 + 2) / 5 + 1);
+    var month = @as(u8, @intCast((5 * dayN + 2) / 153));
+    var day = @as(u8, @intCast(dayN - (@as(u64, @intCast(month)) * 153 + 2) / 5 + 1));
     //  153 = 31+30+31+30+31 Days for the 5 months from March through July
     //  153 = 31+30+31+30+31 Days for the 5 months from August through December
     //        31+28          Days for January and February (see below)
@@ -50,9 +50,9 @@ pub fn timestampToDateTime(timestamp: i64) DateTime {
         year += 1;
     }
 
-    var hours = @intCast(u8, seconds_since_midnight / 3600);
-    var minutes = @intCast(u8, seconds_since_midnight % 3600 / 60);
-    var seconds = @intCast(u8, seconds_since_midnight % 60);
+    var hours = @as(u8, @intCast(seconds_since_midnight / 3600));
+    var minutes = @as(u8, @intCast(seconds_since_midnight % 3600 / 60));
+    var seconds = @as(u8, @intCast(seconds_since_midnight % 60));
 
     return DateTime{ .day = day, .month = month, .year = year, .hour = hours, .minute = minutes, .second = seconds };
 }
@@ -72,7 +72,7 @@ pub fn parseEnglishToDateTime(data: []const u8) !DateTime {
     var state = EnglishParsingState.Start;
     // Anything not explicitly set by our string would be 0
     var rc = DateTime{ .year = 0, .month = 0, .day = 0, .hour = 0, .minute = 0, .second = 0 };
-    for (data) |ch, i| {
+    for (data, 0..) |ch, i| {
         _ = i;
         switch (ch) {
             ',' => {},
@@ -154,7 +154,7 @@ pub fn parseIso8601ToDateTime(data: []const u8) !DateTime {
     // Anything not explicitly set by our string would be 0
     var rc = DateTime{ .year = 0, .month = 0, .day = 0, .hour = 0, .minute = 0, .second = 0 };
     var zulu_time = false;
-    for (data) |ch, i| {
+    for (data, 0..) |ch, i| {
         _ = i;
         switch (ch) {
             '0', '1', '2', '3', '4', '5', '6', '7', '8', '9' => {

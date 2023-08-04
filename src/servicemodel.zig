@@ -7,7 +7,7 @@ pub fn Services(comptime service_imports: anytype) type {
     // From here, the fields of our structure can be generated at comptime...
     var fields: [serviceCount(service_imports)]std.builtin.TypeInfo.StructField = undefined;
 
-    for (fields) |*item, i| {
+    for (fields, 0..) |*item, i| {
         const import_field = @field(service_list, @tagName(service_imports[i]));
         item.* = .{
             .name = @tagName(service_imports[i]),

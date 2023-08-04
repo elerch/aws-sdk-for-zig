@@ -671,7 +671,7 @@ fn canonicalHeaderValue(allocator: std.mem.Allocator, value: []const u8) ![]cons
     var start: usize = 0;
     const rc = try allocator.alloc(u8, value.len);
     var rc_inx: usize = 0;
-    for (value) |c, i| {
+    for (value, 0..) |c, i| {
         if (!started and !std.ascii.isSpace(c)) {
             started = true;
             start = i;

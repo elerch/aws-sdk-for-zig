@@ -351,7 +351,7 @@ fn endpointException(
 fn s3BucketFromPath(path: []const u8) []const u8 {
     var in_bucket = false;
     var start: usize = 0;
-    for (path) |c, inx| {
+    for (path, 0..) |c, inx| {
         if (c == '/') {
             if (in_bucket) return path[start..inx];
             start = inx + 1;
@@ -370,7 +370,7 @@ fn endPointFromUri(allocator: std.mem.Allocator, uri: []const u8) !EndPoint {
     var port: u16 = 443;
     var host_start: usize = 0;
     var host_end: usize = 0;
-    for (uri) |ch, i| {
+    for (uri, 0..) |ch, i| {
         switch (ch) {
             ':' => {
                 if (!std.mem.eql(u8, scheme, "")) {

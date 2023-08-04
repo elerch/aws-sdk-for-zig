@@ -111,7 +111,7 @@ pub const Token = union(enum) {
         pub fn decodedLength(self: @This()) usize {
             return self.count +% switch (self.escapes) {
                 .None => 0,
-                .Some => |s| @bitCast(usize, s.size_diff),
+                .Some => |s| @as(usize, @bitCast(s.size_diff)),
             };
         }
 
@@ -247,7 +247,7 @@ pub const StreamingParser = struct {
         pub fn fromInt(x: anytype) State {
             debug.assert(x == 0 or x == 1);
             const T = std.meta.Tag(State);
-            return @intToEnum(State, @intCast(T, x));
+            return @as(State, @enumFromInt(@as(T, @intCast(x))));
         }
     };
 
@@ -1427,7 +1427,7 @@ fn parsedEqual(a: anytype, b: @TypeOf(a)) bool {
             }
         },
         .Array => {
-            for (a) |e, i|
+            for (a, 0..) |e, i|
                 if (!parsedEqual(e, b[i])) return false;
             return true;
         },
@@ -1441,7 +1441,7 @@ fn parsedEqual(a: anytype, b: @TypeOf(a)) bool {
             .One => return parsedEqual(a.*, b.*),
             .Slice => {
                 if (a.len != b.len) return false;
-                for (a) |e, i|
+                for (a, 0..) |e, i|
                     if (!parsedEqual(e, b[i])) return false;
                 return true;
             },
@@ -1585,7 +1585,7 @@ fn parseInternal(comptime T: type, token: Token, tokens: *TokenStream, options: 
                 return try std.fmt.parseInt(T, numberToken.slice(tokens.slice, tokens.i - 1), 10);
             const float = try std.fmt.parseFloat(f128, numberToken.slice(tokens.slice, tokens.i - 1));
             if (std.math.round(float) != float) return error.InvalidNumber;
-            return @floatToInt(T, float);
+            return @as(T, @intFromFloat(float));
         },
         .Optional => |optionalInfo| {
             if (token == .Null) {
@@ -1652,7 +1652,7 @@ fn parseInternal(comptime T: type, token: Token, tokens: *TokenStream, options: 
             errdefer {
                 // TODO: why so high here? This was needed for ec2 describe instances
                 @setEvalBranchQuota(100000);
-                inline for (structInfo.fields) |field, i| {
+                inline for (structInfo.fields, 0..) |field, i| {
                     if (fields_seen[i] and !field.is_comptime) {
                         parseFree(field.field_type, @field(r, field.name), options);
                     }
@@ -1665,7 +1665,7 @@ fn parseInternal(comptime T: type, token: Token, tokens: *TokenStream, options: 
                     .String => |stringToken| {
                         const key_source_slice = stringToken.slice(tokens.slice, tokens.i - 1);
                         var found = false;
-                        inline for (structInfo.fields) |field, i| {
+                        inline for (structInfo.fields, 0..) |field, i| {
                             // TODO: using switches here segfault the compiler (#2727?)
                             if ((stringToken.escapes == .None and mem.eql(u8, field.name, key_source_slice)) or (stringToken.escapes == .Some and (field.name.len == stringToken.decodedLength() and encodesTo(field.name, key_source_slice))) or (stringToken.escapes == .None and options.allow_camel_case_conversion and try camelCaseComp(field.name, key_source_slice, options)) or (stringToken.escapes == .None and options.allow_snake_case_conversion and try snakeCaseComp(field.name, key_source_slice, options))) {
                                 // if (switch (stringToken.escapes) {
@@ -1720,7 +1720,7 @@ fn parseInternal(comptime T: type, token: Token, tokens: *TokenStream, options: 
                     else => return error.UnexpectedToken,
                 }
             }
-            inline for (structInfo.fields) |field, i| {
+            inline for (structInfo.fields, 0..) |field, i| {
                 if (!fields_seen[i]) {
                     if (field.default_value) |default| {
                         if (!field.is_comptime) {
@@ -2705,7 +2705,7 @@ test "string copy option" {
     const copy_addr = &obj_copy.get("noescape").?.String[0];
 
     var found_nocopy = false;
-    for (input) |_, index| {
+    for (input, 0..) |_, index| {
         try testing.expect(copy_addr != &input[index]);
         if (nocopy_addr == &input[index]) {
             found_nocopy = true;
@@ -2784,8 +2784,8 @@ fn outputUnicodeEscape(
         assert(codepoint <= 0x10FFFF);
         // To escape an extended character that is not in the Basic Multilingual Plane,
         // the character is represented as a 12-character sequence, encoding the UTF-16 surrogate pair.
-        const high = @intCast(u16, (codepoint - 0x10000) >> 10) + 0xD800;
-        const low = @intCast(u16, codepoint & 0x3FF) + 0xDC00;
+        const high = @as(u16, @intCast((codepoint - 0x10000) >> 10)) + 0xD800;
+        const low = @as(u16, @intCast(codepoint & 0x3FF)) + 0xDC00;
         try out_stream.writeAll("\\u");
         try std.fmt.formatIntValue(high, "x", std.fmt.FormatOptions{ .width = 4, .fill = '0' }, out_stream);
         try out_stream.writeAll("\\u");
@@ -2957,7 +2957,7 @@ pub fn stringify(
                 if (child_options.whitespace) |*whitespace| {
                     whitespace.indent_level += 1;
                 }
-                for (value) |x, i| {
+                for (value, 0..) |x, i| {
                     if (i != 0) {
                         try out_stream.writeByte(',');
                     }
