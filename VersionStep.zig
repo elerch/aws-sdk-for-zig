@@ -44,7 +44,7 @@ fn make(step: *std.build.Step) !void {
         \\pub const abbreviated_hash = "{s}";
         \\pub const commit_date = "{s}";
         \\pub const branch = "{s}";
-        \\pub const dirty = {b};
+        \\pub const dirty = {};
         \\pub const pretty_version = "{s}";
     , .{
         version.hash,

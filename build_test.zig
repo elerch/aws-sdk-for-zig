@@ -8,12 +8,16 @@ const std = @import("std");
 
 pub fn addTestStep(b: *std.build.Builder, mode: std.builtin.Mode, packages: []std.build.Pkg) !*std.build.Step {
     const test_step = b.step("test", "Run all tests");
-    var src_dir = try std.fs.openDirAbsolute(try std.fs.path.resolve(b.allocator, &[_][]const u8{
+    const src_path = try std.fs.path.resolve(b.allocator, &[_][]const u8{
         b.build_root,
         "src",
-    }), .{ .iterate = true });
+    });
+    defer b.allocator.free(src_path);
+    var src_dir = try std.fs.openDirAbsolute(src_path, .{});
     defer src_dir.close();
-    var iterator = src_dir.iterate();
+    var iterable = try src_dir.openIterableDir(".", .{});
+    defer iterable.close();
+    var iterator = iterable.iterate();
     while (try iterator.next()) |entry| {
         if (std.mem.endsWith(u8, entry.name, ".zig")) {
             const name = try std.fmt.allocPrint(b.allocator, "src/{s}", .{entry.name});

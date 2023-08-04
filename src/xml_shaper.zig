@@ -69,7 +69,7 @@ fn deinitObject(allocator: std.mem.Allocator, obj: anytype) void {
 // should we just use json parse options?
 pub const ParseOptions = struct {
     allocator: ?std.mem.Allocator = null,
-    match_predicate: ?fn (a: []const u8, b: []const u8, options: xml.PredicateOptions) anyerror!bool = null,
+    match_predicate_ptr: ?*const fn (a: []const u8, b: []const u8, options: xml.PredicateOptions) anyerror!bool = null,
 };
 
 pub fn parse(comptime T: type, source: []const u8, options: ParseOptions) !Parsed(T) {

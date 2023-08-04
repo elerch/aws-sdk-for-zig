@@ -65,7 +65,7 @@ fn processFile(arg: []const u8, stdout: anytype, manifest: anytype) !void {
 }
 
 fn generateServicesForFilePath(allocator: std.mem.Allocator, comptime terminator: []const u8, path: []const u8, writer: anytype) ![][]const u8 {
-    const file = try std.fs.cwd().openFile(path, .{ .read = true, .write = false });
+    const file = try std.fs.cwd().openFile(path, .{});
     defer file.close();
     return try generateServices(allocator, terminator, file, writer);
 }
@@ -209,7 +209,7 @@ fn generateServices(allocator: std.mem.Allocator, comptime _: []const u8, file: 
         try writer.print("pub const sigv4_name: []const u8 = \"{s}\";\n", .{sigv4_name});
         try writer.print("pub const name: []const u8 = \"{s}\";\n", .{name});
         // TODO: This really should just be ".whatevs". We're fully qualifying here, which isn't typical
-        try writer.print("pub const aws_protocol: smithy.AwsProtocol = smithy.{s};\n\n", .{aws_protocol});
+        try writer.print("pub const aws_protocol: smithy.AwsProtocol = smithy.{};\n\n", .{aws_protocol});
         _ = try writer.write("pub const service_metadata: struct {\n");
         try writer.print("    version: []const u8 = \"{s}\",\n", .{version});
         try writer.print("    sdk_id: []const u8 = \"{s}\",\n", .{sdk_id});
@@ -218,7 +218,7 @@ fn generateServices(allocator: std.mem.Allocator, comptime _: []const u8, file: 
         try writer.print("    sigv4_name: []const u8 = \"{s}\",\n", .{sigv4_name});
         try writer.print("    name: []const u8 = \"{s}\",\n", .{name});
         // TODO: This really should just be ".whatevs". We're fully qualifying here, which isn't typical
-        try writer.print("    aws_protocol: smithy.AwsProtocol = smithy.{s},\n", .{aws_protocol});
+        try writer.print("    aws_protocol: smithy.AwsProtocol = smithy.{},\n", .{aws_protocol});
         _ = try writer.write("} = .{};\n");
 
         // Operations
@@ -591,15 +591,15 @@ fn generateComplexTypeFor(shape_id: []const u8, members: []smithy.TypeMember, ty
         var found_name_trait = false;
         for (member.traits) |trait| {
             switch (trait) {
-                .json_name => {
+                .json_name => |n| {
                     found_name_trait = true;
-                    field_name_mappings.appendAssumeCapacity(.{ .snake = try state.allocator.dupe(u8, snake_case_member), .original = trait.json_name });
+                    field_name_mappings.appendAssumeCapacity(.{ .snake = try state.allocator.dupe(u8, snake_case_member), .original = n });
                 },
-                .xml_name => {
+                .xml_name => |n| {
                     found_name_trait = true;
-                    field_name_mappings.appendAssumeCapacity(.{ .snake = try state.allocator.dupe(u8, snake_case_member), .original = trait.xml_name });
+                    field_name_mappings.appendAssumeCapacity(.{ .snake = try state.allocator.dupe(u8, snake_case_member), .original = n });
                 },
-                .http_query => http_query_mappings.appendAssumeCapacity(.{ .snake = try state.allocator.dupe(u8, snake_case_member), .original = trait.http_query }),
+                .http_query => |n| http_query_mappings.appendAssumeCapacity(.{ .snake = try state.allocator.dupe(u8, snake_case_member), .original = n }),
                 .http_header => http_header_mappings.appendAssumeCapacity(.{ .snake = try state.allocator.dupe(u8, snake_case_member), .original = trait.http_header }),
                 .http_payload => {
                     // Don't assert as that will be optimized for Release* builds

@@ -2,7 +2,7 @@ const std = @import("std");
 const service_list = @import("models/service_manifest.zig");
 const expectEqualStrings = std.testing.expectEqualStrings;
 
-pub fn Services(service_imports: anytype) type {
+pub fn Services(comptime service_imports: anytype) type {
     if (service_imports.len == 0) return services;
     // From here, the fields of our structure can be generated at comptime...
     var fields: [serviceCount(service_imports)]std.builtin.TypeInfo.StructField = undefined;
@@ -12,7 +12,7 @@ pub fn Services(service_imports: anytype) type {
         item.* = .{
             .name = @tagName(service_imports[i]),
             .field_type = @TypeOf(import_field),
-            .default_value = import_field,
+            .default_value = &import_field,
             .is_comptime = false,
             .alignment = 0,
         };

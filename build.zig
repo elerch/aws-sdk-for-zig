@@ -68,7 +68,7 @@ pub fn build(b: *Builder) !void {
     test_step.dependOn(&version.step);
 
     var codegen: ?*std.build.Step = null;
-    if (target.getOs().tag == .linux) {
+    if (target.getOs().tag == .linux and false) {
         // TODO: Support > linux with RunStep
         // std.build.RunStep.create(null,null).cwd(std.fs.path.resolve(b.build_root, "codegen")).addArgs(...)
         codegen = b.step("gen", "Generate zig service code from smithy models");
@@ -116,7 +116,7 @@ fn getDependency(comptime lib_prefix: []const u8, comptime name: []const u8, com
 
     return std.build.Pkg{
         .name = name,
-        .path = .{ .path = path },
+        .source = .{ .path = path },
     };
 }
 
@@ -130,7 +130,7 @@ pub fn getZfetchPackage(b: *std.build.Builder, comptime lib_prefix: []const u8) 
 
     return std.build.Pkg{
         .name = "zfetch",
-        .path = .{ .path = lib_prefix ++ "/src/main.zig" },
+        .source = .{ .path = lib_prefix ++ "/src/main.zig" },
         .dependencies = dependencies,
     };
 }

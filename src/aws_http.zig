@@ -21,7 +21,7 @@ const US_ISOB_EAST_1_HASH = std.hash_map.hashString("us-isob-east-1");
 
 const log = std.log.scoped(.awshttp);
 
-const amazon_root_ca_1 = @embedFile("../Amazon_Root_CA_1.pem");
+const amazon_root_ca_1 = @embedFile("Amazon_Root_CA_1.pem");
 
 pub const default_root_ca = amazon_root_ca_1;
 

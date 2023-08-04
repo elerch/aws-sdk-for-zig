@@ -27,7 +27,7 @@ url: []const u8,
 name: []const u8,
 branch: ?[]const u8 = null,
 sha: []const u8,
-path: []const u8 = null,
+path: ?[]const u8 = null,
 sha_check: ShaCheck = .warn,
 fetch_enabled: bool,
 
@@ -82,12 +82,12 @@ fn hasDependency(step: *const std.build.Step, dep_candidate: *const std.build.St
 fn make(step: *std.build.Step) !void {
     const self = @fieldParentPtr(GitRepoStep, "step", step);
 
-    std.fs.accessAbsolute(self.path, std.fs.File.OpenFlags{ .read = true }) catch {
+    std.fs.accessAbsolute(self.path.?, .{ .mode = .read_only }) catch {
         const branch_args = if (self.branch) |b| &[2][]const u8{ " -b ", b } else &[2][]const u8{ "", "" };
         if (!self.fetch_enabled) {
-            std.debug.print("Error: git repository '{s}' does not exist\n", .{self.path});
+            std.debug.print("Error: git repository '{s}' does not exist\n", .{self.path.?});
             std.debug.print("       Use -Dfetch to download it automatically, or run the following to clone it:\n", .{});
-            std.debug.print("       git clone {s}{s}{s} {s} && git -C {3s} checkout {s} -b for_ziget\n", .{ self.url, branch_args[0], branch_args[1], self.path, self.sha });
+            std.debug.print("       git clone {s}{s}{s} {s} && git -C {3s} checkout {s} -b for_ziget\n", .{ self.url, branch_args[0], branch_args[1], self.path.?, self.sha });
             std.os.exit(1);
         }
 
@@ -102,7 +102,7 @@ fn make(step: *std.build.Step) !void {
             try args.append(self.url);
             // TODO: clone it to a temporary location in case of failure
             //       also, remove that temporary location before running
-            try args.append(self.path);
+            try args.append(self.path.?);
             if (self.branch) |branch| {
                 try args.append("-b");
                 try args.append(branch);
@@ -112,7 +112,7 @@ fn make(step: *std.build.Step) !void {
         try run(self.builder, &[_][]const u8{
             "git",
             "-C",
-            self.path,
+            self.path.?,
             "checkout",
             self.sha,
             "-b",
@@ -123,7 +123,7 @@ fn make(step: *std.build.Step) !void {
         try run(self.builder, &[_][]const u8{
             "git",
             "-C",
-            self.path,
+            self.path.?,
             "submodule",
             "update",
             "--init",
@@ -144,7 +144,7 @@ fn checkSha(self: GitRepoStep) !void {
             .argv = &[_][]const u8{
                 "git",
                 "-C",
-                self.path,
+                self.path.?,
                 "rev-parse",
                 "HEAD",
             },
@@ -187,8 +187,7 @@ fn run(builder: *std.build.Builder, argv: []const []const u8) !void {
         std.log.debug("[RUN] {s}", .{msg.items});
     }
 
-    const child = try std.ChildProcess.init(argv, builder.allocator);
-    defer child.deinit();
+    var child = std.ChildProcess.init(argv, builder.allocator);
 
     child.stdin_behavior = .Ignore;
     child.stdout_behavior = .Inherit;

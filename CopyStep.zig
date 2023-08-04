@@ -3,8 +3,8 @@ const CopyStep = @This();
 
 step: std.build.Step,
 builder: *std.build.Builder,
-from_path: []const u8 = null,
-to_path: []const u8 = null,
+from_path: ?[]const u8 = null,
+to_path: ?[]const u8 = null,
 
 pub fn create(
     b: *std.build.Builder,
@@ -29,8 +29,8 @@ pub fn create(
 
 fn make(step: *std.build.Step) !void {
     const self = @fieldParentPtr(CopyStep, "step", step);
-    std.fs.copyFileAbsolute(self.from_path, self.to_path, .{}) catch |e| {
-        std.log.err("Error copying {s} to {s}: {s}", .{ self.from_path, self.to_path, e });
+    std.fs.copyFileAbsolute(self.from_path.?, self.to_path.?, .{}) catch |e| {
+        std.log.err("Error copying {s} to {s}: {}", .{ self.from_path.?, self.to_path.?, e });
         std.os.exit(1);
     };
 }

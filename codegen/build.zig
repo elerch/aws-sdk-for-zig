@@ -40,11 +40,11 @@ pub fn build(b: *std.build.Builder) !void {
     run_step.dependOn(&run_cmd.step);
 
     const test_step = b.step("test", "Run library tests");
-    var build_dir = try std.fs.openDirAbsolute(b.build_root, .{});
-    defer build_dir.close();
-    var src_dir = try build_dir.openDir("src", .{ .iterate = true });
+    var src_dir = try std.fs.openDirAbsolute(b.build_root, .{});
     defer src_dir.close();
-    var iterator = src_dir.iterate();
+    var iterable = try src_dir.openIterableDir(".", .{});
+    defer iterable.close();
+    var iterator = iterable.iterate();
     while (try iterator.next()) |entry| {
         if (std.mem.endsWith(u8, entry.name, ".zig") and
             !std.mem.eql(u8, entry.name, "main.zig"))

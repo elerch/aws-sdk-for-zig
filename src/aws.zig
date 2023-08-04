@@ -58,12 +58,12 @@ pub const Client = struct {
 /// parameters. If all parameters are known at comptime, the call function
 /// may be simpler to use. request parameter here refers to the action
 /// constant from the model, e.g. Request(services.lambda.list_functions)
-pub fn Request(comptime action: anytype) type {
+pub fn Request(comptime request_action: anytype) type {
     return struct {
         const ActionRequest = action.Request;
         const FullResponseType = FullResponse(action);
         const Self = @This();
-        const action = action;
+        const action = request_action;
         const meta_info = ActionRequest.metaInfo();
         const service_meta = meta_info.service_metadata;
 

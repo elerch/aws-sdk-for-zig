@@ -64,9 +64,7 @@ pub fn main() anyerror!void {
     defer tests.deinit();
     var args = std.process.args();
     var first = true;
-    while (args.next(allocator)) |arg_or_error| {
-        const arg = try arg_or_error;
-        defer allocator.free(arg);
+    while (args.next()) |arg| {
         if (first)
             std.log.info("{s} {s}", .{ arg, version.pretty_version });
         first = false;
