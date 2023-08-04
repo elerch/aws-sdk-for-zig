@@ -73,7 +73,6 @@ pub fn parseEnglishToDateTime(data: []const u8) !DateTime {
     // Anything not explicitly set by our string would be 0
     var rc = DateTime{ .year = 0, .month = 0, .day = 0, .hour = 0, .minute = 0, .second = 0 };
     for (data, 0..) |ch, i| {
-        _ = i;
         switch (ch) {
             ',' => {},
             ' ', ':' => {
@@ -155,7 +154,6 @@ pub fn parseIso8601ToDateTime(data: []const u8) !DateTime {
     var rc = DateTime{ .year = 0, .month = 0, .day = 0, .hour = 0, .minute = 0, .second = 0 };
     var zulu_time = false;
     for (data, 0..) |ch, i| {
-        _ = i;
         switch (ch) {
             '0', '1', '2', '3', '4', '5', '6', '7', '8', '9' => {
                 if (state == .Start) state = .Year;
