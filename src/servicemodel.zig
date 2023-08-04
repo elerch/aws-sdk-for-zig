@@ -5,13 +5,13 @@ const expectEqualStrings = std.testing.expectEqualStrings;
 pub fn Services(comptime service_imports: anytype) type {
     if (service_imports.len == 0) return services;
     // From here, the fields of our structure can be generated at comptime...
-    var fields: [serviceCount(service_imports)]std.builtin.TypeInfo.StructField = undefined;
+    var fields: [serviceCount(service_imports)]std.builtin.Type.StructField = undefined;
 
-    for (fields, 0..) |*item, i| {
+    for (&fields, 0..) |*item, i| {
         const import_field = @field(service_list, @tagName(service_imports[i]));
         item.* = .{
             .name = @tagName(service_imports[i]),
-            .field_type = @TypeOf(import_field),
+            .type = @TypeOf(import_field),
             .default_value = &import_field,
             .is_comptime = false,
             .alignment = 0,
@@ -23,7 +23,7 @@ pub fn Services(comptime service_imports: anytype) type {
         .Struct = .{
             .layout = .Auto,
             .fields = &fields,
-            .decls = &[_]std.builtin.TypeInfo.Declaration{},
+            .decls = &[_]std.builtin.Type.Declaration{},
             .is_tuple = false,
         },
     });
