@@ -1,7 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const Builder = @import("std").build.Builder;
-const tst = @import("build_test.zig");
 
 pub fn build(b: *Builder) !void {
     // Standard target options allows the person running `zig build` to choose
@@ -44,8 +43,7 @@ pub fn build(b: *Builder) !void {
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
 
-    // TODO: Demo for testing is kind of terrible. Proper testing
-    // var test_step = try tst.addTestStep(b, optimize, exe.packages.items);
+    // TODO: Proper testing
 
     var codegen: ?*std.build.Step = null;
     if (target.getOs().tag == .linux and false) {
