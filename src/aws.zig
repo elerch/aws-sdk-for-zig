@@ -27,9 +27,7 @@ pub const services = servicemodel.services;
 /// This will give you a constant with service data for sts, ec2, s3 and ddb only
 pub const Services = servicemodel.Services;
 
-pub const ClientOptions = struct {
-    trust_pem: ?[]const u8 = awshttp.default_root_ca,
-};
+pub const ClientOptions = struct {};
 pub const Client = struct {
     allocator: std.mem.Allocator,
     aws_http: awshttp.AwsHttp,
@@ -37,9 +35,10 @@ pub const Client = struct {
     const Self = @This();
 
     pub fn init(allocator: std.mem.Allocator, options: ClientOptions) !Self {
+        _ = options;
         return Self{
             .allocator = allocator,
-            .aws_http = try awshttp.AwsHttp.init(allocator, options.trust_pem),
+            .aws_http = try awshttp.AwsHttp.init(allocator),
         };
     }
     pub fn deinit(self: *Client) void {
@@ -208,7 +207,7 @@ pub fn Request(comptime request_action: anytype) type {
                 .query = "",
                 .body = buffer.items,
                 .content_type = content_type,
-                .headers = &[_]awshttp.Header{.{ .name = "X-Amz-Target", .value = target }},
+                .headers = @constCast(&[_]awshttp.Header{.{ .name = "X-Amz-Target", .value = target }}),
             }, options);
         }
 
@@ -221,9 +220,8 @@ pub fn Request(comptime request_action: anytype) type {
             var buffer = std.ArrayList(u8).init(options.client.allocator);
             defer buffer.deinit();
             const writer = buffer.writer();
-            try url.encode(request, writer, .{
+            try url.encode(options.client.allocator, request, writer, .{
                 .field_name_transformer = &queryFieldTransformer,
-                .allocator = options.client.allocator,
             });
             const continuation = if (buffer.items.len > 0) "&" else "";
 
@@ -556,7 +554,7 @@ pub fn Request(comptime request_action: anytype) type {
             // scenario, then parse as appropriate later
             const SRawResponse = if (Self.service_meta.aws_protocol != .query and
                 std.meta.fields(action.Response).len == 1)
-                std.meta.fields(action.Response)[0].field_type
+                std.meta.fields(action.Response)[0].type
             else
                 NullType;
 
@@ -635,7 +633,7 @@ pub fn Request(comptime request_action: anytype) type {
             };
             return ParsedJsonData(response_types.NormalResponse){
                 .raw_response_parsed = raw_response_parsed,
-                .parsed_response_ptr = parsed_response_ptr,
+                .parsed_response_ptr = @constCast(parsed_response_ptr), //TODO: why doesn't changing const->var above fix this?
                 .allocator = options.client.allocator,
             };
         }
@@ -792,39 +790,39 @@ fn ServerResponse(comptime action: anytype) type {
     const Result = @Type(.{
         .Struct = .{
             .layout = .Auto,
-            .fields = &[_]std.builtin.TypeInfo.StructField{
+            .fields = &[_]std.builtin.Type.StructField{
                 .{
                     .name = action.action_name ++ "Result",
-                    .field_type = T,
+                    .type = T,
                     .default_value = null,
                     .is_comptime = false,
                     .alignment = 0,
                 },
                 .{
                     .name = "ResponseMetadata",
-                    .field_type = ResponseMetadata,
+                    .type = ResponseMetadata,
                     .default_value = null,
                     .is_comptime = false,
                     .alignment = 0,
                 },
             },
-            .decls = &[_]std.builtin.TypeInfo.Declaration{},
+            .decls = &[_]std.builtin.Type.Declaration{},
             .is_tuple = false,
         },
     });
     return @Type(.{
         .Struct = .{
             .layout = .Auto,
-            .fields = &[_]std.builtin.TypeInfo.StructField{
+            .fields = &[_]std.builtin.Type.StructField{
                 .{
                     .name = action.action_name ++ "Response",
-                    .field_type = Result,
+                    .type = Result,
                     .default_value = null,
                     .is_comptime = false,
                     .alignment = 0,
                 },
             },
-            .decls = &[_]std.builtin.TypeInfo.Declaration{},
+            .decls = &[_]std.builtin.Type.Declaration{},
             .is_tuple = false,
         },
     });
@@ -885,8 +883,9 @@ fn FullResponse(comptime action: anytype) type {
         }
     };
 }
-fn queryFieldTransformer(field_name: []const u8, encoding_options: url.EncodingOptions) anyerror![]const u8 {
-    return try case.snakeToPascal(encoding_options.allocator.?, field_name);
+fn queryFieldTransformer(allocator: std.mem.Allocator, field_name: []const u8, options: url.EncodingOptions) anyerror![]const u8 {
+    _ = options;
+    return try case.snakeToPascal(allocator, field_name);
 }
 
 fn buildPath(
@@ -984,24 +983,15 @@ fn buildQuery(allocator: std.mem.Allocator, request: anytype) ![]const u8 {
     const writer = buffer.writer();
     defer buffer.deinit();
     var prefix = "?";
-    const Req = @TypeOf(request);
-    if (declaration(Req, "http_query") == null)
-        return buffer.toOwnedSlice();
-    const query_arguments = Req.http_query;
+    // TODO: This was a pain before, and it's a pain now. Clearly our codegen
+    //       needs to emit a declaration 100% of the time
+    const query_arguments = @TypeOf(request).http_query;
     inline for (@typeInfo(@TypeOf(query_arguments)).Struct.fields) |arg| {
         const val = @field(request, arg.name);
-        if (try addQueryArg(arg.field_type, prefix, @field(query_arguments, arg.name), val, writer))
+        if (try addQueryArg(arg.type, prefix, @field(query_arguments, arg.name), val, writer))
             prefix = "&";
     }
     return buffer.toOwnedSlice();
-}
-
-fn declaration(comptime T: type, name: []const u8) ?std.builtin.TypeInfo.Declaration {
-    for (std.meta.declarations(T)) |decl| {
-        if (std.mem.eql(u8, name, decl.name))
-            return decl;
-    }
-    return null;
 }
 
 fn addQueryArg(comptime ValueType: type, prefix: []const u8, key: []const u8, value: anytype, writer: anytype) !bool {
@@ -1044,7 +1034,9 @@ fn addBasicQueryArg(prefix: []const u8, key: []const u8, value: anytype, writer:
     // TODO: url escaping
     try uriEncode(key, writer, true);
     _ = try writer.write("=");
-    try json.stringify(value, .{}, ignoringWriter(uriEncodingWriter(writer).writer(), '"').writer());
+    var encoding_writer = uriEncodingWriter(writer);
+    var ignoring_writer = ignoringWriter(encoding_writer.writer(), '"');
+    try json.stringify(value, .{}, ignoring_writer.writer());
     return true;
 }
 pub fn uriEncodingWriter(child_stream: anytype) UriEncodingWriter(@TypeOf(child_stream)) {
@@ -1135,7 +1127,7 @@ fn typeForField(comptime T: type, field_name: []const u8) !type {
         .Struct => {
             inline for (ti.Struct.fields) |field| {
                 if (std.mem.eql(u8, field.name, field_name))
-                    return field.field_type;
+                    return field.type;
             }
         },
         else => return error.TypeIsNotAStruct, // should not hit this

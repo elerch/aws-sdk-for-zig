@@ -83,7 +83,7 @@ pub fn parse(comptime T: type, source: []const u8, options: ParseOptions) !Parse
     errdefer parsed.deinit();
     const opts = ParseOptions{
         .allocator = aa,
-        .match_predicate = options.match_predicate,
+        .match_predicate_ptr = options.match_predicate_ptr,
     };
 
     return Parsed(T).init(arena_allocator, try parseInternal(T, parsed.root, opts), parsed);
@@ -123,7 +123,7 @@ fn parseInternal(comptime T: type, element: *xml.Element, options: ParseOptions)
                     // We have an iso8601 in an integer field (we think)
                     // Try to coerce this into our type
                     const timestamp = try date.parseIso8601ToTimestamp(element.children.items[0].CharData);
-                    return try std.math.cast(T, timestamp);
+                    return std.math.cast(T, timestamp).?;
                 }
                 if (log_parse_traces) {
                     std.log.err(
@@ -167,7 +167,7 @@ fn parseInternal(comptime T: type, element: *xml.Element, options: ParseOptions)
                 // inline for (union_info.fields) |u_field| {
                 //     // take a copy of tokens so we can withhold mutations until success
                 //     var tokens_copy = tokens.*;
-                //     if (parseInternal(u_field.field_type, token, &tokens_copy, options)) |value| {
+                //     if (parseInternal(u_field.type, token, &tokens_copy, options)) |value| {
                 //         tokens.* = tokens_copy;
                 //         return @unionInit(T, u_field.name, value);
                 //     } else |err| {
@@ -193,7 +193,7 @@ fn parseInternal(comptime T: type, element: *xml.Element, options: ParseOptions)
             //     @setEvalBranchQuota(100000);
             //     inline for (struct_info.fields) |field, i| {
             //         if (fields_seen[i] and !field.is_comptime) {
-            //             parseFree(field.field_type, @field(r, field.name), options);
+            //             parseFree(field.type, @field(r, field.name), options);
             //         }
             //     }
             // }
@@ -220,31 +220,31 @@ fn parseInternal(comptime T: type, element: *xml.Element, options: ParseOptions)
                     name = r.fieldNameFor(field.name);
                 log.debug("Field name: {s}, Element: {s}, Adjusted field name: {s}", .{ field.name, element.tag, name });
                 var iterator = element.findChildrenByTag(name);
-                if (options.match_predicate) |predicate| {
-                    iterator.predicate = predicate;
+                if (options.match_predicate_ptr) |predicate_ptr| {
+                    iterator.predicate = predicate_ptr;
                     iterator.predicate_options = .{ .allocator = options.allocator.? };
                 }
                 if (try iterator.next()) |child| {
                     // I don't know that we would use comptime here. I'm also
                     // not sure the nuance of setting this...
                     // if (field.is_comptime) {
-                    //     if (!try parsesTo(field.field_type, field.default_value.?, tokens, options)) {
+                    //     if (!try parsesTo(field.type, field.default_value.?, tokens, options)) {
                     //         return error.UnexpectedValue;
                     //     }
                     // } else {
                     log.debug("Found child element {s}", .{child.tag});
                     // TODO: how do we errdefer this?
-                    @field(r, field.name) = try parseInternal(field.field_type, child, options);
+                    @field(r, field.name) = try parseInternal(field.type, child, options);
                     fields_seen[i] = true;
                     fields_set = fields_set + 1;
                     found_value = true;
                 }
-                if (@typeInfo(field.field_type) == .Optional) {
+                if (@typeInfo(field.type) == .Optional) {
                     // Test "compiler assertion failure 2"
                     // Zig compiler bug circa 0.9.0. Using "and !found_value"
                     // in the if statement above will trigger assertion failure
                     if (!found_value) {
-                        // @compileLog("Optional: Field name ", field.name, ", type ", field.field_type);
+                        // @compileLog("Optional: Field name ", field.name, ", type ", field.type);
                         @field(r, field.name) = null;
                         fields_set = fields_set + 1;
                         found_value = true;

@@ -209,7 +209,7 @@ fn generateServices(allocator: std.mem.Allocator, comptime _: []const u8, file: 
         try writer.print("pub const sigv4_name: []const u8 = \"{s}\";\n", .{sigv4_name});
         try writer.print("pub const name: []const u8 = \"{s}\";\n", .{name});
         // TODO: This really should just be ".whatevs". We're fully qualifying here, which isn't typical
-        try writer.print("pub const aws_protocol: smithy.AwsProtocol = smithy.{};\n\n", .{aws_protocol});
+        try writer.print("pub const aws_protocol: smithy.AwsProtocol = {};\n\n", .{aws_protocol});
         _ = try writer.write("pub const service_metadata: struct {\n");
         try writer.print("    version: []const u8 = \"{s}\",\n", .{version});
         try writer.print("    sdk_id: []const u8 = \"{s}\",\n", .{sdk_id});
@@ -218,7 +218,7 @@ fn generateServices(allocator: std.mem.Allocator, comptime _: []const u8, file: 
         try writer.print("    sigv4_name: []const u8 = \"{s}\",\n", .{sigv4_name});
         try writer.print("    name: []const u8 = \"{s}\",\n", .{name});
         // TODO: This really should just be ".whatevs". We're fully qualifying here, which isn't typical
-        try writer.print("    aws_protocol: smithy.AwsProtocol = smithy.{},\n", .{aws_protocol});
+        try writer.print("    aws_protocol: smithy.AwsProtocol = {},\n", .{aws_protocol});
         _ = try writer.write("} = .{};\n");
 
         // Operations

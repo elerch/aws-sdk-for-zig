@@ -7,7 +7,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const auth = @import("aws_authentication.zig");
-const zfetch = @import("zfetch");
 
 const log = std.log.scoped(.aws_credentials);
 
@@ -114,28 +113,32 @@ fn getContainerCredentials(allocator: std.mem.Allocator) !?auth.Credentials {
     // from s3 and run
     const container_relative_uri = (try getEnvironmentVariable(allocator, "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI")) orelse return null;
     defer allocator.free(container_relative_uri);
-    try zfetch.init();
-    defer zfetch.deinit();
     const container_uri = try std.fmt.allocPrint(allocator, "http://169.254.170.2{s}", .{container_relative_uri});
     defer allocator.free(container_uri);
 
-    var req = try zfetch.Request.init(allocator, container_uri, null);
+    var empty_headers = std.http.Headers.init(allocator);
+    defer empty_headers.deinit();
+    var cl = std.http.Client{ .allocator = allocator };
+    defer cl.deinit(); // I don't belive connection pooling would help much here as it's non-ssl and local
+    var req = try cl.request(.GET, try std.Uri.parse(container_uri), empty_headers, .{});
     defer req.deinit();
-    try req.do(.GET, null, null);
-    if (req.status.code != 200 and req.status.code != 404) {
-        log.warn("Bad status code received from container credentials endpoint: {}", .{req.status.code});
+    try req.start();
+    try req.wait();
+    if (req.response.status != .ok and req.response.status != .not_found) {
+        log.warn("Bad status code received from container credentials endpoint: {}", .{@intFromEnum(req.response.status)});
         return null;
     }
-    if (req.status.code == 404) return null;
-    const reader = req.reader();
-    var buf: [2048]u8 = undefined;
-    const read = try reader.read(&buf);
-    if (read == 2048) {
-        log.warn("Unexpected long response from container credentials endpoint: {s}", .{buf});
-        return null;
-    }
-    log.debug("Read {d} bytes from container credentials endpoint", .{read});
-    if (read == 0) return null;
+    if (req.response.status == .not_found) return null;
+    if (req.response.content_length == null or req.response.content_length.? == 0) return null;
+
+    var resp_payload = try std.ArrayList(u8).initCapacity(allocator, req.response.content_length.?);
+    defer resp_payload.deinit();
+    try resp_payload.resize(req.response.content_length.?);
+    var response_data = try resp_payload.toOwnedSlice();
+    defer allocator.free(response_data);
+    _ = try req.readAll(response_data);
+    log.debug("Read {d} bytes from container credentials endpoint", .{response_data.len});
+    if (response_data.len == 0) return null;
 
     const CredsResponse = struct {
         AccessKeyId: []const u8,
@@ -145,9 +148,8 @@ fn getContainerCredentials(allocator: std.mem.Allocator) !?auth.Credentials {
         Token: []const u8,
     };
     const creds_response = blk: {
-        var stream = std.json.TokenStream.init(buf[0..read]);
-        const res = std.json.parse(CredsResponse, &stream, .{ .allocator = allocator }) catch |e| {
-            log.err("Unexpected Json response from container credentials endpoint: {s}", .{buf});
+        const res = std.json.parseFromSlice(CredsResponse, allocator, response_data, .{}) catch |e| {
+            log.err("Unexpected Json response from container credentials endpoint: {s}", .{response_data});
             log.err("Error parsing json: {}", .{e});
             if (@errorReturnTrace()) |trace| {
                 std.debug.dumpStackTrace(trace.*);
@@ -157,83 +159,92 @@ fn getContainerCredentials(allocator: std.mem.Allocator) !?auth.Credentials {
         };
         break :blk res;
     };
-    defer std.json.parseFree(CredsResponse, creds_response, .{ .allocator = allocator });
+    defer creds_response.deinit();
 
     return auth.Credentials.init(
         allocator,
-        try allocator.dupe(u8, creds_response.AccessKeyId),
-        try allocator.dupe(u8, creds_response.SecretAccessKey),
-        try allocator.dupe(u8, creds_response.Token),
+        try allocator.dupe(u8, creds_response.value.AccessKeyId),
+        try allocator.dupe(u8, creds_response.value.SecretAccessKey),
+        try allocator.dupe(u8, creds_response.value.Token),
     );
 }
 
 fn getImdsv2Credentials(allocator: std.mem.Allocator) !?auth.Credentials {
-    try zfetch.init();
-    defer zfetch.deinit();
-
-    var token: [1024]u8 = undefined;
-    var len: usize = undefined;
+    var token: ?[]u8 = null;
+    defer if (token) |t| allocator.free(t);
+    var cl = std.http.Client{ .allocator = allocator };
+    defer cl.deinit(); // I don't belive connection pooling would help much here as it's non-ssl and local
     // Get token
     {
-        var headers = zfetch.Headers.init(allocator);
+        var headers = std.http.Headers.init(allocator);
         defer headers.deinit();
-
-        try headers.appendValue("X-aws-ec2-metadata-token-ttl-seconds", "21600");
-        var req = try zfetch.Request.init(allocator, "http://169.254.169.254/latest/api/token", null);
+        try headers.append("X-aws-ec2-metadata-token-ttl-seconds", "21600");
+        var req = try cl.request(.PUT, try std.Uri.parse("http://169.254.169.254/latest/api/token"), headers, .{});
         defer req.deinit();
-        try req.do(.PUT, headers, "");
-        if (req.status.code != 200) {
-            log.warn("Bad status code received from IMDS v2: {}", .{req.status.code});
+        try req.start();
+        try req.wait();
+        if (req.response.status != .ok) {
+            log.warn("Bad status code received from IMDS v2: {}", .{@intFromEnum(req.response.status)});
             return null;
         }
-        const reader = req.reader();
-        const read = try reader.read(&token);
-        if (read == 0 or read == 1024) {
-            log.warn("Unexpected zero or long response from IMDS v2: {s}", .{token});
+        if (req.response.content_length == null or req.response.content_length == 0) {
+            log.warn("Unexpected zero response from IMDS v2", .{});
             return null;
         }
-        len = read;
+
+        var resp_payload = try std.ArrayList(u8).initCapacity(allocator, req.response.content_length.?);
+        defer resp_payload.deinit();
+        try resp_payload.resize(req.response.content_length.?);
+        token = try resp_payload.toOwnedSlice();
+        errdefer allocator.free(token);
+        _ = try req.readAll(token.?);
     }
-    log.debug("Got token from IMDSv2", .{});
-    const role_name = try getImdsRoleName(allocator, token[0..len]);
+    std.debug.assert(token != null);
+    log.debug("Got token from IMDSv2: {s}", .{token.?});
+    const role_name = try getImdsRoleName(allocator, &cl, token.?);
     if (role_name == null) {
         log.info("No role is associated with this instance", .{});
         return null;
     }
     defer allocator.free(role_name.?);
     log.debug("Got role name '{s}'", .{role_name});
-    return getImdsCredentials(allocator, role_name.?, token[0..len]);
+    return getImdsCredentials(allocator, &cl, role_name.?, token.?);
 }
 
-fn getImdsRoleName(allocator: std.mem.Allocator, imds_token: []u8) !?[]const u8 {
+fn getImdsRoleName(allocator: std.mem.Allocator, client: *std.http.Client, imds_token: []u8) !?[]const u8 {
     //     {
     //   "Code" : "Success",
     //   "LastUpdated" : "2022-02-09T05:42:09Z",
     //   "InstanceProfileArn" : "arn:aws:iam::550620852718:instance-profile/ec2-dev",
     //   "InstanceProfileId" : "AIPAYAM4POHXCFNKZ7HU2"
     // }
-    var buf: [255]u8 = undefined;
-    var headers = zfetch.Headers.init(allocator);
+    var headers = std.http.Headers.init(allocator);
     defer headers.deinit();
-    try headers.appendValue("X-aws-ec2-metadata-token", imds_token);
+    try headers.append("X-aws-ec2-metadata-token", imds_token);
 
-    var req = try zfetch.Request.init(allocator, "http://169.254.169.254/latest/meta-data/iam/info", null);
+    var req = try client.request(.GET, try std.Uri.parse("http://169.254.169.254/latest/meta-data/iam/info"), headers, .{});
     defer req.deinit();
 
-    try req.do(.GET, headers, null);
+    try req.start();
+    try req.wait();
 
-    if (req.status.code != 200 and req.status.code != 404) {
-        log.warn("Bad status code received from IMDS iam endpoint: {}", .{req.status.code});
+    if (req.response.status != .ok and req.response.status != .not_found) {
+        log.warn("Bad status code received from IMDS iam endpoint: {}", .{@intFromEnum(req.response.status)});
         return null;
     }
-    if (req.status.code == 404) return null;
-    const reader = req.reader();
-    const read = try reader.read(&buf);
-    if (read == 255) {
-        log.warn("Unexpected zero or long response from IMDS endpoint post token: {s}", .{buf});
+    if (req.response.status == .not_found) return null;
+    if (req.response.content_length == null or req.response.content_length.? == 0) {
+        log.warn("Unexpected empty response from IMDS endpoint post token", .{});
         return null;
     }
-    if (read == 0) return null;
+    // TODO: This is all stupid. We can just allocate a freaking array and be done
+    var resp_payload = try std.ArrayList(u8).initCapacity(allocator, req.response.content_length.?);
+    defer resp_payload.deinit();
+    try resp_payload.resize(req.response.content_length.?);
+    // TODO: This feels safer, but can we avoid this?
+    const resp = try resp_payload.toOwnedSlice();
+    defer allocator.free(resp);
+    _ = try req.readAll(resp);
 
     const ImdsResponse = struct {
         Code: []const u8,
@@ -241,22 +252,17 @@ fn getImdsRoleName(allocator: std.mem.Allocator, imds_token: []u8) !?[]const u8 
         InstanceProfileArn: []const u8,
         InstanceProfileId: []const u8,
     };
-    const imds_response = blk: {
-        var stream = std.json.TokenStream.init(buf[0..read]);
-        const res = std.json.parse(ImdsResponse, &stream, .{ .allocator = allocator }) catch |e| {
-            log.err("Unexpected Json response from IMDS endpoint: {s}", .{buf});
-            log.err("Error parsing json: {}", .{e});
-            if (@errorReturnTrace()) |trace| {
-                std.debug.dumpStackTrace(trace.*);
-            }
-
-            return null;
-        };
-        break :blk res;
+    const imds_response = std.json.parseFromSlice(ImdsResponse, allocator, resp, .{}) catch |e| {
+        log.err("Unexpected Json response from IMDS endpoint: {s}", .{resp});
+        log.err("Error parsing json: {}", .{e});
+        if (@errorReturnTrace()) |trace| {
+            std.debug.dumpStackTrace(trace.*);
+        }
+        return null;
     };
-    defer std.json.parseFree(ImdsResponse, imds_response, .{ .allocator = allocator });
+    defer imds_response.deinit();
 
-    const role_arn = imds_response.InstanceProfileArn;
+    const role_arn = imds_response.value.InstanceProfileArn;
     const first_slash = std.mem.indexOf(u8, role_arn, "/"); // I think this is valid
     if (first_slash == null) {
         log.err("Could not find role name in arn '{s}'", .{role_arn});
@@ -266,29 +272,37 @@ fn getImdsRoleName(allocator: std.mem.Allocator, imds_token: []u8) !?[]const u8 
 }
 
 /// Note - this internal function assumes zfetch is initialized prior to use
-fn getImdsCredentials(allocator: std.mem.Allocator, role_name: []const u8, imds_token: []u8) !?auth.Credentials {
-    var buf: [2048]u8 = undefined;
-    var headers = zfetch.Headers.init(allocator);
+fn getImdsCredentials(allocator: std.mem.Allocator, client: *std.http.Client, role_name: []const u8, imds_token: []u8) !?auth.Credentials {
+    var headers = std.http.Headers.init(allocator);
     defer headers.deinit();
-    try headers.appendValue("X-aws-ec2-metadata-token", imds_token);
+    try headers.append("X-aws-ec2-metadata-token", imds_token);
 
     const url = try std.fmt.allocPrint(allocator, "http://169.254.169.254/latest/meta-data/iam/security-credentials/{s}/", .{role_name});
     defer allocator.free(url);
-    var req = try zfetch.Request.init(allocator, url, null);
+
+    var req = try client.request(.GET, try std.Uri.parse(url), headers, .{});
     defer req.deinit();
 
-    try req.do(.GET, headers, null);
+    try req.start();
+    try req.wait();
 
-    if (req.status.code != 200) {
-        log.warn("Bad status code received from IMDS role endpoint: {}", .{req.status.code});
+    if (req.response.status != .ok and req.response.status != .not_found) {
+        log.warn("Bad status code received from IMDS role endpoint: {}", .{@intFromEnum(req.response.status)});
         return null;
     }
-    const reader = req.reader();
-    const read = try reader.read(&buf);
-    if (read == 0 or read == 2048) {
-        log.warn("Unexpected zero or long response from IMDS role endpoint: {s}", .{buf});
+    if (req.response.status == .not_found) return null;
+    if (req.response.content_length == null or req.response.content_length.? == 0) {
+        log.warn("Unexpected empty response from IMDS role endpoint", .{});
         return null;
     }
+    // TODO: This is still stupid
+    var resp_payload = try std.ArrayList(u8).initCapacity(allocator, req.response.content_length.?);
+    defer resp_payload.deinit();
+    try resp_payload.resize(req.response.content_length.?);
+    const resp = try resp_payload.toOwnedSlice();
+    defer allocator.free(resp);
+    _ = try req.readAll(resp);
+
     // log.debug("Read {d} bytes from imds v2 credentials endpoint", .{read});
     const ImdsResponse = struct {
         Code: []const u8,
@@ -299,26 +313,22 @@ fn getImdsCredentials(allocator: std.mem.Allocator, role_name: []const u8, imds_
         Token: []const u8,
         Expiration: []const u8,
     };
-    const imds_response = blk: {
-        var stream = std.json.TokenStream.init(buf[0..read]);
-        const res = std.json.parse(ImdsResponse, &stream, .{ .allocator = allocator }) catch |e| {
-            log.err("Unexpected Json response from IMDS endpoint: {s}", .{buf});
-            log.err("Error parsing json: {}", .{e});
-            if (@errorReturnTrace()) |trace| {
-                std.debug.dumpStackTrace(trace.*);
-            }
+    const imds_response = std.json.parseFromSlice(ImdsResponse, allocator, resp, .{}) catch |e| {
+        log.err("Unexpected Json response from IMDS endpoint: {s}", .{resp});
+        log.err("Error parsing json: {}", .{e});
+        if (@errorReturnTrace()) |trace| {
+            std.debug.dumpStackTrace(trace.*);
+        }
 
-            return null;
-        };
-        break :blk res;
+        return null;
     };
-    defer std.json.parseFree(ImdsResponse, imds_response, .{ .allocator = allocator });
+    defer imds_response.deinit();
 
     const ret = auth.Credentials.init(
         allocator,
-        try allocator.dupe(u8, imds_response.AccessKeyId),
-        try allocator.dupe(u8, imds_response.SecretAccessKey),
-        try allocator.dupe(u8, imds_response.Token),
+        try allocator.dupe(u8, imds_response.value.AccessKeyId),
+        try allocator.dupe(u8, imds_response.value.SecretAccessKey),
+        try allocator.dupe(u8, imds_response.value.Token),
     );
     log.debug("IMDSv2 credentials found. Access key: {s}", .{ret.access_key});
 

@@ -336,8 +336,8 @@ fn isLeapYear(year: u16) bool {
 }
 
 fn leapYearsBetween(start_year_inclusive: u16, end_year_exclusive: u16) u16 {
-    const start = std.math.min(start_year_inclusive, end_year_exclusive);
-    const end = std.math.max(start_year_inclusive, end_year_exclusive);
+    const start = @min(start_year_inclusive, end_year_exclusive);
+    const end = @max(start_year_inclusive, end_year_exclusive);
     var current = start;
     log.debug("Leap years starting from {d}, ending at {d}", .{ start, end });
     while (current % 4 != 0 and current < end) {

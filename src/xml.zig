@@ -70,7 +70,8 @@ pub const Element = struct {
     }
 
     pub fn findChildByTag(self: *Element, tag: []const u8) !?*Element {
-        return try self.findChildrenByTag(tag).next();
+        var it = self.findChildrenByTag(tag);
+        return try it.next();
     }
 
     pub fn findChildrenByTag(self: *Element, tag: []const u8) FindChildrenByTagIterator {
@@ -116,7 +117,7 @@ pub const Element = struct {
     pub const FindChildrenByTagIterator = struct {
         inner: ChildElementIterator,
         tag: []const u8,
-        predicate: fn (a: []const u8, b: []const u8, options: PredicateOptions) anyerror!bool = strictEqual,
+        predicate: *const fn (a: []const u8, b: []const u8, options: PredicateOptions) anyerror!bool = strictEqual,
         predicate_options: PredicateOptions = .{},
 
         pub fn next(self: *FindChildrenByTagIterator) !?*Element {
@@ -650,7 +651,10 @@ fn dupeAndUnescape(alloc: Allocator, text: []const u8) ![]const u8 {
         }
     }
 
-    return alloc.shrink(str, j);
+    // This error is not strictly true, but we need to match one of the items
+    // from the error set provided by the other stdlib calls at the calling site
+    if (!alloc.resize(str, j)) return error.OutOfMemory;
+    return str;
 }
 
 test "dupeAndUnescape" {

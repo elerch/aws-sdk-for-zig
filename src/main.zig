@@ -318,13 +318,13 @@ pub fn main() anyerror!void {
 
     std.log.info("===== Tests complete =====", .{});
 }
-fn typeForField(comptime T: type, field_name: []const u8) !type {
+fn typeForField(comptime T: type, comptime field_name: []const u8) !type {
     const ti = @typeInfo(T);
     switch (ti) {
         .Struct => {
             inline for (ti.Struct.fields) |field| {
                 if (std.mem.eql(u8, field.name, field_name))
-                    return field.field_type;
+                    return field.type;
             }
         },
         else => return error.TypeIsNotAStruct, // should not hit this

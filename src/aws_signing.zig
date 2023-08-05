@@ -283,7 +283,9 @@ pub fn freeSignedRequest(allocator: std.mem.Allocator, request: *base.Request, c
         }
     }
     if (remove_len > 0)
-        request.headers = allocator.resize(request.headers, request.headers.len - remove_len).?;
+        // TODO: We should not be discarding this return value
+        // Why on earth are we resizing the array if we're about to free the whole thing anyway?
+        _ = allocator.resize(request.headers, request.headers.len - remove_len);
 
     allocator.free(request.headers);
 }
@@ -434,7 +436,7 @@ fn encodeParamPart(allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
                 should_encode = false;
                 break;
             };
-        if (should_encode and std.ascii.isAlNum(c))
+        if (should_encode and std.ascii.isAlphanumeric(c))
             should_encode = false;
 
         if (!should_encode) {
@@ -468,7 +470,7 @@ fn encodeUri(allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
                     break;
                 };
         }
-        if (should_encode and std.ascii.isAlNum(c))
+        if (should_encode and std.ascii.isAlphanumeric(c))
             should_encode = false;
 
         if (!should_encode) {
@@ -538,7 +540,7 @@ fn canonicalQueryString(allocator: std.mem.Allocator, path: []const u8) ![]const
     defer sort_me.deinit();
     while (portions.next()) |item|
         try sort_me.append(item);
-    std.sort.sort([]const u8, sort_me.items, {}, lessThanBinary);
+    std.sort.pdq([]const u8, sort_me.items, {}, lessThanBinary);
 
     var normalized = try std.ArrayList(u8).initCapacity(allocator, path.len);
     defer normalized.deinit();
@@ -642,7 +644,7 @@ fn canonicalHeaders(allocator: std.mem.Allocator, headers: []base.Header, servic
         try dest.append(.{ .name = n, .value = v });
     }
 
-    std.sort.sort(base.Header, dest.items, {}, lessThan);
+    std.sort.pdq(base.Header, dest.items, {}, lessThan);
 
     var dest_str = try std.ArrayList(u8).initCapacity(allocator, total_len);
     defer dest_str.deinit();
@@ -660,8 +662,8 @@ fn canonicalHeaders(allocator: std.mem.Allocator, headers: []base.Header, servic
         signed_headers.appendSliceAssumeCapacity(h.name);
     }
     return CanonicalHeaders{
-        .str = dest_str.toOwnedSlice(),
-        .signed_headers = signed_headers.toOwnedSlice(),
+        .str = try dest_str.toOwnedSlice(),
+        .signed_headers = try signed_headers.toOwnedSlice(),
     };
 }
 
@@ -672,12 +674,12 @@ fn canonicalHeaderValue(allocator: std.mem.Allocator, value: []const u8) ![]cons
     const rc = try allocator.alloc(u8, value.len);
     var rc_inx: usize = 0;
     for (value, 0..) |c, i| {
-        if (!started and !std.ascii.isSpace(c)) {
+        if (!started and !std.ascii.isWhitespace(c)) {
             started = true;
             start = i;
         }
         if (started) {
-            if (!in_quote and i > 0 and std.ascii.isSpace(c) and std.ascii.isSpace(value[i - 1]))
+            if (!in_quote and i > 0 and std.ascii.isWhitespace(c) and std.ascii.isWhitespace(value[i - 1]))
                 continue;
             // if (c == '"') in_quote = !in_quote;
             rc[rc_inx] = c;
@@ -685,7 +687,7 @@ fn canonicalHeaderValue(allocator: std.mem.Allocator, value: []const u8) ![]cons
         }
     }
     // Trim end
-    while (std.ascii.isSpace(rc[rc_inx - 1]))
+    while (std.ascii.isWhitespace(rc[rc_inx - 1]))
         rc_inx -= 1;
     return rc[0..rc_inx];
 }

@@ -11,8 +11,6 @@ const std = @import("std");
 const base = @import("aws_http_base.zig");
 const signing = @import("aws_signing.zig");
 const credentials = @import("aws_credentials.zig");
-const zfetch = @import("zfetch");
-const tls = @import("iguanaTLS");
 
 const CN_NORTH_1_HASH = std.hash_map.hashString("cn-north-1");
 const CN_NORTHWEST_1_HASH = std.hash_map.hashString("cn-northwest-1");
@@ -20,10 +18,6 @@ const US_ISO_EAST_1_HASH = std.hash_map.hashString("us-iso-east-1");
 const US_ISOB_EAST_1_HASH = std.hash_map.hashString("us-isob-east-1");
 
 const log = std.log.scoped(.awshttp);
-
-const amazon_root_ca_1 = @embedFile("Amazon_Root_CA_1.pem");
-
-pub const default_root_ca = amazon_root_ca_1;
 
 pub const AwsError = error{
     AddHeaderError,
@@ -67,27 +61,19 @@ const EndPoint = struct {
 };
 pub const AwsHttp = struct {
     allocator: std.mem.Allocator,
-    trust_chain: ?tls.x509.CertificateChain,
 
     const Self = @This();
 
     /// Recommend usage is init(allocator, awshttp.default_root_ca)
     /// Passing null for root_pem will result in no TLS verification
-    pub fn init(allocator: std.mem.Allocator, root_pem: ?[]const u8) !Self {
-        var trust_chain: ?tls.x509.CertificateChain = null;
-        if (root_pem) |p| {
-            var fbs = std.io.fixedBufferStream(p);
-            trust_chain = try tls.x509.CertificateChain.from_pem(allocator, fbs.reader());
-        }
+    pub fn init(allocator: std.mem.Allocator) !Self {
         return Self{
             .allocator = allocator,
-            .trust_chain = trust_chain,
             // .credentialsProvider = // creds provider could be useful
         };
     }
 
     pub fn deinit(self: *AwsHttp) void {
-        if (self.trust_chain) |c| c.deinit();
         _ = self;
         log.debug("Deinit complete", .{});
     }
@@ -173,12 +159,10 @@ pub const AwsHttp = struct {
             }
         }
 
-        try zfetch.init(); // This only does anything on Windows. Not sure how performant it is to do this on every request
-        defer zfetch.deinit();
-        var headers = zfetch.Headers.init(self.allocator);
+        var headers = std.http.Headers.init(self.allocator);
         defer headers.deinit();
         for (request_cp.headers) |header|
-            try headers.appendValue(header.name, header.value);
+            try headers.append(header.name, header.value);
         log.debug("All Request Headers (zfetch):", .{});
         for (headers.list.items) |h| {
             log.debug("\t{s}: {s}", .{ h.name, h.value });
@@ -187,24 +171,36 @@ pub const AwsHttp = struct {
         const url = try std.fmt.allocPrint(self.allocator, "{s}{s}{s}", .{ endpoint.uri, request_cp.path, request_cp.query });
         defer self.allocator.free(url);
         log.debug("Request url: {s}", .{url});
-        // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-        // PLEASE READ!! IF YOU ARE LOOKING AT THIS LINE OF CODE DUE TO A
-        // SEGFAULT IN INIT, IT IS PROBABLY BECAUSE THE HOST DOES NOT EXIST
-        // https://github.com/ziglang/zig/issues/11358
-        // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-        var req = try zfetch.Request.init(self.allocator, url, self.trust_chain);
-        defer req.deinit();
+        var cl = std.http.Client{ .allocator = self.allocator };
+        defer cl.deinit(); // TODO: Connection pooling
+        //
+        // var req = try zfetch.Request.init(self.allocator, url, self.trust_chain);
+        // defer req.deinit();
 
-        const method = std.meta.stringToEnum(zfetch.Method, request_cp.method).?;
-        try req.do(method, headers, if (request_cp.body.len == 0) null else request_cp.body);
+        const method = std.meta.stringToEnum(std.http.Method, request_cp.method).?;
+        var req = try cl.request(method, try std.Uri.parse(url), headers, .{});
+        if (request_cp.body.len > 0)
+            req.transfer_encoding = .{ .content_length = request_cp.body.len };
+        try req.start();
+        if (request_cp.body.len > 0) {
+            try req.writeAll(request_cp.body);
+            try req.finish();
+        }
+        try req.wait();
 
         // TODO: Timeout - is this now above us?
-        log.debug("Request Complete. Response code {d}: {s}", .{ req.status.code, req.status.reason });
+        log.debug(
+            "Request Complete. Response code {d}: {s}",
+            .{ @intFromEnum(req.response.status), req.response.status.phrase() },
+        );
         log.debug("Response headers:", .{});
-        var resp_headers = try std.ArrayList(Header).initCapacity(self.allocator, req.headers.list.items.len);
+        var resp_headers = try std.ArrayList(Header).initCapacity(
+            self.allocator,
+            req.response.headers.list.items.len,
+        );
         defer resp_headers.deinit();
         var content_length: usize = 0;
-        for (req.headers.list.items) |h| {
+        for (req.response.headers.list.items) |h| {
             log.debug("    {s}: {s}", .{ h.name, h.value });
             resp_headers.appendAssumeCapacity(.{
                 .name = try (self.allocator.dupe(u8, h.name)),
@@ -213,22 +209,20 @@ pub const AwsHttp = struct {
             if (content_length == 0 and std.ascii.eqlIgnoreCase("content-length", h.name))
                 content_length = std.fmt.parseInt(usize, h.value, 10) catch 0;
         }
-        const reader = req.reader();
-        var buf: [65535]u8 = undefined;
+
+        // TODO: This is still stupid. Allocate a freaking array
         var resp_payload = try std.ArrayList(u8).initCapacity(self.allocator, content_length);
         defer resp_payload.deinit();
-
-        while (true) {
-            const read = try reader.read(&buf);
-            try resp_payload.appendSlice(buf[0..read]);
-            if (read == 0) break;
-        }
-        log.debug("raw response body:\n{s}", .{resp_payload.items});
+        try resp_payload.resize(content_length);
+        var response_data = try resp_payload.toOwnedSlice();
+        errdefer self.allocator.free(response_data);
+        _ = try req.readAll(response_data);
+        log.debug("raw response body:\n{s}", .{response_data});
 
         const rc = HttpResult{
-            .response_code = req.status.code,
-            .body = resp_payload.toOwnedSlice(),
-            .headers = resp_headers.toOwnedSlice(),
+            .response_code = @intFromEnum(req.response.status),
+            .body = response_data,
+            .headers = try resp_headers.toOwnedSlice(),
             .allocator = self.allocator,
         };
         return rc;

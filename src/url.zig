@@ -1,57 +1,72 @@
 const std = @import("std");
 
-fn defaultTransformer(field_name: []const u8, _: EncodingOptions) anyerror![]const u8 {
+fn defaultTransformer(allocator: std.mem.Allocator, field_name: []const u8, options: EncodingOptions) anyerror![]const u8 {
+    _ = options;
+    _ = allocator;
     return field_name;
 }
 
-pub const FieldNameTransformer = fn ([]const u8, EncodingOptions) anyerror![]const u8;
+pub const fieldNameTransformerFn = *const fn (std.mem.Allocator, []const u8, EncodingOptions) anyerror![]const u8;
 
 pub const EncodingOptions = struct {
-    allocator: ?std.mem.Allocator = null,
-    field_name_transformer: *const FieldNameTransformer = &defaultTransformer,
+    field_name_transformer: fieldNameTransformerFn = &defaultTransformer,
 };
 
-pub fn encode(obj: anytype, writer: anytype, options: EncodingOptions) !void {
-    _ = try encodeInternal("", "", true, obj, writer, options);
+pub fn encode(allocator: std.mem.Allocator, obj: anytype, writer: anytype, comptime options: EncodingOptions) !void {
+    _ = try encodeInternal(allocator, "", "", true, obj, writer, options);
 }
 
-fn encodeStruct(parent: []const u8, first: bool, obj: anytype, writer: anytype, options: EncodingOptions) !bool {
+fn encodeStruct(
+    allocator: std.mem.Allocator,
+    parent: []const u8,
+    first: bool,
+    obj: anytype,
+    writer: anytype,
+    comptime options: EncodingOptions,
+) !bool {
     var rc = first;
     inline for (@typeInfo(@TypeOf(obj)).Struct.fields) |field| {
-        const field_name = try options.field_name_transformer.*(field.name, options);
+        const field_name = try options.field_name_transformer(allocator, field.name, options);
         defer if (options.field_name_transformer.* != defaultTransformer)
-            if (options.allocator) |a| a.free(field_name);
+            allocator.free(field_name);
         // @compileLog(@typeInfo(field.field_type).Pointer);
-        rc = try encodeInternal(parent, field_name, rc, @field(obj, field.name), writer, options);
+        rc = try encodeInternal(allocator, parent, field_name, rc, @field(obj, field.name), writer, options);
     }
     return rc;
 }
 
-pub fn encodeInternal(parent: []const u8, field_name: []const u8, first: bool, obj: anytype, writer: anytype, options: EncodingOptions) !bool {
+pub fn encodeInternal(
+    allocator: std.mem.Allocator,
+    parent: []const u8,
+    field_name: []const u8,
+    first: bool,
+    obj: anytype,
+    writer: anytype,
+    comptime options: EncodingOptions,
+) !bool {
     // @compileLog(@typeInfo(@TypeOf(obj)));
     var rc = first;
     switch (@typeInfo(@TypeOf(obj))) {
         .Optional => if (obj) |o| {
-            rc = try encodeInternal(parent, field_name, first, o, writer, options);
+            rc = try encodeInternal(allocator, parent, field_name, first, o, writer, options);
         },
         .Pointer => |ti| if (ti.size == .One) {
-            rc = try encodeInternal(parent, field_name, first, obj.*, writer, options);
+            rc = try encodeInternal(allocator, parent, field_name, first, obj.*, writer, options);
         } else {
             if (!first) _ = try writer.write("&");
             try writer.print("{s}{s}={s}", .{ parent, field_name, obj });
             rc = false;
         },
         .Struct => if (std.mem.eql(u8, "", field_name)) {
-            rc = try encodeStruct(parent, first, obj, writer, options);
+            rc = try encodeStruct(allocator, parent, first, obj, writer, options);
         } else {
             // TODO: It would be lovely if we could concat at compile time or allocPrint at runtime
             // XOR have compile time allocator support. Alas, neither are possible:
             // https://github.com/ziglang/zig/issues/868: Comptime detection (feels like foot gun)
             // https://github.com/ziglang/zig/issues/1291: Comptime allocator
-            const allocator = options.allocator orelse return error.AllocatorRequired;
             const new_parent = try std.fmt.allocPrint(allocator, "{s}{s}.", .{ parent, field_name });
             defer allocator.free(new_parent);
-            rc = try encodeStruct(new_parent, first, obj, writer, options);
+            rc = try encodeStruct(allocator, new_parent, first, obj, writer, options);
             // try encodeStruct(parent ++ field_name ++ ".", first, obj,  writer, options);
         },
         .Array => {

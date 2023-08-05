@@ -1624,7 +1624,7 @@ fn parseInternal(comptime T: type, token: Token, tokens: *TokenStream, options: 
                 inline for (unionInfo.fields) |u_field| {
                     // take a copy of tokens so we can withhold mutations until success
                     var tokens_copy = tokens.*;
-                    if (parseInternal(u_field.field_type, token, &tokens_copy, options)) |value| {
+                    if (parseInternal(u_field.type, token, &tokens_copy, options)) |value| {
                         tokens.* = tokens_copy;
                         return @unionInit(T, u_field.name, value);
                     } else |err| {
@@ -1654,7 +1654,7 @@ fn parseInternal(comptime T: type, token: Token, tokens: *TokenStream, options: 
                 @setEvalBranchQuota(100000);
                 inline for (structInfo.fields, 0..) |field, i| {
                     if (fields_seen[i] and !field.is_comptime) {
-                        parseFree(field.field_type, @field(r, field.name), options);
+                        parseFree(field.type, @field(r, field.name), options);
                     }
                 }
             }
@@ -1683,16 +1683,16 @@ fn parseInternal(comptime T: type, token: Token, tokens: *TokenStream, options: 
                                     } else if (options.duplicate_field_behavior == .Error) {
                                         return error.DuplicateJSONField;
                                     } else if (options.duplicate_field_behavior == .UseLast) {
-                                        parseFree(field.field_type, @field(r, field.name), options);
+                                        parseFree(field.type, @field(r, field.name), options);
                                         fields_seen[i] = false;
                                     }
                                 }
                                 if (field.is_comptime) {
-                                    if (!try parsesTo(field.field_type, field.default_value.?, tokens, options)) {
+                                    if (!try parsesTo(field.type, field.default_value.?, tokens, options)) {
                                         return error.UnexpectedValue;
                                     }
                                 } else {
-                                    @field(r, field.name) = try parse(field.field_type, tokens, options);
+                                    @field(r, field.name) = try parse(field.type, tokens, options);
                                 }
                                 fields_seen[i] = true;
                                 found = true;
@@ -1722,9 +1722,10 @@ fn parseInternal(comptime T: type, token: Token, tokens: *TokenStream, options: 
             }
             inline for (structInfo.fields, 0..) |field, i| {
                 if (!fields_seen[i]) {
-                    if (field.default_value) |default| {
+                    if (field.default_value) |default_value_ptr| {
                         if (!field.is_comptime) {
-                            @field(r, field.name) = default;
+                            const default_value = @as(*align(1) const field.type, @ptrCast(default_value_ptr)).*;
+                            @field(r, field.name) = default_value;
                         }
                     } else {
                         if (!options.allow_missing_fields)
@@ -1815,33 +1816,36 @@ fn parseInternal(comptime T: type, token: Token, tokens: *TokenStream, options: 
                             }
                         },
                         .ObjectBegin => {
+                            // TODO: Fix this, or better yet, try to switch
+                            //       back to standard json parse
+                            return error.NotConvertedToZig11;
                             // We are parsing into a slice, but we have an
                             // ObjectBegin. This might be ok, iff the type
                             // follows this pattern: []struct { key: []const u8, value: anytype }
                             // (could key be anytype?).
-                            if (!isMapPattern(T))
-                                return error.UnexpectedToken;
-                            var arraylist = std.ArrayList(ptrInfo.child).init(allocator);
-                            errdefer {
-                                while (arraylist.popOrNull()) |v| {
-                                    parseFree(ptrInfo.child, v, options);
-                                }
-                                arraylist.deinit();
-                            }
-                            while (true) {
-                                const key = (try tokens.next()) orelse return error.UnexpectedEndOfJson;
-                                switch (key) {
-                                    .ObjectEnd => break,
-                                    else => {},
-                                }
-
-                                try arraylist.ensureTotalCapacity(arraylist.items.len + 1);
-                                const key_val = try parseInternal(try typeForField(ptrInfo.child, "key"), key, tokens, options);
-                                const val = (try tokens.next()) orelse return error.UnexpectedEndOfJson;
-                                const val_val = try parseInternal(try typeForField(ptrInfo.child, "value"), val, tokens, options);
-                                arraylist.appendAssumeCapacity(.{ .key = key_val, .value = val_val });
-                            }
-                            return arraylist.toOwnedSlice();
+                            // if (!isMapPattern(T))
+                            //     return error.UnexpectedToken;
+                            // var arraylist = std.ArrayList(ptrInfo.child).init(allocator);
+                            // errdefer {
+                            //     while (arraylist.popOrNull()) |v| {
+                            //         parseFree(ptrInfo.child, v, options);
+                            //     }
+                            //     arraylist.deinit();
+                            // }
+                            // while (true) {
+                            //     const key = (try tokens.next()) orelse return error.UnexpectedEndOfJson;
+                            //     switch (key) {
+                            //         .ObjectEnd => break,
+                            //         else => {},
+                            //     }
+                            //
+                            //     try arraylist.ensureTotalCapacity(arraylist.items.len + 1);
+                            //     const key_val = try parseInternal(try typeForField(ptrInfo.child, "key"), key, tokens, options);
+                            //     const val = (try tokens.next()) orelse return error.UnexpectedEndOfJson;
+                            //     const val_val = try parseInternal(try typeForField(ptrInfo.child, "value"), val, tokens, options);
+                            //     arraylist.appendAssumeCapacity(.{ .key = key_val, .value = val_val });
+                            // }
+                            // return arraylist.toOwnedSlice();
                         },
                         else => return error.UnexpectedToken,
                     }
@@ -1854,13 +1858,13 @@ fn parseInternal(comptime T: type, token: Token, tokens: *TokenStream, options: 
     unreachable;
 }
 
-fn typeForField(comptime T: type, field_name: []const u8) !type {
+fn typeForField(comptime T: type, comptime field_name: []const u8) !type {
     const ti = @typeInfo(T);
     switch (ti) {
         .Struct => {
             inline for (ti.Struct.fields) |field| {
                 if (std.mem.eql(u8, field.name, field_name))
-                    return field.field_type;
+                    return field.type;
             }
         },
         else => return error.TypeIsNotAStruct, // should not hit this
@@ -1907,7 +1911,7 @@ pub fn parseFree(comptime T: type, value: T, options: ParseOptions) void {
             if (unionInfo.tag_type) |UnionTagType| {
                 inline for (unionInfo.fields) |u_field| {
                     if (value == @field(UnionTagType, u_field.name)) {
-                        parseFree(u_field.field_type, @field(value, u_field.name), options);
+                        parseFree(u_field.type, @field(value, u_field.name), options);
                         break;
                     }
                 }
@@ -1917,7 +1921,7 @@ pub fn parseFree(comptime T: type, value: T, options: ParseOptions) void {
         },
         .Struct => |structInfo| {
             inline for (structInfo.fields) |field| {
-                parseFree(field.field_type, @field(value, field.name), options);
+                parseFree(field.type, @field(value, field.name), options);
             }
         },
         .Array => |arrayInfo| {
@@ -2855,7 +2859,7 @@ pub fn stringify(
             }
             inline for (S.fields) |Field| {
                 // don't include void fields
-                if (Field.field_type == void) continue;
+                if (Field.type == void) continue;
 
                 if (!field_output) {
                     field_output = true;
@@ -3172,5 +3176,5 @@ test "stringify struct with custom stringifier" {
 }
 
 test "stringify vector" {
-    // try teststringify("[1,1]", @splat(2, @as(u32, 1)), StringifyOptions{});
+    try teststringify("[1,1]", @as(@Vector(2, u32), @splat(@as(u32, 1))), StringifyOptions{});
 }
