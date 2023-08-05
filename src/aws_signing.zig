@@ -358,7 +358,7 @@ fn createCanonicalRequest(allocator: std.mem.Allocator, request: base.Request, p
     ;
 
     // TODO: This is all better as a writer - less allocations/copying
-    const canonical_method = canonicalRequestMethod(request.method);
+    const canonical_method = try canonicalRequestMethod(request.method);
     // Let's not mess around here...s3 is the oddball
     const double_encode = !std.mem.eql(u8, config.service, "s3");
     const canonical_url = try canonicalUri(allocator, request.path, double_encode);

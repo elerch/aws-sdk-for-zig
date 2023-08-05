@@ -102,7 +102,7 @@ fn parseInternal(comptime T: type, element: *xml.Element, options: ParseOptions)
             return std.fmt.parseFloat(T, element.children.items[0].CharData) catch |e| {
                 if (log_parse_traces) {
                     std.log.err(
-                        "Could not parse '{s}' as float in element '{s}': {s}",
+                        "Could not parse '{s}' as float in element '{s}': {any}",
                         .{
                             element.children.items[0].CharData,
                             element.tag,
@@ -127,7 +127,7 @@ fn parseInternal(comptime T: type, element: *xml.Element, options: ParseOptions)
                 }
                 if (log_parse_traces) {
                     std.log.err(
-                        "Could not parse '{s}' as integer in element '{s}': {s}",
+                        "Could not parse '{s}' as integer in element '{s}': {any}",
                         .{
                             element.children.items[0].CharData,
                             element.tag,
@@ -392,7 +392,7 @@ test "can parse a simple type" {
         foo_bar: []const u8,
     };
     // std.debug.print("{s}", .{data});
-    const parsed_data = try parse(Example, data, .{ .allocator = allocator, .match_predicate = fuzzyEqual });
+    const parsed_data = try parse(Example, data, .{ .allocator = allocator, .match_predicate_ptr = fuzzyEqual });
     defer parsed_data.deinit();
     try testing.expectEqualStrings("bar", parsed_data.parsed_value.foo_bar);
 }
@@ -410,7 +410,7 @@ test "can parse a boolean type" {
         foo_bar: bool,
     };
     // std.debug.print("{s}", .{data});
-    const parsed_data = try parse(Example, data, .{ .allocator = allocator, .match_predicate = fuzzyEqual });
+    const parsed_data = try parse(Example, data, .{ .allocator = allocator, .match_predicate_ptr = fuzzyEqual });
     defer parsed_data.deinit();
     try testing.expectEqual(true, parsed_data.parsed_value.foo_bar);
 }
@@ -427,7 +427,7 @@ test "can parse an integer type" {
         foo_bar: u8,
     };
     // std.debug.print("{s}", .{data});
-    const parsed_data = try parse(Example, data, .{ .allocator = allocator, .match_predicate = fuzzyEqual });
+    const parsed_data = try parse(Example, data, .{ .allocator = allocator, .match_predicate_ptr = fuzzyEqual });
     defer parsed_data.deinit();
     try testing.expectEqual(@as(u8, 42), parsed_data.parsed_value.foo_bar);
 }
@@ -442,7 +442,7 @@ test "can parse an optional boolean type" {
     const ExampleDoesNotMatter = struct {
         foo_bar: ?bool = null,
     };
-    const parsed_data = try parse(ExampleDoesNotMatter, data, .{ .allocator = allocator, .match_predicate = fuzzyEqual });
+    const parsed_data = try parse(ExampleDoesNotMatter, data, .{ .allocator = allocator, .match_predicate_ptr = fuzzyEqual });
     defer parsed_data.deinit();
     try testing.expectEqual(@as(?bool, true), parsed_data.parsed_value.foo_bar);
 }
@@ -458,7 +458,7 @@ test "can coerce 8601 date to integer" {
     const ExampleDoesNotMatter = struct {
         foo_bar: ?i64 = null,
     };
-    const parsed_data = try parse(ExampleDoesNotMatter, data, .{ .allocator = allocator, .match_predicate = fuzzyEqual });
+    const parsed_data = try parse(ExampleDoesNotMatter, data, .{ .allocator = allocator, .match_predicate_ptr = fuzzyEqual });
     defer parsed_data.deinit();
     try testing.expectEqual(@as(i64, 1633451985), parsed_data.parsed_value.foo_bar.?);
 }
@@ -477,7 +477,7 @@ test "can parse a boolean type (two fields)" {
         foo_bar: bool,
         foo_baz: bool,
     };
-    const parsed_data = try parse(ExampleDoesNotMatter, data, .{ .allocator = allocator, .match_predicate = fuzzyEqual });
+    const parsed_data = try parse(ExampleDoesNotMatter, data, .{ .allocator = allocator, .match_predicate_ptr = fuzzyEqual });
     defer parsed_data.deinit();
     try testing.expectEqual(@as(bool, true), parsed_data.parsed_value.foo_bar);
 }
@@ -499,7 +499,7 @@ test "can error without leaking memory" {
     defer log_parse_traces = true;
     try std.testing.expectError(
         error.InvalidCharacter,
-        parse(ExampleDoesNotMatter, data, .{ .allocator = allocator, .match_predicate = fuzzyEqual }),
+        parse(ExampleDoesNotMatter, data, .{ .allocator = allocator, .match_predicate_ptr = fuzzyEqual }),
     );
 }
 
@@ -518,7 +518,7 @@ test "can parse a nested type" {
             bar: []const u8,
         },
     };
-    const parsed_data = try parse(Example, data, .{ .allocator = allocator, .match_predicate = fuzzyEqual });
+    const parsed_data = try parse(Example, data, .{ .allocator = allocator, .match_predicate_ptr = fuzzyEqual });
     defer parsed_data.deinit();
     try testing.expectEqualStrings("baz", parsed_data.parsed_value.foo.bar);
 }
@@ -539,7 +539,7 @@ test "can parse a nested type - two fields" {
             qux: []const u8,
         },
     };
-    const parsed_data = try parse(Example, data, .{ .allocator = allocator, .match_predicate = fuzzyEqual });
+    const parsed_data = try parse(Example, data, .{ .allocator = allocator, .match_predicate_ptr = fuzzyEqual });
     defer parsed_data.deinit();
     try testing.expectEqualStrings("baz", parsed_data.parsed_value.foo.bar);
     try testing.expectEqualStrings("baz", parsed_data.parsed_value.foo.qux);
