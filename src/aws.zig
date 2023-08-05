@@ -983,13 +983,13 @@ fn buildQuery(allocator: std.mem.Allocator, request: anytype) ![]const u8 {
     const writer = buffer.writer();
     defer buffer.deinit();
     var prefix = "?";
-    // TODO: This was a pain before, and it's a pain now. Clearly our codegen
-    //       needs to emit a declaration 100% of the time
-    const query_arguments = @TypeOf(request).http_query;
-    inline for (@typeInfo(@TypeOf(query_arguments)).Struct.fields) |arg| {
-        const val = @field(request, arg.name);
-        if (try addQueryArg(arg.type, prefix, @field(query_arguments, arg.name), val, writer))
-            prefix = "&";
+    if (@hasDecl(@TypeOf(request), "http_query")) {
+        const query_arguments = @field(@TypeOf(request), "http_query");
+        inline for (@typeInfo(@TypeOf(query_arguments)).Struct.fields) |arg| {
+            const val = @field(request, arg.name);
+            if (try addQueryArg(arg.type, prefix, @field(query_arguments, arg.name), val, writer))
+                prefix = "&";
+        }
     }
     return buffer.toOwnedSlice();
 }
