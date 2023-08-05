@@ -94,7 +94,7 @@ pub fn parseEnglishToDateTime(data: []const u8) !DateTime {
 
 fn endEnglishState(current_state: EnglishParsingState, date: *DateTime, prev_data: []const u8) !EnglishParsingState {
     var next_state: EnglishParsingState = undefined;
-    log.debug("endEnglishState. Current state '{s}', data: {s}", .{ current_state, prev_data });
+    log.debug("endEnglishState. Current state '{}', data: {s}", .{ current_state, prev_data });
 
     // Using two switches is slightly less efficient, but more readable
     switch (current_state) {
@@ -200,7 +200,7 @@ fn parseIso8601BasicFormatToDateTime(data: []const u8) !DateTime {
 
 fn endIsoState(current_state: IsoParsingState, date: *DateTime, prev_data: []const u8) !IsoParsingState {
     var next_state: IsoParsingState = undefined;
-    log.debug("endIsoState. Current state '{s}', data: {s}", .{ current_state, prev_data });
+    log.debug("endIsoState. Current state '{}', data: {s}", .{ current_state, prev_data });
 
     // Using two switches is slightly less efficient, but more readable
     switch (current_state) {
