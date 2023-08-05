@@ -76,7 +76,7 @@ pub fn Request(comptime request_action: anytype) type {
                 Self.service_meta.version,
                 action.action_name,
             });
-            log.debug("proto: {s}", .{Self.service_meta.aws_protocol});
+            log.debug("proto: {}", .{Self.service_meta.aws_protocol});
 
             // It seems as though there are 3 major branches of the 6 protocols.
             // 1. query/ec2_query, which are identical until you get to complex
@@ -600,7 +600,7 @@ pub fn Request(comptime request_action: anytype) type {
                             \\This could be the result of a bug or a stale set of code generated
                             \\service models.
                             \\
-                            \\Model Type: {s}
+                            \\Model Type: {}
                             \\
                             \\Response from server:
                             \\
@@ -620,7 +620,7 @@ pub fn Request(comptime request_action: anytype) type {
                         \\This could be the result of a bug or a stale set of code generated
                         \\service models.
                         \\
-                        \\Model Type: {s}
+                        \\Model Type: {}
                         \\
                         \\Response from server:
                         \\
@@ -674,7 +674,7 @@ fn generalAllocPrint(allocator: std.mem.Allocator, val: anytype) !?[]const u8 {
     }
 }
 fn headersFor(allocator: std.mem.Allocator, request: anytype) ![]awshttp.Header {
-    log.debug("Checking for headers to include for type {s}", .{@TypeOf(request)});
+    log.debug("Checking for headers to include for type {}", .{@TypeOf(request)});
     if (!@hasDecl(@TypeOf(request), "http_header")) return &[_]awshttp.Header{};
     const http_header = @TypeOf(request).http_header;
     const fields = std.meta.fields(@TypeOf(http_header));
