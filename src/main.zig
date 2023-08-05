@@ -1,7 +1,6 @@
 const std = @import("std");
 const aws = @import("aws.zig");
 const json = @import("json.zig");
-const version = @import("git_version.zig");
 
 var verbose: u8 = 0;
 
@@ -63,11 +62,7 @@ pub fn main() anyerror!void {
     var tests = std.ArrayList(Tests).init(allocator);
     defer tests.deinit();
     var args = std.process.args();
-    var first = true;
     while (args.next()) |arg| {
-        if (first)
-            std.log.info("{s} {s}", .{ arg, version.pretty_version });
-        first = false;
         if (std.mem.eql(u8, "-v", arg)) {
             verbose += 1;
             continue;
