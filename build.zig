@@ -13,6 +13,16 @@ pub fn build(b: *Builder) !void {
     // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall.
     const optimize = b.standardOptimizeOption(.{});
 
+    // TODO: Embed the current git version in the code. We can do this
+    // by looking for .git/HEAD (if it exists, follow the ref to /ref/heads/whatevs,
+    // grab that commit, and use b.addOptions/exe.addOptions to generate the
+    // Options file. See https://github.com/ziglang/zig/issues/14979 for usage
+    // example.
+    //
+    // From there, I'm not sure what the generated file looks like or quite how
+    // to use, but that should be easy. It may also give some ideas on the
+    // code gen piece itself, though it might be nice to leave as a seperate
+    // executable
     const exe = b.addExecutable(.{
         .name = "demo",
         .root_source_file = .{ .path = "src/main.zig" },
