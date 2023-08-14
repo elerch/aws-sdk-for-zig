@@ -202,6 +202,9 @@ pub fn main() anyerror!void {
                     const more = try aws.Request(services.ec2.describe_instances)
                         .call(.{ .next_token = next_token, .max_results = 6 }, options);
                     defer more.deinit();
+                    // we could have exactly 6, which means we have a next token(?!) but not
+                    // any actual additional data
+                    if (more.response.reservations == null) break;
                     std.log.info("reservation count: {d}", .{more.response.reservations.?.len});
                     var batch_items: usize = 0;
                     for (more.response.reservations.?) |reservation| {
