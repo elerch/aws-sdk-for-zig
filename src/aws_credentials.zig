@@ -196,7 +196,7 @@ fn getImdsv2Credentials(allocator: std.mem.Allocator) !?auth.Credentials {
         defer resp_payload.deinit();
         try resp_payload.resize(req.response.content_length.?);
         token = try resp_payload.toOwnedSlice();
-        errdefer allocator.free(token);
+        errdefer if (token) |t| allocator.free(t);
         _ = try req.readAll(token.?);
     }
     std.debug.assert(token != null);
@@ -207,7 +207,7 @@ fn getImdsv2Credentials(allocator: std.mem.Allocator) !?auth.Credentials {
         return null;
     }
     defer allocator.free(role_name.?);
-    log.debug("Got role name '{s}'", .{role_name});
+    log.debug("Got role name '{s}'", .{role_name.?});
     return getImdsCredentials(allocator, &cl, role_name.?, token.?);
 }
 

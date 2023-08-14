@@ -190,7 +190,7 @@ pub const AwsHttp = struct {
 
         // TODO: Timeout - is this now above us?
         log.debug(
-            "Request Complete. Response code {d}: {s}",
+            "Request Complete. Response code {d}: {any}",
             .{ @intFromEnum(req.response.status), req.response.status.phrase() },
         );
         log.debug("Response headers:", .{});
