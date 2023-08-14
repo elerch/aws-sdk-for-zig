@@ -19,7 +19,7 @@ pub fn serializeMap(map: anytype, key: []const u8, options: anytype, out_stream:
     try out_stream.writeByte('{');
     if (options.whitespace) |_|
         try out_stream.writeByte('\n');
-    for (map) |tag, i| {
+    for (map, 0..) |tag, i| {
         if (tag.key == null or tag.value == null) continue;
         // TODO: Deal with escaping and general "json.stringify" the values...
         if (child_options.whitespace) |ws|
@@ -100,8 +100,8 @@ fn outputUnicodeEscape(
         assert(codepoint <= 0x10FFFF);
         // To escape an extended character that is not in the Basic Multilingual Plane,
         // the character is represented as a 12-character sequence, encoding the UTF-16 surrogate pair.
-        const high = @intCast(u16, (codepoint - 0x10000) >> 10) + 0xD800;
-        const low = @intCast(u16, codepoint & 0x3FF) + 0xDC00;
+        const high = @as(u16, @intCast((codepoint - 0x10000) >> 10)) + 0xD800;
+        const low = @as(u16, @intCast(codepoint & 0x3FF)) + 0xDC00;
         try out_stream.writeAll("\\u");
         try std.fmt.formatIntValue(high, "x", std.fmt.FormatOptions{ .width = 4, .fill = '0' }, out_stream);
         try out_stream.writeAll("\\u");

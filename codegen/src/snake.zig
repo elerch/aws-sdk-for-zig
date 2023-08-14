@@ -72,7 +72,7 @@ fn isAcronymChar(char: u8) bool {
 fn isAscii(codepoint: ?u21) !?u8 {
     if (codepoint) |cp| {
         if (cp > 0xff) return error.UnicodeNotSupported;
-        return @truncate(u8, cp);
+        return @as(u8, @truncate(cp));
     }
     return null;
 }
