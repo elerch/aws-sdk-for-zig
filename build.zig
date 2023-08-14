@@ -51,13 +51,25 @@ pub fn build(b: *Builder) !void {
         // std.build.RunStep.create(null,null).cwd(std.fs.path.resolve(b.build_root, "codegen")).addArgs(...)
         codegen = b.step("gen", "Generate zig service code from smithy models");
         const cg = codegen.?;
+        // TODO: this should use zig_exe from std.Build
+        // codegen should store a hash in a comment
+        // this would be hash of the exe that created the file
+        // concatenated with hash of input json. this would
+        // allow skipping generated files. May not include hash
+        // of contents of output file as maybe we want to tweak
+        // manually??
+        //
+        // All the hashes can be in service_manifest.zig, which
+        // could be fun to just parse and go nuts. Top of
+        // file, generator exe hash. Each import has comment
+        // with both input and output hash and we can decide
+        // later about warning on manual changes...
+        //
+        // this scheme would permit cross plat codegen and maybe
+        // we can have codegen added in a seperate repo,
+        // though not sure how necessary that is
         cg.dependOn(&b.addSystemCommand(&.{ "/bin/sh", "-c", "cd codegen && zig build" }).step);
 
-        // This can probably be triggered instead by GitRepoStep cloning the repo
-        // with models
-        // Since codegen binary is built every time, if it's newer than our
-        // service manifest we know it needs to be regenerated. So this step
-        // will remove the service manifest if codegen has been touched, thereby
         // triggering the re-gen
         cg.dependOn(&b.addSystemCommand(&.{
             "/bin/sh", "-c",
