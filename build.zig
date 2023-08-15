@@ -66,7 +66,7 @@ pub fn build(b: *Builder) !void {
             .root_source_file = .{ .path = "codegen/src/main.zig" },
             // We need this generated for the host, not the real target
             // .target = target,
-            // .optimize = optimize,
+            .optimize = .ReleaseSafe,
         });
         cg_exe.addModule("smithy", smithy_dep.module("smithy"));
         var cg_cmd = b.addRunArtifact(cg_exe);
