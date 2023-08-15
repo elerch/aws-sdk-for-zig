@@ -131,9 +131,9 @@ fn getContainerCredentials(allocator: std.mem.Allocator) !?auth.Credentials {
     if (req.response.status == .not_found) return null;
     if (req.response.content_length == null or req.response.content_length.? == 0) return null;
 
-    var resp_payload = try std.ArrayList(u8).initCapacity(allocator, req.response.content_length.?);
+    var resp_payload = try std.ArrayList(u8).initCapacity(allocator, @intCast(req.response.content_length.?));
     defer resp_payload.deinit();
-    try resp_payload.resize(req.response.content_length.?);
+    try resp_payload.resize(@intCast(req.response.content_length.?));
     var response_data = try resp_payload.toOwnedSlice();
     defer allocator.free(response_data);
     _ = try req.readAll(response_data);
@@ -192,9 +192,9 @@ fn getImdsv2Credentials(allocator: std.mem.Allocator) !?auth.Credentials {
             return null;
         }
 
-        var resp_payload = try std.ArrayList(u8).initCapacity(allocator, req.response.content_length.?);
+        var resp_payload = try std.ArrayList(u8).initCapacity(allocator, @intCast(req.response.content_length.?));
         defer resp_payload.deinit();
-        try resp_payload.resize(req.response.content_length.?);
+        try resp_payload.resize(@intCast(req.response.content_length.?));
         token = try resp_payload.toOwnedSlice();
         errdefer if (token) |t| allocator.free(t);
         _ = try req.readAll(token.?);
@@ -238,9 +238,9 @@ fn getImdsRoleName(allocator: std.mem.Allocator, client: *std.http.Client, imds_
         return null;
     }
     // TODO: This is all stupid. We can just allocate a freaking array and be done
-    var resp_payload = try std.ArrayList(u8).initCapacity(allocator, req.response.content_length.?);
+    var resp_payload = try std.ArrayList(u8).initCapacity(allocator, @intCast(req.response.content_length.?));
     defer resp_payload.deinit();
-    try resp_payload.resize(req.response.content_length.?);
+    try resp_payload.resize(@intCast(req.response.content_length.?));
     // TODO: This feels safer, but can we avoid this?
     const resp = try resp_payload.toOwnedSlice();
     defer allocator.free(resp);
@@ -296,9 +296,9 @@ fn getImdsCredentials(allocator: std.mem.Allocator, client: *std.http.Client, ro
         return null;
     }
     // TODO: This is still stupid
-    var resp_payload = try std.ArrayList(u8).initCapacity(allocator, req.response.content_length.?);
+    var resp_payload = try std.ArrayList(u8).initCapacity(allocator, @intCast(req.response.content_length.?));
     defer resp_payload.deinit();
-    try resp_payload.resize(req.response.content_length.?);
+    try resp_payload.resize(@intCast(req.response.content_length.?));
     const resp = try resp_payload.toOwnedSlice();
     defer allocator.free(resp);
     _ = try req.readAll(resp);
