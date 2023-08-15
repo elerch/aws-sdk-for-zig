@@ -28,7 +28,7 @@ pub fn main() anyerror!void {
             std.process.exit(0);
         }
         if (std.mem.eql(u8, "--output", arg))
-            output_dir = try output_dir.openDir(args[i + 1], .{});
+            output_dir = try output_dir.makeOpenPath(args[i + 1], .{});
         if (std.mem.eql(u8, "--models", arg))
             models_dir = try std.fs.cwd().openIterableDir(args[i + 1], .{});
     }
