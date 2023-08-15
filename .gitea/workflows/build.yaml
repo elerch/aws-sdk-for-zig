@@ -23,7 +23,6 @@ jobs:
       - run: tar x -C /usr/local -f zig-linux-${ARCH}-${ZIG_VERSION}.tar.xz
       - run: ln -s /usr/local/zig-linux-${ARCH}-${ZIG_VERSION}/zig /usr/local/bin/zig
       - run: apt update && apt install --no-install-recommends git
-      - run: (cd codegen && zig build test)
       - run: zig build test
       - run: zig build -Dtarget=arm-linux
       - run: zig build -Dtarget=x86_64-windows
