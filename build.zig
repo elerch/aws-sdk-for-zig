@@ -82,7 +82,7 @@ pub fn build(b: *Builder) !void {
             .root_source_file = .{ .path = "codegen/src/main.zig" },
             // We need this generated for the host, not the real target
             // .target = target,
-            .optimize = .ReleaseSafe,
+            .optimize = if (b.verbose) .Debug else .ReleaseSafe,
         });
         cg_exe.addModule("smithy", smithy_dep.module("smithy"));
         var cg_cmd = b.addRunArtifact(cg_exe);
@@ -90,6 +90,8 @@ pub fn build(b: *Builder) !void {
         cg_cmd.addDirectoryArg(std.Build.FileSource.relative("codegen/models"));
         cg_cmd.addArg("--output");
         cg_cmd.addDirectoryArg(std.Build.FileSource.relative("src/models"));
+        if (b.verbose)
+            cg_cmd.addArg("--verbose");
 
         // TODO: this should use zig_exe from std.Build
         // codegen should store a hash in a comment

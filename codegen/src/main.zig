@@ -3,6 +3,8 @@ const smithy = @import("smithy");
 const snake = @import("snake.zig");
 const json_zig = @embedFile("json.zig");
 
+var verbose = false;
+
 pub fn main() anyerror!void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
@@ -20,7 +22,7 @@ pub fn main() anyerror!void {
         if (std.mem.eql(u8, "--help", arg) or
             std.mem.eql(u8, "-h", arg))
         {
-            try stdout.print("usage: {s} [--models dir] [--output dir] [file...]\n\n", .{args[0]});
+            try stdout.print("usage: {s} [--verbose] [--models dir] [--output dir] [file...]\n\n", .{args[0]});
             try stdout.print(" --models specifies a directory with all model files (do not specify files if --models is used)\n", .{});
             try stdout.print(" --output specifies an output directory, otherwise the current working directory will be used\n", .{});
             std.process.exit(0);
@@ -44,6 +46,11 @@ pub fn main() anyerror!void {
             skip_next = false;
             continue;
         }
+        if (std.mem.eql(u8, "--verbose", arg)) {
+            verbose = true;
+            continue;
+        }
+
         if (std.mem.eql(u8, "--models", arg) or
             std.mem.eql(u8, "--output", arg))
         {
@@ -60,11 +67,7 @@ pub fn main() anyerror!void {
             defer cwd.close();
             defer cwd.setAsCwd() catch unreachable;
 
-            try stdout.print("orig cwd: {any}\n", .{cwd});
             try m.dir.setAsCwd();
-            try stdout.print("cwd: {any}\n", .{m.dir});
-            // TODO: this is throwing an error?
-            // _ = cwd;
             var mi = m.iterate();
             while (try mi.next()) |e| {
                 if ((e.kind == .file or e.kind == .sym_link) and
@@ -96,7 +99,7 @@ fn processFile(file_name: []const u8, stdout: anytype, output_dir: std.fs.Dir, m
     _ = try writer.write("const std = @import(\"std\");\n");
     _ = try writer.write("const serializeMap = @import(\"json.zig\").serializeMap;\n");
     _ = try writer.write("const smithy = @import(\"smithy\");\n\n");
-    std.log.info("Processing file: {s}", .{file_name});
+    if (verbose) std.log.info("Processing file: {s}", .{file_name});
     const service_names = generateServicesForFilePath(allocator, ";", file_name, writer) catch |err| {
         std.log.err("Error processing file: {s}", .{file_name});
         return err;
