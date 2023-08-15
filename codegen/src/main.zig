@@ -15,7 +15,7 @@ pub fn main() anyerror!void {
     const stdout = std.io.getStdOut().writer();
 
     var output_dir = std.fs.cwd();
-    defer output_dir.close();
+    defer if (output_dir.fd > 0) output_dir.close();
     var models_dir: ?std.fs.IterableDir = null;
     defer if (models_dir) |*m| m.close();
     for (args, 0..) |arg, i| {
