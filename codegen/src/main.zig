@@ -11,27 +11,74 @@ pub fn main() anyerror!void {
     const args = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, args);
     const stdout = std.io.getStdOut().writer();
-    const json_file = try std.fs.cwd().createFile("json.zig", .{});
+
+    var output_dir = std.fs.cwd();
+    defer output_dir.close();
+    var models_dir: ?std.fs.IterableDir = null;
+    defer if (models_dir) |*m| m.close();
+    for (args, 0..) |arg, i| {
+        if (std.mem.eql(u8, "--help", arg) or
+            std.mem.eql(u8, "-h", arg))
+        {
+            try stdout.print("usage: {s} [--models dir] [--output dir] [file...]\n\n", .{args[0]});
+            try stdout.print(" --models specifies a directory with all model files (do not specify files if --models is used)\n", .{});
+            try stdout.print(" --output specifies an output directory, otherwise the current working directory will be used\n", .{});
+            std.process.exit(0);
+        }
+        if (std.mem.eql(u8, "--output", arg))
+            output_dir = try output_dir.openDir(args[i + 1], .{});
+        if (std.mem.eql(u8, "--models", arg))
+            models_dir = try std.fs.cwd().openIterableDir(args[i + 1], .{});
+    }
+    // TODO: Seems like we should remove this in favor of a package
+    const json_file = try output_dir.createFile("json.zig", .{});
     defer json_file.close();
     try json_file.writer().writeAll(json_zig);
-    const manifest_file = try std.fs.cwd().createFile("service_manifest.zig", .{});
+    const manifest_file = try output_dir.createFile("service_manifest.zig", .{});
     defer manifest_file.close();
     const manifest = manifest_file.writer();
-    var inx: u32 = 0;
+    var files_processed: usize = 0;
+    var skip_next = true;
     for (args) |arg| {
-        if (inx == 0) {
-            inx = inx + 1;
+        if (skip_next) {
+            skip_next = false;
             continue;
         }
-        try processFile(arg, stdout, manifest);
-        inx = inx + 1;
+        if (std.mem.eql(u8, "--models", arg) or
+            std.mem.eql(u8, "--output", arg))
+        {
+            skip_next = true;
+            continue;
+        }
+        try processFile(arg, stdout, output_dir, manifest);
+        files_processed += 1;
+    }
+    if (files_processed == 0) {
+        // no files specified, look for json files in models directory or cwd
+        if (models_dir) |m| {
+            var cwd = try std.fs.cwd().openDir(".", .{});
+            defer cwd.close();
+            defer cwd.setAsCwd() catch unreachable;
+
+            try stdout.print("orig cwd: {any}\n", .{cwd});
+            try m.dir.setAsCwd();
+            try stdout.print("cwd: {any}\n", .{m.dir});
+            // TODO: this is throwing an error?
+            // _ = cwd;
+            var mi = m.iterate();
+            while (try mi.next()) |e| {
+                if ((e.kind == .file or e.kind == .sym_link) and
+                    std.mem.endsWith(u8, e.name, ".json"))
+                    try processFile(e.name, stdout, output_dir, manifest);
+            }
+        }
     }
 
     if (args.len == 0)
         _ = try generateServices(allocator, ";", std.io.getStdIn(), stdout);
 }
 
-fn processFile(arg: []const u8, stdout: anytype, manifest: anytype) !void {
+fn processFile(file_name: []const u8, stdout: anytype, output_dir: std.fs.Dir, manifest: anytype) !void {
     // It's probably best to create our own allocator here so we can deint at the end and
     // toss all allocations related to the services in this file
     // I can't guarantee we're not leaking something, and at the end of the
@@ -41,17 +88,17 @@ fn processFile(arg: []const u8, stdout: anytype, manifest: anytype) !void {
     const allocator = arena.allocator();
     var writer = &stdout;
     var file: std.fs.File = undefined;
-    const filename = try std.fmt.allocPrint(allocator, "{s}.zig", .{arg});
-    defer allocator.free(filename);
-    file = try std.fs.cwd().createFile(filename, .{ .truncate = true });
+    const output_file_name = try std.fmt.allocPrint(allocator, "{s}.zig", .{file_name});
+    defer allocator.free(output_file_name);
+    file = try output_dir.createFile(output_file_name, .{ .truncate = true });
     errdefer file.close();
     writer = &file.writer();
     _ = try writer.write("const std = @import(\"std\");\n");
     _ = try writer.write("const serializeMap = @import(\"json.zig\").serializeMap;\n");
     _ = try writer.write("const smithy = @import(\"smithy\");\n\n");
-    std.log.info("Processing file: {s}", .{arg});
-    const service_names = generateServicesForFilePath(allocator, ";", arg, writer) catch |err| {
-        std.log.err("Error processing file: {s}", .{arg});
+    std.log.info("Processing file: {s}", .{file_name});
+    const service_names = generateServicesForFilePath(allocator, ";", file_name, writer) catch |err| {
+        std.log.err("Error processing file: {s}", .{file_name});
         return err;
     };
     defer {
@@ -60,11 +107,16 @@ fn processFile(arg: []const u8, stdout: anytype, manifest: anytype) !void {
     }
     file.close();
     for (service_names) |name| {
-        try manifest.print("pub const {s} = @import(\"{s}\");\n", .{ name, std.fs.path.basename(filename) });
+        try manifest.print("pub const {s} = @import(\"{s}\");\n", .{ name, std.fs.path.basename(output_file_name) });
     }
 }
 
-fn generateServicesForFilePath(allocator: std.mem.Allocator, comptime terminator: []const u8, path: []const u8, writer: anytype) ![][]const u8 {
+fn generateServicesForFilePath(
+    allocator: std.mem.Allocator,
+    comptime terminator: []const u8,
+    path: []const u8,
+    writer: anytype,
+) ![][]const u8 {
     const file = try std.fs.cwd().openFile(path, .{});
     defer file.close();
     return try generateServices(allocator, terminator, file, writer);

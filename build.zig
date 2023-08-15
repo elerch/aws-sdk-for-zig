@@ -35,14 +35,19 @@ pub fn build(b: *Builder) !void {
         .optimize = optimize,
     });
     exe.addModule("smithy", smithy_dep.module("smithy"));
-    // TODO: Smithy needs to be in a different repo
-    // https://github.com/ziglang/zig/issues/855
-    // exe.addModulePath("smithy", "smithy/src/smithy.zig");
 
-    if (target.getOs().tag != .macos) exe.linkage = .static;
-
-    // Strip is controlled by optimize options
-    // exe.strip = b.option(bool, "strip", "strip exe [true]") orelse true;
+    // TODO: This does not work correctly due to https://github.com/ziglang/zig/issues/16354
+    //
+    // We are working here with kind of a weird dependency though. So we can do this
+    // another way
+    //
+    // TODO: These target/optimize are not correct, as we need to run the thing
+    // const codegen = b.anonymousDependency("codegen/", @import("codegen/build.zig"), .{
+    //     .target = target,
+    //     .optimize = optimize,
+    // });
+    // const codegen_cmd = b.addRunArtifact(codegen.artifact("codegen"));
+    // exe.step.dependOn(&codegen_cmd.step);
 
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
@@ -53,14 +58,23 @@ pub fn build(b: *Builder) !void {
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
 
-    // TODO: Proper testing
+    {
+        const cg = b.step("gen", "Generate zig service code from smithy models");
 
-    var codegen: ?*std.build.Step = null;
-    if (target.getOs().tag == .linux and false) {
-        // TODO: Support > linux with RunStep
-        // std.build.RunStep.create(null,null).cwd(std.fs.path.resolve(b.build_root, "codegen")).addArgs(...)
-        codegen = b.step("gen", "Generate zig service code from smithy models");
-        const cg = codegen.?;
+        const cg_exe = b.addExecutable(.{
+            .name = "codegen",
+            .root_source_file = .{ .path = "codegen/src/main.zig" },
+            // We need this generated for the host, not the real target
+            // .target = target,
+            // .optimize = optimize,
+        });
+        cg_exe.addModule("smithy", smithy_dep.module("smithy"));
+        var cg_cmd = b.addRunArtifact(cg_exe);
+        cg_cmd.addArg("--models");
+        cg_cmd.addDirectoryArg(std.Build.FileSource.relative("codegen/models"));
+        cg_cmd.addArg("--output");
+        cg_cmd.addDirectoryArg(std.Build.FileSource.relative("src/models"));
+
         // TODO: this should use zig_exe from std.Build
         // codegen should store a hash in a comment
         // this would be hash of the exe that created the file
@@ -78,21 +92,14 @@ pub fn build(b: *Builder) !void {
         // this scheme would permit cross plat codegen and maybe
         // we can have codegen added in a seperate repo,
         // though not sure how necessary that is
-        cg.dependOn(&b.addSystemCommand(&.{ "/bin/sh", "-c", "cd codegen && zig build" }).step);
+        // cg.dependOn(&b.addSystemCommand(&.{
+        //     b.zig_exe,
+        //     "build",
+        //     "run",
+        //     "-Doptimize=ReleaseSafe",
+        // }).step);
 
-        // triggering the re-gen
-        cg.dependOn(&b.addSystemCommand(&.{
-            "/bin/sh", "-c",
-            \\ [ ! -f src/models/service_manifest.zig ] || \
-            \\ [ $(find codegen -type f -newer src/models/service_manifest.zig -print -quit |wc -c) = '0' ] || \
-            \\ rm src/models/service_manifest.zig
-        }).step);
-        cg.dependOn(&b.addSystemCommand(&.{
-            "/bin/sh", "-c",
-            \\ mkdir -p src/models/ && \
-            \\ [ -f src/models/service_manifest.zig ] || \
-            \\ ( cd codegen/models && ../codegen *.json && mv *.zig ../../src/models )
-        }).step);
+        cg.dependOn(&cg_cmd.step);
         exe.step.dependOn(cg);
     }
 
