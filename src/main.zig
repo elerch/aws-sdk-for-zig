@@ -61,7 +61,8 @@ pub fn main() anyerror!void {
     const allocator = gpa.allocator();
     var tests = std.ArrayList(Tests).init(allocator);
     defer tests.deinit();
-    var args = std.process.args();
+    var args = try std.process.argsWithAllocator(allocator);
+    defer args.deinit();
     while (args.next()) |arg| {
         if (std.mem.eql(u8, "-v", arg)) {
             verbose += 1;
