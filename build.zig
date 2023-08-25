@@ -1,6 +1,12 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const Builder = @import("std").build.Builder;
+const Package = @import("Package.zig");
+
+const models_url = "https://github.com/aws/aws-sdk-go-v2/archive/7502ff360b1c3b79cbe117437327f6ff5fb89f65.tar.gz";
+const models_hash: ?[]const u8 = "1220a414719bff14c9362fb1c695e3346fa12ec2e728bae5757a57aae7738916ffd2";
+const models_subdir = "codegen/sdk-codegen/aws-models/"; // note will probably not work on windows
+const models_dir = "p" ++ std.fs.path.sep_str ++ (models_hash orelse "") ++ std.fs.path.sep_str ++ models_subdir;
 
 pub fn build(b: *Builder) !void {
     // Standard target options allows the person running `zig build` to choose
@@ -74,6 +80,9 @@ pub fn build(b: *Builder) !void {
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_unit_tests.step);
 
+    const fm = b.step("fetch", "Fetch model files");
+    var fetch_step = FetchStep.create(b, models_url, models_hash);
+    fm.dependOn(&fetch_step.step);
     {
         const cg = b.step("gen", "Generate zig service code from smithy models");
 
@@ -87,12 +96,16 @@ pub fn build(b: *Builder) !void {
         cg_exe.addModule("smithy", smithy_dep.module("smithy"));
         var cg_cmd = b.addRunArtifact(cg_exe);
         cg_cmd.addArg("--models");
-        cg_cmd.addDirectoryArg(std.Build.FileSource.relative("codegen/models"));
+        cg_cmd.addArg(try std.fs.path.join(
+            b.allocator,
+            &[_][]const u8{ b.global_cache_root.path.?, models_dir },
+        ));
+        // cg_cmd.addDirectoryArg(std.Build.FileSource.relative("codegen/models"));
         cg_cmd.addArg("--output");
         cg_cmd.addDirectoryArg(std.Build.FileSource.relative("src/models"));
         if (b.verbose)
             cg_cmd.addArg("--verbose");
-
+        cg_cmd.step.dependOn(&fetch_step.step);
         // TODO: this should use zig_exe from std.Build
         // codegen should store a hash in a comment
         // this would be hash of the exe that created the file
@@ -124,3 +137,49 @@ pub fn build(b: *Builder) !void {
 
     b.installArtifact(exe);
 }
+const FetchStep = struct {
+    step: std.Build.Step,
+    url: []const u8,
+    hash: ?[]const u8,
+
+    pub fn create(owner: *std.Build, url: []const u8, hash: ?[]const u8) *FetchStep {
+        const fs = owner.allocator.create(FetchStep) catch @panic("OOM");
+        fs.* = .{
+            .step = std.Build.Step.init(.{
+                .id = .custom,
+                .name = "FetchStep",
+                .owner = owner,
+                .makeFn = make,
+            }),
+            .url = url,
+            .hash = hash,
+        };
+        return fs;
+    }
+
+    fn make(step: *std.Build.Step, prog_node: *std.Progress.Node) !void {
+        const b = step.owner;
+        const self = @fieldParentPtr(FetchStep, "step", step);
+
+        const alloc = b.allocator;
+        var http_client: std.http.Client = .{ .allocator = alloc };
+        defer http_client.deinit();
+
+        var thread_pool: std.Thread.Pool = undefined;
+        try thread_pool.init(.{ .allocator = alloc });
+        defer thread_pool.deinit();
+        const pkg = try Package.fetchAndUnpack(
+            &thread_pool,
+            &http_client,
+            b.global_cache_root,
+            .{
+                .url = self.url,
+                .hash = self.hash,
+            },
+            self.url,
+            prog_node,
+        );
+        defer alloc.destroy(pkg);
+        defer pkg.deinit();
+    }
+};
