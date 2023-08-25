@@ -1,7 +1,8 @@
 const builtin = @import("builtin");
 const std = @import("std");
 const Hash = std.crypto.hash.sha2.Sha256;
-const HashedFile = struct {
+
+pub const HashedFile = struct {
     fs_path: []const u8,
     normalized_path: []const u8,
     hash: [Hash.digest_length]u8,
@@ -74,9 +75,28 @@ pub fn hex64(x: u64) [16]u8 {
     }
     return result;
 }
+
+pub const walkerFn = *const fn (std.fs.IterableDir.Walker.WalkerEntry) bool;
+
+fn included(entry: std.fs.IterableDir.Walker.WalkerEntry) bool {
+    _ = entry;
+    return true;
+}
+fn excluded(entry: std.fs.IterableDir.Walker.WalkerEntry) bool {
+    _ = entry;
+    return false;
+}
+pub const ComputeDirectoryOptions = struct {
+    isIncluded: walkerFn = included,
+    isExcluded: walkerFn = excluded,
+    fileHashes: []*HashedFile = undefined,
+    needFileHashes: bool = false,
+};
+
 pub fn computeDirectoryHash(
     thread_pool: *std.Thread.Pool,
     dir: std.fs.IterableDir,
+    options: *ComputeDirectoryOptions,
 ) ![Hash.digest_length]u8 {
     const gpa = thread_pool.allocator;
 
@@ -105,11 +125,14 @@ pub fn computeDirectoryHash(
                 .file => {},
                 else => return error.IllegalFileTypeInPackage,
             }
-            const hashed_file = try arena.create(HashedFile);
-            const fs_path = try arena.dupe(u8, entry.path);
+            if (options.isExcluded(entry) or !options.isIncluded(entry))
+                continue;
+            const alloc = if (options.needFileHashes) gpa else arena;
+            const hashed_file = try alloc.create(HashedFile);
+            const fs_path = try alloc.dupe(u8, entry.path);
             hashed_file.* = .{
                 .fs_path = fs_path,
-                .normalized_path = try normalizePath(arena, fs_path),
+                .normalized_path = try normalizePath(alloc, fs_path),
                 .hash = undefined, // to be populated by the worker
                 .failure = undefined, // to be populated by the worker
             };
@@ -132,6 +155,7 @@ pub fn computeDirectoryHash(
         hasher.update(&hashed_file.hash);
     }
     if (any_failures) return error.DirectoryHashUnavailable;
+    if (options.needFileHashes) options.fileHashes = try all_files.toOwnedSlice();
     return hasher.finalResult();
 }
 fn workerHashFile(dir: std.fs.Dir, hashed_file: *HashedFile, wg: *std.Thread.WaitGroup) void {

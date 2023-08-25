@@ -202,7 +202,7 @@ pub fn fetchAndUnpack(
         // Of course, if the ignore rules above omit the file from the package, then everything
         // is fine and no error should be raised.
 
-        break :a try Hasher.computeDirectoryHash(thread_pool, .{ .dir = tmp_directory.handle });
+        break :a try Hasher.computeDirectoryHash(thread_pool, .{ .dir = tmp_directory.handle }, &.{});
     };
 
     const pkg_dir_sub_path = "p" ++ s ++ Hasher.hexDigest(actual_hash);

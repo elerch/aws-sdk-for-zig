@@ -62,23 +62,29 @@ pub fn main() anyerror!void {
     }
     if (files_processed == 0) {
         // no files specified, look for json files in models directory or cwd
+        // this is our normal mode of operation and where initial optimizations
+        // can be made
         if (models_dir) |m| {
             var cwd = try std.fs.cwd().openDir(".", .{});
             defer cwd.close();
             defer cwd.setAsCwd() catch unreachable;
 
             try m.dir.setAsCwd();
-            var mi = m.iterate();
-            while (try mi.next()) |e| {
-                if ((e.kind == .file or e.kind == .sym_link) and
-                    std.mem.endsWith(u8, e.name, ".json"))
-                    try processFile(e.name, stdout, output_dir, manifest);
-            }
+            try processDirectories(m, output_dir, stdout, manifest);
         }
     }
 
     if (args.len == 0)
         _ = try generateServices(allocator, ";", std.io.getStdIn(), stdout);
+}
+fn processDirectories(models_dir: std.fs.IterableDir, output_dir: std.fs.Dir, stdout: anytype, manifest: anytype) !void {
+    // Do this in a brain dead fashion, no optimization
+    var mi = models_dir.iterate();
+    while (try mi.next()) |e| {
+        if ((e.kind == .file or e.kind == .sym_link) and
+            std.mem.endsWith(u8, e.name, ".json"))
+            try processFile(e.name, stdout, output_dir, manifest);
+    }
 }
 
 fn processFile(file_name: []const u8, stdout: anytype, output_dir: std.fs.Dir, manifest: anytype) !void {
