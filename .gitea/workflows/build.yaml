@@ -11,6 +11,7 @@ jobs:
     env:
       ZIG_VERSION: 0.11.0
       ARCH: x86_64
+      GLOBAL_CACHE: "--global-cache-dir ${{ github.workspace }}/zig-global-cache"
     steps:
       - name: Check out repository code
         uses: actions/checkout@v3
@@ -24,7 +25,7 @@ jobs:
       - run: ln -s /usr/local/zig-linux-${ARCH}-${ZIG_VERSION}/zig /usr/local/bin/zig
       - run: apt update && apt install --no-install-recommends git
       - run: zig build test --verbose
-      - run: zig build -Dtarget=arm-linux
+      - run: zig build --verbose -Dtarget=arm-linux
       - run: zig build -Dtarget=x86_64-windows
       - run: zig build -Dtarget=aarch64-linux
       - run: zig build -Dtarget=riscv64-linux
