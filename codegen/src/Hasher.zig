@@ -18,6 +18,7 @@ pub const HashedFile = struct {
 
 const multihash_len = 1 + 1 + Hash.digest_length;
 pub const hex_multihash_len = 2 * multihash_len;
+pub const digest_len = Hash.digest_length;
 
 const MultiHashHexDigest = [hex_multihash_len]u8;
 const MultihashFunction = enum(u16) {

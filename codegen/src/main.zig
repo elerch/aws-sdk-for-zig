@@ -1,6 +1,7 @@
 const std = @import("std");
 const smithy = @import("smithy");
 const snake = @import("snake.zig");
+const Hasher = @import("Hasher.zig");
 const json_zig = @embedFile("json.zig");
 
 var verbose = false;
@@ -33,12 +34,13 @@ pub fn main() anyerror!void {
             models_dir = try std.fs.cwd().openIterableDir(args[i + 1], .{});
     }
     // TODO: Seems like we should remove this in favor of a package
-    const json_file = try output_dir.createFile("json.zig", .{});
-    defer json_file.close();
-    try json_file.writer().writeAll(json_zig);
-    const manifest_file = try output_dir.createFile("service_manifest.zig", .{});
-    defer manifest_file.close();
-    const manifest = manifest_file.writer();
+    try output_dir.writeFile("json.zig", json_zig);
+
+    // TODO: We need a different way to handle this file...
+    var manifest_file_started = false;
+    var manifest_file: std.fs.File = undefined;
+    defer if (manifest_file_started) manifest_file.close();
+    var manifest: std.fs.File.Writer = undefined;
     var files_processed: usize = 0;
     var skip_next = true;
     for (args) |arg| {
@@ -57,6 +59,10 @@ pub fn main() anyerror!void {
             skip_next = true;
             continue;
         }
+        if (!manifest_file_started) {
+            manifest_file = try output_dir.createFile("service_manifest.zig", .{});
+            manifest = manifest_file.writer();
+        }
         try processFile(arg, stdout, output_dir, manifest);
         files_processed += 1;
     }
@@ -70,23 +76,98 @@ pub fn main() anyerror!void {
             defer cwd.setAsCwd() catch unreachable;
 
             try m.dir.setAsCwd();
-            try processDirectories(m, output_dir, stdout, manifest);
+            try processDirectories(m, output_dir, stdout);
         }
     }
 
     if (args.len == 0)
         _ = try generateServices(allocator, ";", std.io.getStdIn(), stdout);
 }
-fn processDirectories(models_dir: std.fs.IterableDir, output_dir: std.fs.Dir, stdout: anytype, manifest: anytype) !void {
-    // Do this in a brain dead fashion, no optimization
+const OutputManifest = struct {
+    model_dir_hash_digest: [Hasher.hex_multihash_len]u8,
+    output_dir_hash_digest: [Hasher.hex_multihash_len]u8,
+};
+fn processDirectories(models_dir: std.fs.IterableDir, output_dir: std.fs.Dir, stdout: anytype) !void {
+    // Let's get ready to hash!!
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var thread_pool: std.Thread.Pool = undefined;
+    try thread_pool.init(.{ .allocator = allocator });
+    defer thread_pool.deinit();
+    var calculated_manifest = try calculateDigests(models_dir, output_dir, &thread_pool);
+    const output_stored_manifest = output_dir.readFileAlloc(allocator, "output_manifest.json", std.math.maxInt(usize)) catch null;
+    if (output_stored_manifest) |o| {
+        // we have a stored manifest. Parse it and compare to our calculations
+        // we can leak as we're using an arena allocator
+        const stored_manifest = try std.json.parseFromSliceLeaky(OutputManifest, allocator, o, .{});
+        if (std.mem.eql(u8, &stored_manifest.model_dir_hash_digest, &calculated_manifest.model_dir_hash_digest) and
+            std.mem.eql(u8, &stored_manifest.output_dir_hash_digest, &calculated_manifest.output_dir_hash_digest))
+        {
+            // hashes all match, we can end now
+            if (verbose)
+                std.log.info("calculated hashes match output_manifest.json. Nothing to do", .{});
+            return;
+        }
+    }
+    // Do this in a brain dead fashion from here, no optimization
+    const manifest_file = try output_dir.createFile("service_manifest.zig", .{});
+    defer manifest_file.close();
+    const manifest = manifest_file.writer();
     var mi = models_dir.iterate();
     while (try mi.next()) |e| {
         if ((e.kind == .file or e.kind == .sym_link) and
             std.mem.endsWith(u8, e.name, ".json"))
             try processFile(e.name, stdout, output_dir, manifest);
     }
+    // re-calculate so we can store the manifest
+    model_digest = calculated_manifest.model_dir_hash_digest;
+    calculated_manifest = try calculateDigests(models_dir, output_dir, &thread_pool);
+    try output_dir.writeFile("output_manifest.json", try std.json.stringifyAlloc(
+        allocator,
+        calculated_manifest,
+        .{ .whitespace = .indent_2 },
+    ));
 }
 
+var model_digest: ?[Hasher.hex_multihash_len]u8 = null;
+fn calculateDigests(models_dir: std.fs.IterableDir, output_dir: std.fs.Dir, thread_pool: *std.Thread.Pool) !OutputManifest {
+    const model_hash = if (model_digest) |m| m[0..Hasher.digest_len].* else try Hasher.computeDirectoryHash(thread_pool, models_dir, @constCast(&Hasher.ComputeDirectoryOptions{
+        .isIncluded = struct {
+            pub fn include(entry: std.fs.IterableDir.Walker.WalkerEntry) bool {
+                return std.mem.endsWith(u8, entry.basename, ".json");
+            }
+        }.include,
+        .isExcluded = struct {
+            pub fn exclude(entry: std.fs.IterableDir.Walker.WalkerEntry) bool {
+                _ = entry;
+                return false;
+            }
+        }.exclude,
+        .needFileHashes = false,
+    }));
+    if (verbose) std.log.info("Model directory hash: {s}", .{model_digest orelse Hasher.hexDigest(model_hash)});
+
+    const output_hash = try Hasher.computeDirectoryHash(thread_pool, try output_dir.openIterableDir(".", .{}), @constCast(&Hasher.ComputeDirectoryOptions{
+        .isIncluded = struct {
+            pub fn include(entry: std.fs.IterableDir.Walker.WalkerEntry) bool {
+                return std.mem.endsWith(u8, entry.basename, ".zig");
+            }
+        }.include,
+        .isExcluded = struct {
+            pub fn exclude(entry: std.fs.IterableDir.Walker.WalkerEntry) bool {
+                _ = entry;
+                return false;
+            }
+        }.exclude,
+        .needFileHashes = false,
+    }));
+    if (verbose) std.log.info("Output directory hash: {s}", .{Hasher.hexDigest(output_hash)});
+    return .{
+        .model_dir_hash_digest = model_digest orelse Hasher.hexDigest(model_hash),
+        .output_dir_hash_digest = Hasher.hexDigest(output_hash),
+    };
+}
 fn processFile(file_name: []const u8, stdout: anytype, output_dir: std.fs.Dir, manifest: anytype) !void {
     // It's probably best to create our own allocator here so we can deint at the end and
     // toss all allocations related to the services in this file
