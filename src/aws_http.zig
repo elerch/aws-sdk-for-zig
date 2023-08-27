@@ -283,7 +283,7 @@ fn endpointForRequest(allocator: std.mem.Allocator, service: []const u8, request
     if (try endpointException(allocator, service, request, options, realregion, dualstack, domain)) |e|
         return e;
 
-    const uri = try std.fmt.allocPrintZ(allocator, "https://{s}{s}.{s}.{s}", .{ service, dualstack, realregion, domain });
+    const uri = try std.fmt.allocPrint(allocator, "https://{s}{s}.{s}.{s}", .{ service, dualstack, realregion, domain });
     const host = try allocator.dupe(u8, uri["https://".len..]);
     log.debug("host: {s}, scheme: {s}, port: {}", .{ host, "https", 443 });
     return EndPoint{
@@ -327,7 +327,7 @@ fn endpointException(
         const rest_of_path = request.path[bucket_name.len + 1 ..];
         // TODO: Implement
         _ = options;
-        const uri = try std.fmt.allocPrintZ(allocator, "https://{s}.{s}{s}.{s}.{s}", .{ bucket_name, service, dualstack, realregion, domain });
+        const uri = try std.fmt.allocPrint(allocator, "https://{s}.{s}{s}.{s}.{s}", .{ bucket_name, service, dualstack, realregion, domain });
         const host = try allocator.dupe(u8, uri["https://".len..]);
         log.debug("S3 host: {s}, scheme: {s}, port: {}", .{ host, "https", 443 });
         return EndPoint{
