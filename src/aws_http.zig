@@ -163,7 +163,7 @@ pub const AwsHttp = struct {
         defer headers.deinit();
         for (request_cp.headers) |header|
             try headers.append(header.name, header.value);
-        log.debug("All Request Headers (zfetch):", .{});
+        log.debug("All Request Headers:", .{});
         for (headers.list.items) |h| {
             log.debug("\t{s}: {s}", .{ h.name, h.value });
         }
@@ -179,6 +179,7 @@ pub const AwsHttp = struct {
 
         const method = std.meta.stringToEnum(std.http.Method, request_cp.method).?;
         var req = try cl.request(method, try std.Uri.parse(url), headers, .{});
+        defer req.deinit();
         if (request_cp.body.len > 0)
             req.transfer_encoding = .{ .content_length = request_cp.body.len };
         try req.start();
@@ -210,11 +211,7 @@ pub const AwsHttp = struct {
                 content_length = std.fmt.parseInt(usize, h.value, 10) catch 0;
         }
 
-        // TODO: This is still stupid. Allocate a freaking array
-        var resp_payload = try std.ArrayList(u8).initCapacity(self.allocator, content_length);
-        defer resp_payload.deinit();
-        try resp_payload.resize(content_length);
-        var response_data = try resp_payload.toOwnedSlice();
+        var response_data = try self.allocator.alloc(u8, content_length);
         errdefer self.allocator.free(response_data);
         _ = try req.readAll(response_data);
         log.debug("raw response body:\n{s}", .{response_data});

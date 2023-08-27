@@ -1383,6 +1383,7 @@ fn processRequest(options: *TestOptions, server: *std.http.Server) !void {
     var res = try server.accept(.{ .allocator = options.allocator });
     options.server_ready = false;
     defer res.deinit();
+    defer if (res.headers.owned and res.headers.list.items.len > 0) res.headers.deinit();
     defer _ = res.reset();
     try res.wait(); // wait for client to send a complete request head
 
