@@ -243,7 +243,7 @@ fn getImdsRoleName(allocator: std.mem.Allocator, client: *std.http.Client, imds_
         log.warn("Unexpected empty response from IMDS endpoint post token", .{});
         return null;
     }
-    var resp = try allocator.alloc(u8, req.response.content_length.?);
+    var resp = try allocator.alloc(u8, @intCast(req.response.content_length.?));
     defer allocator.free(resp);
     _ = try req.readAll(resp);
 
@@ -296,7 +296,7 @@ fn getImdsCredentials(allocator: std.mem.Allocator, client: *std.http.Client, ro
         log.warn("Unexpected empty response from IMDS role endpoint", .{});
         return null;
     }
-    var resp = try allocator.alloc(u8, req.response.content_length.?);
+    var resp = try allocator.alloc(u8, @intCast(req.response.content_length.?));
     defer allocator.free(resp);
     _ = try req.readAll(resp);
 
