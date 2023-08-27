@@ -1454,6 +1454,7 @@ test "sts get_caller_identity comptime" {
     try requestOptions.waitForReady();
 
     awshttp.endpoint_override = requestOptions.test_server_runtime_uri;
+    defer awshttp.endpoint_override = null;
     var client = try Client.init(allocator, .{});
     const options = Options{
         .region = "us-west-2",
