@@ -1,12 +1,12 @@
 const std = @import("std");
 const expectEqualStrings = std.testing.expectEqualStrings;
 
-pub fn snakeToCamel(allocator: std.mem.Allocator, name: []const u8) ![]u8 {
+pub fn snakeToCamel(allocator: std.mem.Allocator, name: []const u8) ![:0]u8 {
     var utf8_name = (std.unicode.Utf8View.init(name) catch unreachable).iterator();
     var target_inx: usize = 0;
     var previous_ascii: u8 = 0;
     // A single word will take the entire length plus our sentinel
-    const rc = try allocator.alloc(u8, name.len + 1);
+    var rc = try allocator.alloc(u8, name.len + 1);
     while (utf8_name.nextCodepoint()) |cp| {
         if (cp > 0xff) return error.UnicodeNotSupported;
         const ascii_char = @as(u8, @truncate(cp));
@@ -21,8 +21,10 @@ pub fn snakeToCamel(allocator: std.mem.Allocator, name: []const u8) ![]u8 {
         }
         previous_ascii = ascii_char;
     }
+    // Do we care if the allocator refuses resize?
+    _ = allocator.resize(rc, target_inx + 1);
     rc[target_inx] = 0; // add zero sentinel
-    return rc[0..target_inx];
+    return rc[0..target_inx :0];
 }
 pub fn snakeToPascal(allocator: std.mem.Allocator, name: []const u8) ![]u8 {
     const rc = try snakeToCamel(allocator, name);
