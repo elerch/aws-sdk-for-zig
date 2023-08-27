@@ -635,8 +635,8 @@ fn getHomeDir(allocator: std.mem.Allocator) ![]const u8 {
 
 test "filePath" {
     const allocator = std.testing.allocator;
-    std.testing.log_level = .debug;
-    log.debug("\n", .{});
+    // std.testing.log_level = .debug;
+    // log.debug("\n", .{});
     const path = try filePath(allocator, null, "NOTHING", null, "hello");
     defer allocator.free(path.evaluated_path);
     defer allocator.free(path.home.?);
@@ -646,8 +646,8 @@ test "filePath" {
 }
 
 test "ini to creds" {
-    std.testing.log_level = .debug;
-    log.debug("\n", .{});
+    // std.testing.log_level = .debug;
+    // log.debug("\n", .{});
     const partial_creds = try credsForText(
         \\
         \\# Amazon Web Services Credentials File used by AWS CLI, SDKs, and tools
