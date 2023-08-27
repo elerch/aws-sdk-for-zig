@@ -180,42 +180,46 @@ pub fn main() anyerror!void {
                 }
             },
             .ec2_query_no_input => {
-                // Describe regions is a simpler request and easier to debug
-                const result = try client.call(services.ec2.describe_regions.Request{}, options);
-                defer result.deinit();
-                std.log.info("request id: {any}", .{result.response_metadata.request_id});
-                std.log.info("region count: {d}", .{result.response.regions.?.len});
+                // TODO: hunt down this compile error:
+                // fmt.zig:459:5: error: invalid format string 's' for type 'models.ec2.2016-11-15.json.Filter
+                std.log.err("EC2 functions not yet working in 0.11", .{});
+                // // Describe regions is a simpler request and easier to debug
+                // const result = try client.call(services.ec2.describe_regions.Request{}, options);
+                // defer result.deinit();
+                // std.log.info("request id: {any}", .{result.response_metadata.request_id});
+                // std.log.info("region count: {d}", .{result.response.regions.?.len});
             },
             .ec2_query_with_input => {
+                std.log.err("EC2 functions not yet working in 0.11", .{});
                 // Describe instances is more interesting
-                const result = try client.call(services.ec2.describe_instances.Request{ .max_results = 6 }, options);
-                defer result.deinit();
-                std.log.info("reservation count: {d}", .{result.response.reservations.?.len});
-                var items: usize = 0;
-                for (result.response.reservations.?) |reservation| {
-                    items += reservation.instances.?.len;
-                }
-                std.log.info("items count: {d}", .{items});
-                var next = result.response.next_token;
-                while (next) |next_token| {
-                    std.log.info("more results available: fetching again", .{});
-
-                    const more = try aws.Request(services.ec2.describe_instances)
-                        .call(.{ .next_token = next_token, .max_results = 6 }, options);
-                    defer more.deinit();
-                    // we could have exactly 6, which means we have a next token(?!) but not
-                    // any actual additional data
-                    if (more.response.reservations == null) break;
-                    std.log.info("reservation count: {d}", .{more.response.reservations.?.len});
-                    var batch_items: usize = 0;
-                    for (more.response.reservations.?) |reservation| {
-                        batch_items += reservation.instances.?.len;
-                    }
-                    std.log.info("items count: {d}", .{batch_items});
-                    items += batch_items;
-                    std.log.info("total items count: {d}", .{items});
-                    next = more.response.next_token;
-                }
+                // const result = try client.call(services.ec2.describe_instances.Request{ .max_results = 6 }, options);
+                // defer result.deinit();
+                // std.log.info("reservation count: {d}", .{result.response.reservations.?.len});
+                // var items: usize = 0;
+                // for (result.response.reservations.?) |reservation| {
+                //     items += reservation.instances.?.len;
+                // }
+                // std.log.info("items count: {d}", .{items});
+                // var next = result.response.next_token;
+                // while (next) |next_token| {
+                //     std.log.info("more results available: fetching again", .{});
+                //
+                //     const more = try aws.Request(services.ec2.describe_instances)
+                //         .call(.{ .next_token = next_token, .max_results = 6 }, options);
+                //     defer more.deinit();
+                //     // we could have exactly 6, which means we have a next token(?!) but not
+                //     // any actual additional data
+                //     if (more.response.reservations == null) break;
+                //     std.log.info("reservation count: {d}", .{more.response.reservations.?.len});
+                //     var batch_items: usize = 0;
+                //     for (more.response.reservations.?) |reservation| {
+                //         batch_items += reservation.instances.?.len;
+                //     }
+                //     std.log.info("items count: {d}", .{batch_items});
+                //     items += batch_items;
+                //     std.log.info("total items count: {d}", .{items});
+                //     next = more.response.next_token;
+                // }
             },
             .rest_xml_no_input => {
                 const result = try client.call(services.s3.list_buckets.Request{}, options);

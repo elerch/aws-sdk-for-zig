@@ -42,6 +42,10 @@ pub fn build(b: *Builder) !void {
     });
     exe.addModule("smithy", smithy_dep.module("smithy"));
 
+    const module = b.addModule("aws", .{
+        .source_file = .{ .path = "src/aws.zig" },
+    });
+    exe.addModule("aws", module);
     // TODO: This does not work correctly due to https://github.com/ziglang/zig/issues/16354
     //
     // We are working here with kind of a weird dependency though. So we can do this

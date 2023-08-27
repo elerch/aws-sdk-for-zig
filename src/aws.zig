@@ -1120,6 +1120,10 @@ fn reportTraffic(allocator: std.mem.Allocator, info: []const u8, request: awshtt
     reporter("{s}\n", .{msg.items});
 }
 
+////////////////////////////////////////////////////////////////////////
+// All code below this line is for testing
+////////////////////////////////////////////////////////////////////////
+
 // TODO: Where does this belong really?
 fn typeForField(comptime T: type, comptime field_name: []const u8) !type {
     const ti = @typeInfo(T);
@@ -1299,10 +1303,6 @@ test "layer object only" {
 //     const r = try json.parse(SResponse, &stream, parser_options);
 //     json.parseFree(SResponse, r, parser_options);
 
-////////////////////////////////////////////////////////////////////////
-// All code below this line is for testing
-////////////////////////////////////////////////////////////////////////
-
 test {
     // To run nested container tests, either, call `refAllDecls` which will
     // reference all declarations located in the given argument.
@@ -1430,10 +1430,13 @@ fn serve(options: *TestOptions, res: *std.http.Server.Response) ![]const u8 {
     // try res.headers.append("content-length", try std.fmt.allocPrint(allocator, "{d}", .{server_response.len}));
     return options.server_response;
 }
-const TestHeader = struct {
-    name: []const u8,
-    value: []const u8,
-};
+
+////////////////////////////////////////////////////////////////////////
+// These will replicate the tests that were in src/main.zig
+// The server_response and server_response_headers come from logs of
+// a previous run of src/main.zig, with redactions
+////////////////////////////////////////////////////////////////////////
+
 test "sts get_caller_identity comptime" {
     // std.testing.log_level = .debug;
     const allocator = std.testing.allocator;
