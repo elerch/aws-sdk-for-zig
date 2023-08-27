@@ -1308,10 +1308,14 @@ test {
     // reference all declarations located in the given argument.
     // `@This()` is a builtin function that returns the innermost container it is called from.
     // In this example, the innermost container is this file (implicitly a struct).
-    // TODO: re-enable this
-    // std.testing.refAllDecls(@This());
-    // std.testing.refAllDecls(config);
-    // std.testing.refAllDecls(interface);
+    std.testing.refAllDecls(@This());
+    std.testing.refAllDecls(awshttp);
+    std.testing.refAllDecls(json);
+    std.testing.refAllDecls(url);
+    std.testing.refAllDecls(case);
+    std.testing.refAllDecls(date);
+    std.testing.refAllDecls(servicemodel);
+    std.testing.refAllDecls(xml_shaper);
 }
 const TestOptions = struct {
     allocator: std.mem.Allocator,
