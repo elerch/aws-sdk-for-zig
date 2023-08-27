@@ -263,10 +263,14 @@ fn getEnvironmentVariable(allocator: std.mem.Allocator, key: []const u8) !?[]con
     };
 }
 
+/// override endpoint url. Intended for use in testing. Normally, you should
+/// rely on AWS_ENDPOINT_URL environment variable for this
+pub var endpoint_override: ?[]const u8 = null;
+
 fn endpointForRequest(allocator: std.mem.Allocator, service: []const u8, request: HttpRequest, options: Options) !EndPoint {
-    const environment_override = try getEnvironmentVariable(allocator, "AWS_ENDPOINT_URL");
+    const environment_override = endpoint_override orelse try getEnvironmentVariable(allocator, "AWS_ENDPOINT_URL");
     if (environment_override) |override| {
-        const uri = try allocator.dupeZ(u8, override);
+        const uri = try allocator.dupe(u8, override);
         return endPointFromUri(allocator, uri);
     }
     // Fallback to us-east-1 if global endpoint does not exist.
