@@ -1339,8 +1339,8 @@ const TestOptions = struct {
     fn deinit(self: Self) void {
         if (self.request_body.len > 0)
             self.allocator.free(self.request_body);
-        // if (self.test_server_runtime_uri) |_|
-        //     self.allocator.free(self.test_server_runtime_uri.?);
+        if (self.test_server_runtime_uri) |_|
+            self.allocator.free(self.test_server_runtime_uri.?);
     }
 };
 
@@ -1357,7 +1357,6 @@ fn threadMain(options: *TestOptions) !void {
     options.server_port = server.socket.listen_address.in.getPort();
 
     options.test_server_runtime_uri = try std.fmt.allocPrint(options.allocator, "http://127.0.0.1:{d}", .{options.server_port.?});
-    defer options.allocator.free(options.test_server_runtime_uri.?);
     log.debug("server listening at {s}", .{options.test_server_runtime_uri.?});
     defer server.deinit();
     log.info("starting server thread, tid {d}", .{std.Thread.getCurrentId()});
@@ -1440,8 +1439,6 @@ fn serve(options: *TestOptions, res: *std.http.Server.Response) ![]const u8 {
 test "sts get_caller_identity comptime" {
     // std.testing.log_level = .debug;
     const allocator = std.testing.allocator;
-    // [debug] (awshttp):     x-amzn-RequestId: 8f0d54da-1230-40f7-b4ac-95015c4b84cd
-    // [debug] (awshttp):     Content-Type: application/json
     var requestOptions: TestOptions = .{
         .allocator = allocator,
         .server_response =
@@ -1463,6 +1460,20 @@ test "sts get_caller_identity comptime" {
 
     awshttp.endpoint_override = requestOptions.test_server_runtime_uri;
     defer awshttp.endpoint_override = null;
+
+    const creds = @import("aws_authentication.zig").Credentials.init(
+        allocator,
+        try allocator.dupe(u8, "ACCESS"),
+        try allocator.dupe(u8, "SECRET"),
+        null,
+    );
+    const aws_creds = @import("aws_credentials.zig");
+    aws_creds.static_credentials = creds;
+    defer {
+        // creds.deinit(); Creds will get deinited in the course of the call. We don't want to do it twice
+        aws_creds.static_credentials = null; // we do need to reset the static creds for the next user though
+    }
+
     var client = try Client.init(allocator, .{});
     const options = Options{
         .region = "us-west-2",

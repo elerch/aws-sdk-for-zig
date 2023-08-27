@@ -4,6 +4,9 @@
 //! 3. Credentials/config files
 //! 4. ECS Container credentials, using AWS_CONTAINER_CREDENTIALS_RELATIVE_URI
 //! 5. EC2 instance profile credentials
+//!
+//! For testing purposes, you can also set the static credentials object, which
+//! will override all of the above
 const std = @import("std");
 const builtin = @import("builtin");
 const auth = @import("aws_authentication.zig");
@@ -23,7 +26,10 @@ pub const Options = struct {
     profile: Profile = .{},
 };
 
+pub var static_credentials: ?auth.Credentials = null;
+
 pub fn getCredentials(allocator: std.mem.Allocator, options: Options) !auth.Credentials {
+    if (static_credentials) |c| return c;
     if (try getEnvironmentCredentials(allocator)) |cred| {
         log.debug("Found credentials in environment. Access key: {s}", .{cred.access_key});
         return cred;
