@@ -54,7 +54,7 @@ pub fn encodeInternal(
             rc = try encodeInternal(allocator, parent, field_name, first, obj.*, writer, options);
         } else {
             if (!first) _ = try writer.write("&");
-            try writer.print("{s}{s}={any}", .{ parent, field_name, obj });
+            try writer.print("{s}{s}={s}", .{ parent, field_name, obj });
             rc = false;
         },
         .Struct => if (std.mem.eql(u8, "", field_name)) {
@@ -90,7 +90,7 @@ pub fn encodeInternal(
     return rc;
 }
 
-fn testencode(expected: []const u8, value: anytype, options: EncodingOptions) !void {
+fn testencode(allocator: std.mem.Allocator, expected: []const u8, value: anytype, comptime options: EncodingOptions) !void {
     const ValidationWriter = struct {
         const Self = @This();
         pub const Writer = std.io.Writer(*Self, Error, write);
@@ -143,12 +143,13 @@ fn testencode(expected: []const u8, value: anytype, options: EncodingOptions) !v
     };
 
     var vos = ValidationWriter.init(expected);
-    try encode(value, vos.writer(), options);
+    try encode(allocator, value, vos.writer(), options);
     if (vos.expected_remaining.len > 0) return error.NotEnoughData;
 }
 
 test "can urlencode an object" {
     try testencode(
+        std.testing.allocator,
         "Action=GetCallerIdentity&Version=2021-01-01",
         .{ .Action = "GetCallerIdentity", .Version = "2021-01-01" },
         .{},
@@ -156,6 +157,7 @@ test "can urlencode an object" {
 }
 test "can urlencode an object with integer" {
     try testencode(
+        std.testing.allocator,
         "Action=GetCallerIdentity&Duration=32",
         .{ .Action = "GetCallerIdentity", .Duration = 32 },
         .{},
@@ -172,12 +174,14 @@ test "can urlencode an object with unset values" {
     // defer buffer.deinit();
     // const writer = buffer.writer();
     // try encode(
+    //     std.testing.allocator,
     //     UnsetValues{ .action = "GetCallerIdentity", .duration = 32 },
     //     writer,
-    //     .{ .allocator = std.testing.allocator },
+    //     .{},
     // );
-    // std.debug.print("{s}", .{buffer.items});
+    // std.debug.print("\n\nEncoded as '{s}'\n", .{buffer.items});
     try testencode(
+        std.testing.allocator,
         "action=GetCallerIdentity&duration=32",
         UnsetValues{ .action = "GetCallerIdentity", .duration = 32 },
         .{},
@@ -185,8 +189,9 @@ test "can urlencode an object with unset values" {
 }
 test "can urlencode a complex object" {
     try testencode(
+        std.testing.allocator,
         "Action=GetCallerIdentity&Version=2021-01-01&complex.innermember=foo",
         .{ .Action = "GetCallerIdentity", .Version = "2021-01-01", .complex = .{ .innermember = "foo" } },
-        .{ .allocator = std.testing.allocator },
+        .{},
     );
 }
