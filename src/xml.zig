@@ -654,7 +654,7 @@ fn dupeAndUnescape(alloc: Allocator, text: []const u8) ![]const u8 {
     // This error is not strictly true, but we need to match one of the items
     // from the error set provided by the other stdlib calls at the calling site
     if (!alloc.resize(str, j)) return error.OutOfMemory;
-    return str;
+    return str[0..j];
 }
 
 test "dupeAndUnescape" {
@@ -662,8 +662,12 @@ test "dupeAndUnescape" {
     defer arena.deinit();
     const alloc = arena.allocator();
 
-    try testing.expectEqualSlices(u8, "test", try dupeAndUnescape(alloc, "test"));
-    try testing.expectEqualSlices(u8, "a<b&c>d\"e'f<", try dupeAndUnescape(alloc, "a&lt;b&amp;c&gt;d&quot;e&apos;f&lt;"));
+    const duped = try dupeAndUnescape(testing.allocator, "test");
+    defer testing.allocator.free(duped);
+    try testing.expectEqualSlices(u8, "test", duped);
+    const duped2 = try dupeAndUnescape(testing.allocator, "a&lt;b&amp;c&gt;d&quot;e&apos;f&lt;");
+    defer testing.allocator.free(duped2);
+    try testing.expectEqualSlices(u8, "a<b&c>d\"e'f<", duped2);
     try testing.expectError(error.InvalidEntity, dupeAndUnescape(alloc, "python&"));
     try testing.expectError(error.InvalidEntity, dupeAndUnescape(alloc, "python&&"));
     try testing.expectError(error.InvalidEntity, dupeAndUnescape(alloc, "python&test;"));
