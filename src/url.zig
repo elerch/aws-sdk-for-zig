@@ -195,3 +195,33 @@ test "can urlencode a complex object" {
         .{},
     );
 }
+
+const Filter = struct {
+    name: ?[]const u8 = null,
+    values: ?[][]const u8 = null,
+
+    pub fn fieldNameFor(_: @This(), comptime field_name: []const u8) []const u8 {
+        const mappings = .{
+            .name = "Name",
+            .values = "Value",
+        };
+        return @field(mappings, field_name);
+    }
+};
+
+const Request: type = struct {
+    filters: ?[]Filter = null,
+    region_names: ?[][]const u8 = null,
+    dry_run: ?bool = null,
+    all_regions: ?bool = null,
+};
+test "can urlencode an EC2 Filter" {
+    try testencode(
+        std.testing.allocator,
+        "name=foo&values=bar",
+        Request{
+            .filters = @constCast(&[_]Filter{.{ .name = "foo", .values = @constCast(&[_][]const u8{"bar"}) }}),
+        },
+        .{},
+    );
+}
