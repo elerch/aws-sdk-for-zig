@@ -237,12 +237,7 @@ fn getImdsRoleName(allocator: std.mem.Allocator, client: *std.http.Client, imds_
         log.warn("Unexpected empty response from IMDS endpoint post token", .{});
         return null;
     }
-    // TODO: This is all stupid. We can just allocate a freaking array and be done
-    var resp_payload = try std.ArrayList(u8).initCapacity(allocator, @intCast(req.response.content_length.?));
-    defer resp_payload.deinit();
-    try resp_payload.resize(@intCast(req.response.content_length.?));
-    // TODO: This feels safer, but can we avoid this?
-    const resp = try resp_payload.toOwnedSlice();
+    var resp = try allocator.alloc(u8, req.response.content_length.?);
     defer allocator.free(resp);
     _ = try req.readAll(resp);
 
@@ -295,11 +290,7 @@ fn getImdsCredentials(allocator: std.mem.Allocator, client: *std.http.Client, ro
         log.warn("Unexpected empty response from IMDS role endpoint", .{});
         return null;
     }
-    // TODO: This is still stupid
-    var resp_payload = try std.ArrayList(u8).initCapacity(allocator, @intCast(req.response.content_length.?));
-    defer resp_payload.deinit();
-    try resp_payload.resize(@intCast(req.response.content_length.?));
-    const resp = try resp_payload.toOwnedSlice();
+    var resp = try allocator.alloc(u8, req.response.content_length.?);
     defer allocator.free(resp);
     _ = try req.readAll(resp);
 
