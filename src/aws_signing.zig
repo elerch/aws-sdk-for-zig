@@ -271,21 +271,13 @@ pub fn freeSignedRequest(allocator: std.mem.Allocator, request: *base.Request, c
         return;
     };
 
-    var remove_len: u3 = 0;
     for (request.headers) |h| {
         if (std.ascii.eqlIgnoreCase(h.name, "X-Amz-Date") or
             std.ascii.eqlIgnoreCase(h.name, "Authorization") or
             std.ascii.eqlIgnoreCase(h.name, "X-Amz-Security-Token") or
             std.ascii.eqlIgnoreCase(h.name, "x-amz-content-sha256"))
-        {
             allocator.free(h.value);
-            remove_len += 1;
-        }
     }
-    if (remove_len > 0)
-        // TODO: We should not be discarding this return value
-        // Why on earth are we resizing the array if we're about to free the whole thing anyway?
-        _ = allocator.resize(request.headers, request.headers.len - remove_len);
 
     allocator.free(request.headers);
 }
@@ -415,14 +407,23 @@ fn canonicalUri(allocator: std.mem.Allocator, path: []const u8, double_encode: b
     if (path.len == 0 or path[0] == '?' or path[0] == '#')
         return try allocator.dupe(u8, "/");
     log.debug("encoding path: {s}", .{path});
-    const encoded_once = try encodeUri(allocator, path);
+    var encoded_once = try encodeUri(allocator, path);
     log.debug("encoded path (1): {s}", .{encoded_once});
-    if (!double_encode or std.mem.indexOf(u8, path, "%") != null) // TODO: Is the indexOf condition universally true?
-        return encoded_once[0 .. std.mem.lastIndexOf(u8, encoded_once, "?") orelse encoded_once.len];
+    if (!double_encode or std.mem.indexOf(u8, path, "%") != null) { // TODO: Is the indexOf condition universally true?
+        if (std.mem.lastIndexOf(u8, encoded_once, "?")) |i| {
+            _ = allocator.resize(encoded_once, i);
+            return encoded_once[0..i];
+        }
+        return encoded_once;
+    }
     defer allocator.free(encoded_once);
-    const encoded_twice = try encodeUri(allocator, encoded_once);
+    var encoded_twice = try encodeUri(allocator, encoded_once);
     log.debug("encoded path (2): {s}", .{encoded_twice});
-    return encoded_twice[0 .. std.mem.lastIndexOf(u8, encoded_twice, "?") orelse encoded_twice.len];
+    if (std.mem.lastIndexOf(u8, encoded_twice, "?")) |i| {
+        _ = allocator.resize(encoded_twice, i);
+        return encoded_twice[0..i];
+    }
+    return encoded_twice;
 }
 
 fn encodeParamPart(allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
@@ -451,7 +452,7 @@ fn encodeParamPart(allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
     }
     return encoded.toOwnedSlice();
 }
-fn encodeUri(allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
+fn encodeUri(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
     const reserved_characters = ";,/?:@&=+$#";
     const unreserved_marks = "-_.!~*'()";
     var encoded = try std.ArrayList(u8).initCapacity(allocator, path.len);
@@ -689,6 +690,7 @@ fn canonicalHeaderValue(allocator: std.mem.Allocator, value: []const u8) ![]cons
     // Trim end
     while (std.ascii.isWhitespace(rc[rc_inx - 1]))
         rc_inx -= 1;
+    _ = allocator.resize(rc, rc_inx);
     return rc[0..rc_inx];
 }
 fn lessThan(context: void, lhs: base.Header, rhs: base.Header) bool {
