@@ -1120,41 +1120,41 @@ fn reportTraffic(allocator: std.mem.Allocator, info: []const u8, request: awshtt
     reporter("{s}\n", .{msg.items});
 }
 
-// // TODO: Where does this belong really?
-// fn typeForField(comptime T: type, field_name: []const u8) !type {
-//     const ti = @typeInfo(T);
-//     switch (ti) {
-//         .Struct => {
-//             inline for (ti.Struct.fields) |field| {
-//                 if (std.mem.eql(u8, field.name, field_name))
-//                     return field.type;
-//             }
-//         },
-//         else => return error.TypeIsNotAStruct, // should not hit this
-//     }
-//     return error.FieldNotFound;
-// }
-//
-// test "custom serialization for map objects" {
-//     const allocator = std.testing.allocator;
-//     var buffer = std.ArrayList(u8).init(allocator);
-//     defer buffer.deinit();
-//     var tags = try std.ArrayList(@typeInfo(try typeForField(services.lambda.tag_resource.Request, "tags")).Pointer.child).initCapacity(allocator, 2);
-//     defer tags.deinit();
-//     tags.appendAssumeCapacity(.{ .key = "Foo", .value = "Bar" });
-//     tags.appendAssumeCapacity(.{ .key = "Baz", .value = "Qux" });
-//     const req = services.lambda.tag_resource.Request{ .resource = "hello", .tags = tags.items };
-//     try json.stringify(req, .{ .whitespace = .{} }, buffer.writer());
-//     try std.testing.expectEqualStrings(
-//         \\{
-//         \\    "Resource": "hello",
-//         \\    "Tags": {
-//         \\        "Foo": "Bar",
-//         \\        "Baz": "Qux"
-//         \\    }
-//         \\}
-//     , buffer.items);
-// }
+// TODO: Where does this belong really?
+fn typeForField(comptime T: type, comptime field_name: []const u8) !type {
+    const ti = @typeInfo(T);
+    switch (ti) {
+        .Struct => {
+            inline for (ti.Struct.fields) |field| {
+                if (std.mem.eql(u8, field.name, field_name))
+                    return field.type;
+            }
+        },
+        else => return error.TypeIsNotAStruct, // should not hit this
+    }
+    return error.FieldNotFound;
+}
+
+test "custom serialization for map objects" {
+    const allocator = std.testing.allocator;
+    var buffer = std.ArrayList(u8).init(allocator);
+    defer buffer.deinit();
+    var tags = try std.ArrayList(@typeInfo(try typeForField(services.lambda.tag_resource.Request, "tags")).Pointer.child).initCapacity(allocator, 2);
+    defer tags.deinit();
+    tags.appendAssumeCapacity(.{ .key = "Foo", .value = "Bar" });
+    tags.appendAssumeCapacity(.{ .key = "Baz", .value = "Qux" });
+    const req = services.lambda.tag_resource.Request{ .resource = "hello", .tags = tags.items };
+    try json.stringify(req, .{ .whitespace = .{} }, buffer.writer());
+    try std.testing.expectEqualStrings(
+        \\{
+        \\    "Resource": "hello",
+        \\    "Tags": {
+        \\        "Foo": "Bar",
+        \\        "Baz": "Qux"
+        \\    }
+        \\}
+    , buffer.items);
+}
 
 test "REST Json v1 builds proper queries" {
     const allocator = std.testing.allocator;
