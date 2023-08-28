@@ -180,8 +180,6 @@ pub fn main() anyerror!void {
                 }
             },
             .ec2_query_no_input => {
-                // TODO: hunt down this compile error:
-                // fmt.zig:459:5: error: invalid format string 's' for type 'models.ec2.2016-11-15.json.Filter
                 std.log.err("EC2 functions not yet working in 0.11", .{});
                 // // Describe regions is a simpler request and easier to debug
                 const result = try client.call(services.ec2.describe_regions.Request{}, options);
