@@ -55,7 +55,11 @@ pub fn encodeInternal(
             rc = try encodeInternal(allocator, parent, field_name, first, obj.*, writer, options);
         } else {
             if (!first) _ = try writer.write("&");
-            try writer.print("{s}{s}={any}", .{ parent, field_name, obj });
+            // @compileLog(@typeInfo(@TypeOf(obj)));
+            if (ti.child == []const u8 or ti.child == u8)
+                try writer.print("{s}{s}={s}", .{ parent, field_name, obj })
+            else
+                try writer.print("{s}{s}={any}", .{ parent, field_name, obj });
             rc = false;
         },
         .Struct => if (std.mem.eql(u8, "", field_name)) {
