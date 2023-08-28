@@ -186,7 +186,6 @@ pub fn main() anyerror!void {
                 std.log.info("request id: {any}", .{result.response_metadata.request_id});
                 std.log.info("region count: {d}", .{result.response.regions.?.len});
             },
-            // ^^ under test. vv still in progress
             .ec2_query_with_input => {
                 // Describe instances is more interesting
                 const result = try client.call(services.ec2.describe_instances.Request{ .max_results = 6 }, options);
@@ -218,6 +217,7 @@ pub fn main() anyerror!void {
                     next = more.response.next_token;
                 }
             },
+            // ^^ under test. vv still in progress
             .rest_xml_no_input => {
                 const result = try client.call(services.s3.list_buckets.Request{}, options);
                 defer result.deinit();

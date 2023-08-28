@@ -1815,3 +1815,33 @@ test "ec2_query_no_input: EC2 describe regions" {
     try std.testing.expectEqualStrings("4cdbdd69-800c-49b5-8474-ae4c17709782", call.response_metadata.request_id);
     try std.testing.expectEqual(@as(usize, 17), call.response.regions.?.len);
 }
+test "ec2_query_with_input: EC2 describe instances" {
+    const allocator = std.testing.allocator;
+    var test_harness = TestSetup.init(allocator, .{
+        .allocator = allocator,
+        .server_response = @embedFile("test_ec2_query_with_input.response"),
+        .server_response_headers = @constCast(&[_][2][]const u8{
+            .{ "Content-Type", "text/xml;charset=UTF-8" },
+            .{ "x-amzn-RequestId", "150a14cc-785d-476f-a4c9-2aa4d03b14e2" },
+        }),
+    });
+    defer test_harness.deinit();
+    const options = try test_harness.start();
+    const ec2 = (Services(.{.ec2}){}).ec2;
+    const call = try test_harness.client.call(ec2.describe_instances.Request{
+        .max_results = 6,
+    }, options);
+    defer call.deinit();
+    test_harness.stop();
+    // Request expectations
+    try std.testing.expectEqual(std.http.Method.POST, test_harness.request_options.request_method);
+    try std.testing.expectEqualStrings("/?Action=DescribeInstances&Version=2016-11-15", test_harness.request_options.request_target);
+    try std.testing.expectEqualStrings(
+        \\Action=DescribeInstances&Version=2016-11-15&MaxResults=6
+    , test_harness.request_options.request_body);
+    // Response expectations
+    try std.testing.expectEqualStrings("150a14cc-785d-476f-a4c9-2aa4d03b14e2", call.response_metadata.request_id);
+    try std.testing.expectEqual(@as(usize, 6), call.response.reservations.?.len);
+    try std.testing.expectEqualStrings("i-0212d7d1f62b96676", call.response.reservations.?[1].instances.?[0].instance_id.?);
+    try std.testing.expectEqualStrings("123456789012:found-me", call.response.reservations.?[1].instances.?[0].tags.?[0].value.?);
+}
