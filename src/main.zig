@@ -137,6 +137,8 @@ pub fn main() anyerror!void {
                 std.log.info("request id: {any}", .{call.response_metadata.request_id});
                 std.log.info("account has clusters: {}", .{call.response.cluster_arns.?.len > 0});
             },
+            // ^^ under test. vv stil in progress
+            // This has an issue with json.zig
             .rest_json_1_query_with_input => {
                 const call = try client.call(services.lambda.list_functions.Request{
                     .max_items = 1,
@@ -145,6 +147,7 @@ pub fn main() anyerror!void {
                 std.log.info("request id: {any}", .{call.response_metadata.request_id});
                 std.log.info("account has functions: {}", .{call.response.functions.?.len > 0});
             },
+            // This is skipped
             .rest_json_1_query_no_input => {
                 const call = try client.call(services.lambda.list_functions.Request{}, options);
                 defer call.deinit();
