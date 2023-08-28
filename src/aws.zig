@@ -1645,3 +1645,38 @@ test "json_1_0_query_no_input: dynamodb listTables runtime" {
     try std.testing.expectEqualStrings("QBI72OUIN8U9M9AG6PCSADJL4JVV4KQNSO5AEMVJF66Q9ASUAAJG", call.response_metadata.request_id);
     try std.testing.expectEqual(@as(i64, 80000), call.response.account_max_read_capacity_units.?);
 }
+test "json_1_1_query_with_input: ecs listClusters runtime" {
+    const allocator = std.testing.allocator;
+    var test_harness = TestSetup.init(allocator, .{
+        .allocator = allocator,
+        .server_response =
+        \\{"clusterArns":["arn:aws:ecs:us-west-2:550620852718:cluster/web-applicationehjaf-cluster"],"nextToken":"czE0Og=="}
+        ,
+        .server_response_headers = @constCast(&[_][2][]const u8{
+            .{ "Content-Type", "application/json" },
+            .{ "x-amzn-RequestId", "b2420066-ff67-4237-b782-721c4df60744" },
+        }),
+    });
+    defer test_harness.deinit();
+    const options = try test_harness.start();
+    const ecs = (Services(.{.ecs}){}).ecs;
+    const call = try test_harness.client.call(ecs.list_clusters.Request{
+        .max_results = 1,
+    }, options);
+    defer call.deinit();
+    test_harness.stop();
+    // Request expectations
+    try std.testing.expectEqual(std.http.Method.POST, test_harness.request_options.request_method);
+    try std.testing.expectEqualStrings("/", test_harness.request_options.request_target);
+    try test_harness.request_options.expectHeader("X-Amz-Target", "AmazonEC2ContainerServiceV20141113.ListClusters");
+    try std.testing.expectEqualStrings(
+        \\{
+        \\    "nextToken": null,
+        \\    "maxResults": 1
+        \\}
+    , test_harness.request_options.request_body);
+    // Response expectations
+    try std.testing.expectEqualStrings("b2420066-ff67-4237-b782-721c4df60744", call.response_metadata.request_id);
+    try std.testing.expectEqual(@as(usize, 1), call.response.cluster_arns.?.len);
+    try std.testing.expectEqualStrings("arn:aws:ecs:us-west-2:550620852718:cluster/web-applicationehjaf-cluster", call.response.cluster_arns.?[0]);
+}
