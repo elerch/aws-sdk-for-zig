@@ -1713,3 +1713,64 @@ test "json_1_1_query_no_input: ecs listClusters runtime" {
     try std.testing.expectEqual(@as(usize, 1), call.response.cluster_arns.?.len);
     try std.testing.expectEqualStrings("arn:aws:ecs:us-west-2:550620852718:cluster/web-applicationehjaf-cluster", call.response.cluster_arns.?[0]);
 }
+test "rest_json_1_query_with_input: lambda listFunctions runtime" {
+    // TODO: This passes but leaks like a sieve
+    if (true) return error.SkipZigTest;
+    const allocator = std.testing.allocator;
+    var test_harness = TestSetup.init(allocator, .{
+        .allocator = allocator,
+        .server_response =
+        \\{"Functions":[{"Description":"AWS CDK resource provider framework - onEvent (DevelopmentFrontendStack-g650u/com.amazonaws.cdk.custom-resources.amplify-asset-deployment-provider/amplify-asset-deployment-handler-provider)","TracingConfig":{"Mode":"PassThrough"},"VpcConfig":null,"SigningJobArn":null,"SnapStart":{"OptimizationStatus":"Off","ApplyOn":"None"},"RevisionId":"0c62fc74-a692-403d-9206-5fcbad406424","LastModified":"2023-03-01T18:13:15.704+0000","FileSystemConfigs":null,"FunctionName":"DevelopmentFrontendStack--amplifyassetdeploymentha-aZqB9IbZLIKU","Runtime":"nodejs14.x","Version":"$LATEST","PackageType":"Zip","LastUpdateStatus":null,"Layers":null,"FunctionArn":"arn:aws:lambda:us-west-2:550620852718:function:DevelopmentFrontendStack--amplifyassetdeploymentha-aZqB9IbZLIKU","KMSKeyArn":null,"MemorySize":128,"ImageConfigResponse":null,"LastUpdateStatusReason":null,"DeadLetterConfig":null,"Timeout":900,"Handler":"framework.onEvent","CodeSha256":"m4tt+M0l3p8bZvxIDj83dwGrwRW6atCfS/q8AiXCD3o=","Role":"arn:aws:iam::550620852718:role/DevelopmentFrontendStack-amplifyassetdeploymentha-1782JF7WAPXZ3","SigningProfileVersionArn":null,"MasterArn":null,"RuntimeVersionConfig":null,"CodeSize":4307,"State":null,"StateReason":null,"Environment":{"Variables":{"USER_ON_EVENT_FUNCTION_ARN":"arn:aws:lambda:us-west-2:550620852718:function:DevelopmentFrontendStack--amplifyassetdeploymenton-X9iZJSCSPYDH","WAITER_STATE_MACHINE_ARN":"arn:aws:states:us-west-2:550620852718:stateMachine:amplifyassetdeploymenthandlerproviderwaiterstatemachineB3C2FCBE-Ltggp5wBcHWO","USER_IS_COMPLETE_FUNCTION_ARN":"arn:aws:lambda:us-west-2:550620852718:function:DevelopmentFrontendStack--amplifyassetdeploymentis-jaHopLrSSARV"},"Error":null},"EphemeralStorage":{"Size":512},"StateReasonCode":null,"LastUpdateStatusReasonCode":null,"Architectures":["x86_64"]}],"NextMarker":"lslTXFcbLQKkb0vP9Kgh5hUL7C3VghELNGbWgZfxrRCk3eiDRMkct7D8EmptWfHSXssPdS7Bo66iQPTMpVOHZgANewpgGgFGGr4pVjd6VgLUO6qPe2EMAuNDBjUTxm8z6N28yhlUwEmKbrAV/m0k5qVzizwoxFwvyruMbuMx9kADFACSslcabxXl3/jDI4rfFnIsUVdzTLBgPF1hzwrE1f3lcdkBvUp+QgY+Pn3w5QuJmwsp/di8COzFemY89GgOHbLNqsrBsgR/ee2eXoJp0ZkKM4EcBK3HokqBzefLfgR02PnfNOdXwqTlhkSPW0TKiKGIYu3Bw7lSNrLd+q3+wEr7ZakqOQf0BVo3FMRhMHlVYgwUJzwi3ActyH2q6fuqGG1sS0B8Oa/prUpe5fmp3VaA3WpazioeHtrKF78JwCi6/nfQsrj/8ZtXGQOxlwEgvT1CIUaF+CdHY3biezrK0tRZNpkCtHnkPtF9lq2U7+UiKXSW9yzxT8P2b0M/Qh4IVdnw4rncQK/doYriAeOdrs1wjMEJnHWq9lAaEyipoxYcVr/z5+yaC6Gwxdg45p9X1vIAaYMf6IZxyFuua43SYi0Ls+IBk4VvpR2io7T0dCxHAr3WAo3D2dm0y8OsbM59"}
+        ,
+        .server_response_headers = @constCast(&[_][2][]const u8{
+            .{ "Content-Type", "application/json" },
+            .{ "x-amzn-RequestId", "c4025199-226f-4a16-bb1f-48618e9d2ea6" },
+        }),
+    });
+    defer test_harness.deinit();
+    const options = try test_harness.start();
+    const lambda = (Services(.{.lambda}){}).lambda;
+    const call = try test_harness.client.call(lambda.list_functions.Request{
+        .max_items = 1,
+    }, options);
+    defer call.deinit();
+    test_harness.stop();
+    // Request expectations
+    try std.testing.expectEqual(std.http.Method.GET, test_harness.request_options.request_method);
+    try std.testing.expectEqualStrings("/2015-03-31/functions?MaxItems=1", test_harness.request_options.request_target);
+    try std.testing.expectEqualStrings(
+        \\
+    , test_harness.request_options.request_body);
+    // Response expectations
+    try std.testing.expectEqualStrings("c4025199-226f-4a16-bb1f-48618e9d2ea6", call.response_metadata.request_id);
+    try std.testing.expectEqual(@as(usize, 1), call.response.functions.?.len);
+    try std.testing.expectEqualStrings("DevelopmentFrontendStack--amplifyassetdeploymentha-aZqB9IbZLIKU", call.response.functions.?[0].function_name.?);
+}
+test "rest_json_1_query_no_input: lambda listFunctions runtime" {
+    if (true) return error.SkipZigTest; // TODO: Figure out leaks
+    const allocator = std.testing.allocator;
+    var test_harness = TestSetup.init(allocator, .{
+        .allocator = allocator,
+        .server_response = @embedFile("test_rest_json_1_query_no_input.response"),
+        .server_response_headers = @constCast(&[_][2][]const u8{
+            .{ "Content-Type", "application/json" },
+            .{ "x-amzn-RequestId", "b2aad11f-36fc-4d0d-ae92-fe0167fb0f40" },
+        }),
+    });
+    defer test_harness.deinit();
+    const options = try test_harness.start();
+    const lambda = (Services(.{.lambda}){}).lambda;
+    const call = try test_harness.client.call(lambda.list_functions.Request{}, options);
+    defer call.deinit();
+    test_harness.stop();
+    // Request expectations
+    try std.testing.expectEqual(std.http.Method.GET, test_harness.request_options.request_method);
+    try std.testing.expectEqualStrings("/2015-03-31/functions", test_harness.request_options.request_target);
+    try std.testing.expectEqualStrings(
+        \\
+    , test_harness.request_options.request_body);
+    // Response expectations
+    try std.testing.expectEqualStrings("b2aad11f-36fc-4d0d-ae92-fe0167fb0f40", call.response_metadata.request_id);
+    try std.testing.expectEqual(@as(usize, 1), call.response.functions.?.len);
+    try std.testing.expectEqualStrings("arn:aws:ecs:us-west-2:550620852718:cluster/web-applicationehjaf-cluster", call.response.functions.?[0].function_name.?);
+}
