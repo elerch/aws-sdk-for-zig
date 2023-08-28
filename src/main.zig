@@ -137,8 +137,6 @@ pub fn main() anyerror!void {
                 std.log.info("request id: {any}", .{call.response_metadata.request_id});
                 std.log.info("account has clusters: {}", .{call.response.cluster_arns.?.len > 0});
             },
-            // ^^ under test. vv stil in progress
-            // This has an issue with json.zig
             .rest_json_1_query_with_input => {
                 const call = try client.call(services.lambda.list_functions.Request{
                     .max_items = 1,
@@ -147,7 +145,6 @@ pub fn main() anyerror!void {
                 std.log.info("request id: {any}", .{call.response_metadata.request_id});
                 std.log.info("account has functions: {}", .{call.response.functions.?.len > 0});
             },
-            // This is skipped
             .rest_json_1_query_no_input => {
                 const call = try client.call(services.lambda.list_functions.Request{}, options);
                 defer call.deinit();
@@ -183,15 +180,14 @@ pub fn main() anyerror!void {
                 }
             },
             .ec2_query_no_input => {
-                std.log.err("EC2 functions not yet working in 0.11", .{});
-                // // Describe regions is a simpler request and easier to debug
+                // Describe regions is a simpler request and easier to debug
                 const result = try client.call(services.ec2.describe_regions.Request{}, options);
                 defer result.deinit();
                 std.log.info("request id: {any}", .{result.response_metadata.request_id});
                 std.log.info("region count: {d}", .{result.response.regions.?.len});
             },
+            // ^^ under test. vv still in progress
             .ec2_query_with_input => {
-                std.log.err("EC2 functions not yet working in 0.11", .{});
                 // Describe instances is more interesting
                 const result = try client.call(services.ec2.describe_instances.Request{ .max_results = 6 }, options);
                 defer result.deinit();

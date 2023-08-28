@@ -1785,3 +1785,33 @@ test "rest_json_1_query_no_input: lambda listFunctions runtime" {
         call.response.functions.?[12].function_name.?,
     );
 }
+test "rest_json_1_work_with_lambda: lambda multiple functions (blank test)" {
+    // Replicating this test would not provide additional coverage. It is
+    // here for completeness only
+}
+test "ec2_query_no_input: EC2 describe regions" {
+    const allocator = std.testing.allocator;
+    var test_harness = TestSetup.init(allocator, .{
+        .allocator = allocator,
+        .server_response = @embedFile("test_ec2_query_no_input.response"),
+        .server_response_headers = @constCast(&[_][2][]const u8{
+            .{ "Content-Type", "text/xml;charset=UTF-8" },
+            .{ "x-amzn-RequestId", "4cdbdd69-800c-49b5-8474-ae4c17709782" },
+        }),
+    });
+    defer test_harness.deinit();
+    const options = try test_harness.start();
+    const ec2 = (Services(.{.ec2}){}).ec2;
+    const call = try test_harness.client.call(ec2.describe_regions.Request{}, options);
+    defer call.deinit();
+    test_harness.stop();
+    // Request expectations
+    try std.testing.expectEqual(std.http.Method.POST, test_harness.request_options.request_method);
+    try std.testing.expectEqualStrings("/?Action=DescribeRegions&Version=2016-11-15", test_harness.request_options.request_target);
+    try std.testing.expectEqualStrings(
+        \\Action=DescribeRegions&Version=2016-11-15
+    , test_harness.request_options.request_body);
+    // Response expectations
+    try std.testing.expectEqualStrings("4cdbdd69-800c-49b5-8474-ae4c17709782", call.response_metadata.request_id);
+    try std.testing.expectEqual(@as(usize, 17), call.response.regions.?.len);
+}
