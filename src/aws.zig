@@ -1323,6 +1323,8 @@ const TestOptions = struct {
     server_response: []const u8 = "unset",
     server_response_headers: [][2][]const u8 = &[_][2][]const u8{},
     request_body: []u8 = "",
+    request_method: std.http.Method = undefined,
+    request_target: []const u8 = undefined,
     test_server_runtime_uri: ?[]u8 = null,
     server_ready: bool = false,
 
@@ -1336,8 +1338,10 @@ const TestOptions = struct {
     }
 
     fn deinit(self: Self) void {
-        if (self.request_body.len > 0)
+        if (self.request_body.len > 0) {
             self.allocator.free(self.request_body);
+            self.allocator.free(self.request_target);
+        }
         if (self.test_server_runtime_uri) |_|
             self.allocator.free(self.test_server_runtime_uri.?);
     }
@@ -1396,7 +1400,8 @@ fn processRequest(options: *TestOptions, server: *std.http.Server) !void {
 
     if (res.request.content_length) |l|
         options.request_body = try res.reader().readAllAlloc(options.allocator, @as(usize, l));
-
+    options.request_method = res.request.method;
+    options.request_target = try options.allocator.dupe(u8, res.request.target);
     log.debug(
         "tid {d} (server): {d} bytes read from request",
         .{ std.Thread.getCurrentId(), options.request_body.len },
@@ -1494,7 +1499,7 @@ const TestSetup = struct {
     }
 };
 
-test "sts get_caller_identity comptime" {
+test "sts getCallerIdentity comptime" {
     const allocator = std.testing.allocator;
     var test_harness = TestSetup.init(allocator, .{
         .allocator = allocator,
@@ -1513,9 +1518,13 @@ test "sts get_caller_identity comptime" {
     // const call = try client.call(services.sts.get_caller_identity.Request{}, options);
     defer call.deinit();
     test_harness.stop();
+    // Request expectations
+    try std.testing.expectEqual(std.http.Method.POST, test_harness.request_options.request_method);
+    try std.testing.expectEqualStrings("/", test_harness.request_options.request_target);
     try std.testing.expectEqualStrings(
         \\Action=GetCallerIdentity&Version=2011-06-15
     , test_harness.request_options.request_body);
+    // Response expectations
     try std.testing.expectEqualStrings(
         "arn:aws:iam::123456789012:user/admin",
         call.response.arn.?,
@@ -1523,4 +1532,36 @@ test "sts get_caller_identity comptime" {
     try std.testing.expectEqualStrings("AIDAYAM4POHXHRVANDQBQ", call.response.user_id.?);
     try std.testing.expectEqualStrings("123456789012", call.response.account.?);
     try std.testing.expectEqualStrings("8f0d54da-1230-40f7-b4ac-95015c4b84cd", call.response_metadata.request_id);
+}
+test "sqs listQueues runtime" {
+    const allocator = std.testing.allocator;
+    var test_harness = TestSetup.init(allocator, .{
+        .allocator = allocator,
+        .server_response =
+        \\{"ListQueuesResponse":{"ListQueuesResult":{"NextExclusiveStartQueueName":null,"NextToken":null,"queueUrls":null},"ResponseMetadata":{"RequestId":"a85e390b-b866-590e-8cae-645f2bbe59c5"}}}
+        ,
+        .server_response_headers = @constCast(&[_][2][]const u8{
+            .{ "Content-Type", "application/json" },
+            .{ "x-amzn-RequestId", "a85e390b-b866-590e-8cae-645f2bbe59c5" },
+        }),
+    });
+    defer test_harness.deinit();
+    const options = try test_harness.start();
+    const sqs = (Services(.{.sqs}){}).sqs;
+    const call = try test_harness.client.call(sqs.list_queues.Request{
+        .queue_name_prefix = "s",
+    }, options);
+    defer call.deinit();
+    test_harness.stop();
+    // Request expectations
+    try std.testing.expectEqual(std.http.Method.POST, test_harness.request_options.request_method);
+    try std.testing.expectEqualStrings("/", test_harness.request_options.request_target);
+    try std.testing.expectEqualStrings(
+        \\Action=ListQueues&Version=2012-11-05&QueueNamePrefix=s
+    , test_harness.request_options.request_body);
+    // Response expectations
+    // TODO: We can get a lot better with this under test
+    std.log.info("request id: {any}", .{call.response_metadata.request_id});
+    std.log.info("account has queues with prefix 's': {}", .{call.response.queue_urls != null});
+    try std.testing.expectEqualStrings("a85e390b-b866-590e-8cae-645f2bbe59c5", call.response_metadata.request_id);
 }
