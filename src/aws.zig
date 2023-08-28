@@ -1611,8 +1611,37 @@ test "json_1_0_query_with_input: dynamodb listTables runtime" {
         \\}
     , test_harness.request_options.request_body);
     // Response expectations
-    // TODO: We can get a lot better with this under test
     try std.testing.expectEqualStrings("QBI72OUIN8U9M9AG6PCSADJL4JVV4KQNSO5AEMVJF66Q9ASUAAJG", call.response_metadata.request_id);
     try std.testing.expectEqual(@as(usize, 1), call.response.table_names.?.len);
     try std.testing.expectEqualStrings("Customer", call.response.table_names.?[0]);
+}
+
+test "json_1_0_query_no_input: dynamodb listTables runtime" {
+    const allocator = std.testing.allocator;
+    var test_harness = TestSetup.init(allocator, .{
+        .allocator = allocator,
+        .server_response =
+        \\{"AccountMaxReadCapacityUnits":80000,"AccountMaxWriteCapacityUnits":80000,"TableMaxReadCapacityUnits":40000,"TableMaxWriteCapacityUnits":40000}
+        ,
+        .server_response_headers = @constCast(&[_][2][]const u8{
+            .{ "Content-Type", "application/json" },
+            .{ "x-amzn-RequestId", "QBI72OUIN8U9M9AG6PCSADJL4JVV4KQNSO5AEMVJF66Q9ASUAAJG" },
+        }),
+    });
+    defer test_harness.deinit();
+    const options = try test_harness.start();
+    const dynamo_db = (Services(.{.dynamo_db}){}).dynamo_db;
+    const call = try test_harness.client.call(dynamo_db.describe_limits.Request{}, options);
+    defer call.deinit();
+    test_harness.stop();
+    // Request expectations
+    try std.testing.expectEqual(std.http.Method.POST, test_harness.request_options.request_method);
+    try std.testing.expectEqualStrings("/", test_harness.request_options.request_target);
+    try test_harness.request_options.expectHeader("X-Amz-Target", "DynamoDB_20120810.DescribeLimits");
+    try std.testing.expectEqualStrings(
+        \\{}
+    , test_harness.request_options.request_body);
+    // Response expectations
+    try std.testing.expectEqualStrings("QBI72OUIN8U9M9AG6PCSADJL4JVV4KQNSO5AEMVJF66Q9ASUAAJG", call.response_metadata.request_id);
+    try std.testing.expectEqual(@as(i64, 80000), call.response.account_max_read_capacity_units.?);
 }
