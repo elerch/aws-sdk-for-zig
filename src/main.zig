@@ -88,6 +88,8 @@ pub fn main() anyerror!void {
     };
     defer client.deinit();
 
+    // As of 2023-08-28, only ECS from this list supports TLS v1.3
+    // AWS commitment is to enable all services by 2023-12-31
     const services = aws.Services(.{ .sts, .ec2, .dynamo_db, .ecs, .lambda, .sqs, .s3, .cloudfront }){};
 
     for (tests.items) |t| {
