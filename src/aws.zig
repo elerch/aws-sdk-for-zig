@@ -1435,10 +1435,68 @@ fn serve(options: *TestOptions, res: *std.http.Server.Response) ![]const u8 {
 // a previous run of src/main.zig, with redactions
 ////////////////////////////////////////////////////////////////////////
 
+const TestSetup = struct {
+    allocator: std.mem.Allocator,
+    request_options: TestOptions,
+    server_thread: std.Thread = undefined,
+    creds: aws_auth.Credentials = undefined,
+    client: *Client = undefined,
+    started: bool = false,
+
+    const Self = @This();
+
+    const aws_creds = @import("aws_credentials.zig");
+    const aws_auth = @import("aws_authentication.zig");
+
+    fn init(allocator: std.mem.Allocator, options: TestOptions) Self {
+        return .{
+            .allocator = allocator,
+            .request_options = options,
+        };
+    }
+
+    fn start(self: *Self) !Options {
+        self.server_thread = try std.Thread.spawn(
+            .{},
+            threadMain,
+            .{&self.request_options},
+        );
+        self.started = true;
+        try self.request_options.waitForReady();
+        awshttp.endpoint_override = self.request_options.test_server_runtime_uri;
+        self.creds = aws_auth.Credentials.init(
+            self.allocator,
+            try self.allocator.dupe(u8, "ACCESS"),
+            try self.allocator.dupe(u8, "SECRET"),
+            null,
+        );
+        aws_creds.static_credentials = self.creds;
+        var client = try Client.init(self.allocator, .{});
+        self.client = &client;
+        return .{
+            .region = "us-west-2",
+            .client = client,
+        };
+    }
+
+    fn stop(self: *Self) void {
+        self.server_thread.join();
+    }
+
+    fn deinit(self: Self) void {
+        self.request_options.deinit();
+
+        if (!self.started) return;
+        awshttp.endpoint_override = null;
+        // creds.deinit(); Creds will get deinited in the course of the call. We don't want to do it twice
+        aws_creds.static_credentials = null; // we do need to reset the static creds for the next user though
+        self.client.deinit();
+    }
+};
+
 test "sts get_caller_identity comptime" {
-    // std.testing.log_level = .debug;
     const allocator = std.testing.allocator;
-    var requestOptions: TestOptions = .{
+    var test_harness = TestSetup.init(allocator, .{
         .allocator = allocator,
         .server_response =
         \\{"GetCallerIdentityResponse":{"GetCallerIdentityResult":{"Account":"123456789012","Arn":"arn:aws:iam::123456789012:user/admin","UserId":"AIDAYAM4POHXHRVANDQBQ"},"ResponseMetadata":{"RequestId":"8f0d54da-1230-40f7-b4ac-95015c4b84cd"}}}
@@ -1447,47 +1505,17 @@ test "sts get_caller_identity comptime" {
             .{ "Content-Type", "application/json" },
             .{ "x-amzn-RequestId", "8f0d54da-1230-40f7-b4ac-95015c4b84cd" },
         }),
-    };
-    defer requestOptions.deinit();
-    // Needs to go away: .request_body: []u8 = "",
-    const server_thread = try std.Thread.spawn(
-        .{},
-        threadMain,
-        .{&requestOptions},
-    );
-    try requestOptions.waitForReady();
-
-    awshttp.endpoint_override = requestOptions.test_server_runtime_uri;
-    defer awshttp.endpoint_override = null;
-
-    const creds = @import("aws_authentication.zig").Credentials.init(
-        allocator,
-        try allocator.dupe(u8, "ACCESS"),
-        try allocator.dupe(u8, "SECRET"),
-        null,
-    );
-    const aws_creds = @import("aws_credentials.zig");
-    aws_creds.static_credentials = creds;
-    defer {
-        // creds.deinit(); Creds will get deinited in the course of the call. We don't want to do it twice
-        aws_creds.static_credentials = null; // we do need to reset the static creds for the next user though
-    }
-
-    var client = try Client.init(allocator, .{});
-    const options = Options{
-        .region = "us-west-2",
-        .client = client,
-    };
-    defer client.deinit();
+    });
+    defer test_harness.deinit();
+    const options = try test_harness.start();
     const sts = (Services(.{.sts}){}).sts;
     const call = try Request(sts.get_caller_identity).call(.{}, options);
     // const call = try client.call(services.sts.get_caller_identity.Request{}, options);
     defer call.deinit();
-
-    server_thread.join();
+    test_harness.stop();
     try std.testing.expectEqualStrings(
         \\Action=GetCallerIdentity&Version=2011-06-15
-    , requestOptions.request_body);
+    , test_harness.request_options.request_body);
     try std.testing.expectEqualStrings(
         "arn:aws:iam::123456789012:user/admin",
         call.response.arn.?,
