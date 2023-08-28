@@ -1680,3 +1680,36 @@ test "json_1_1_query_with_input: ecs listClusters runtime" {
     try std.testing.expectEqual(@as(usize, 1), call.response.cluster_arns.?.len);
     try std.testing.expectEqualStrings("arn:aws:ecs:us-west-2:550620852718:cluster/web-applicationehjaf-cluster", call.response.cluster_arns.?[0]);
 }
+test "json_1_1_query_no_input: ecs listClusters runtime" {
+    const allocator = std.testing.allocator;
+    var test_harness = TestSetup.init(allocator, .{
+        .allocator = allocator,
+        .server_response =
+        \\{"clusterArns":["arn:aws:ecs:us-west-2:550620852718:cluster/web-applicationehjaf-cluster"],"nextToken":"czE0Og=="}
+        ,
+        .server_response_headers = @constCast(&[_][2][]const u8{
+            .{ "Content-Type", "application/json" },
+            .{ "x-amzn-RequestId", "e65322b2-0065-45f2-ba37-f822bb5ce395" },
+        }),
+    });
+    defer test_harness.deinit();
+    const options = try test_harness.start();
+    const ecs = (Services(.{.ecs}){}).ecs;
+    const call = try test_harness.client.call(ecs.list_clusters.Request{}, options);
+    defer call.deinit();
+    test_harness.stop();
+    // Request expectations
+    try std.testing.expectEqual(std.http.Method.POST, test_harness.request_options.request_method);
+    try std.testing.expectEqualStrings("/", test_harness.request_options.request_target);
+    try test_harness.request_options.expectHeader("X-Amz-Target", "AmazonEC2ContainerServiceV20141113.ListClusters");
+    try std.testing.expectEqualStrings(
+        \\{
+        \\    "nextToken": null,
+        \\    "maxResults": null
+        \\}
+    , test_harness.request_options.request_body);
+    // Response expectations
+    try std.testing.expectEqualStrings("e65322b2-0065-45f2-ba37-f822bb5ce395", call.response_metadata.request_id);
+    try std.testing.expectEqual(@as(usize, 1), call.response.cluster_arns.?.len);
+    try std.testing.expectEqualStrings("arn:aws:ecs:us-west-2:550620852718:cluster/web-applicationehjaf-cluster", call.response.cluster_arns.?[0]);
+}
