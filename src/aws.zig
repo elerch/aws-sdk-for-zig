@@ -1328,6 +1328,7 @@ const TestOptions = struct {
     request_headers: *std.http.Headers = undefined,
     test_server_runtime_uri: ?[]u8 = null,
     server_ready: bool = false,
+    requests_processed: usize = 0,
 
     const Self = @This();
 
@@ -1345,7 +1346,7 @@ const TestOptions = struct {
     }
 
     fn deinit(self: Self) void {
-        if (self.request_body.len > 0) {
+        if (self.requests_processed > 0) {
             self.allocator.free(self.request_body);
             self.allocator.free(self.request_target);
             self.request_headers.deinit();
@@ -1407,8 +1408,11 @@ fn processRequest(options: *TestOptions, server: *std.http.Server) !void {
     @memcpy(&errbuf, errstr);
     var response_bytes: []const u8 = errbuf[0..];
 
+    options.requests_processed += 1;
     if (res.request.content_length) |l|
-        options.request_body = try res.reader().readAllAlloc(options.allocator, @as(usize, l));
+        options.request_body = try res.reader().readAllAlloc(options.allocator, @as(usize, l))
+    else
+        options.request_body = try options.allocator.dupe(u8, "");
     options.request_method = res.request.method;
     options.request_target = try options.allocator.dupe(u8, res.request.target);
     options.request_headers = try options.allocator.create(std.http.Headers);
@@ -1714,8 +1718,6 @@ test "json_1_1_query_no_input: ecs listClusters runtime" {
     try std.testing.expectEqualStrings("arn:aws:ecs:us-west-2:550620852718:cluster/web-applicationehjaf-cluster", call.response.cluster_arns.?[0]);
 }
 test "rest_json_1_query_with_input: lambda listFunctions runtime" {
-    // TODO: This passes but leaks like a sieve
-    if (true) return error.SkipZigTest;
     const allocator = std.testing.allocator;
     var test_harness = TestSetup.init(allocator, .{
         .allocator = allocator,
@@ -1744,10 +1746,12 @@ test "rest_json_1_query_with_input: lambda listFunctions runtime" {
     // Response expectations
     try std.testing.expectEqualStrings("c4025199-226f-4a16-bb1f-48618e9d2ea6", call.response_metadata.request_id);
     try std.testing.expectEqual(@as(usize, 1), call.response.functions.?.len);
-    try std.testing.expectEqualStrings("DevelopmentFrontendStack--amplifyassetdeploymentha-aZqB9IbZLIKU", call.response.functions.?[0].function_name.?);
+    try std.testing.expectEqualStrings(
+        "DevelopmentFrontendStack--amplifyassetdeploymentha-aZqB9IbZLIKU",
+        call.response.functions.?[0].function_name.?,
+    );
 }
 test "rest_json_1_query_no_input: lambda listFunctions runtime" {
-    if (true) return error.SkipZigTest; // TODO: Figure out leaks
     const allocator = std.testing.allocator;
     var test_harness = TestSetup.init(allocator, .{
         .allocator = allocator,
@@ -1771,6 +1775,13 @@ test "rest_json_1_query_no_input: lambda listFunctions runtime" {
     , test_harness.request_options.request_body);
     // Response expectations
     try std.testing.expectEqualStrings("b2aad11f-36fc-4d0d-ae92-fe0167fb0f40", call.response_metadata.request_id);
-    try std.testing.expectEqual(@as(usize, 1), call.response.functions.?.len);
-    try std.testing.expectEqualStrings("arn:aws:ecs:us-west-2:550620852718:cluster/web-applicationehjaf-cluster", call.response.functions.?[0].function_name.?);
+    try std.testing.expectEqual(@as(usize, 24), call.response.functions.?.len);
+    try std.testing.expectEqualStrings(
+        "DevelopmentFrontendStack--amplifyassetdeploymentha-aZqB9IbZLIKU",
+        call.response.functions.?[0].function_name.?,
+    );
+    try std.testing.expectEqualStrings(
+        "amplify-login-create-auth-challenge-b4883e4c",
+        call.response.functions.?[12].function_name.?,
+    );
 }
