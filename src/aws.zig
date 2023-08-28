@@ -858,15 +858,7 @@ fn FullResponse(comptime action: anytype) type {
             const Response = @TypeOf(self.response);
             if (@hasDecl(Response, "http_header")) {
                 inline for (std.meta.fields(@TypeOf(Response.http_header))) |f| {
-                    const field_type = @TypeOf(@field(self.response, f.name));
-                    // TODO: Fix this. We need to make this much more robust
-                    // The deal is we have to do the dupe though
-                    // Also, this is a memory leak atm
-                    if (@typeInfo(field_type) == .Optional) {
-                        if (@field(self.response, f.name) != null) {
-                            self.allocator.free(@field(self.response, f.name).?);
-                        }
-                    }
+                    safeFree(self.allocator, @field(self.response, f.name));
                 }
             }
             if (@hasDecl(Response, "http_payload")) {
@@ -882,6 +874,13 @@ fn FullResponse(comptime action: anytype) type {
             }
         }
     };
+}
+fn safeFree(allocator: std.mem.Allocator, obj: anytype) void {
+    switch (@typeInfo(@TypeOf(obj))) {
+        .Pointer => allocator.free(obj),
+        .Optional => if (obj) |o| safeFree(allocator, o),
+        else => {},
+    }
 }
 fn queryFieldTransformer(allocator: std.mem.Allocator, field_name: []const u8, options: url.EncodingOptions) anyerror![]const u8 {
     _ = options;

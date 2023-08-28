@@ -238,7 +238,6 @@ pub fn main() anyerror!void {
                 //       that frees both a bool and an i64
                 std.log.err("This demo (rest_xml_work_with_s3) is not yet fully functional in 0.11", .{});
                 const key = "i/am/a/teapot/foo";
-                _ = key;
                 // // const key = "foo";
                 //
                 const bucket = blk: {
@@ -266,43 +265,39 @@ pub fn main() anyerror!void {
                     .region = location,
                     .client = client,
                 };
-                // TODO: This block triggers the free(bool) problem. Note that the rest of this will have runtime issues
-                //       without the block
-                // {
-                //     const result = try aws.Request(services.s3.put_object).call(.{
-                //         .bucket = bucket,
-                //         .key = key,
-                //         .content_type = "text/plain",
-                //         .body = "bar",
-                //         .storage_class = "STANDARD",
-                //     }, s3opts);
-                //     std.log.info("PutObject Request id: {any}", .{result.response_metadata.request_id});
-                //     std.log.info("PutObject etag: {any}", .{result.response.e_tag.?});
-                //     defer result.deinit();
-                // }
-                // TODO: This block triggers both compile errors
-                // {
-                //     // Note that boto appears to redirect by default, but java
-                //     // does not. We will not
-                //     const result = try aws.Request(services.s3.get_object).call(.{
-                //         .bucket = bucket,
-                //         .key = key,
-                //     }, s3opts);
-                //     std.log.info("GetObject Request id: {any}", .{result.response_metadata.request_id});
-                //     std.log.info("GetObject Body: {any}", .{result.response.body});
-                //     std.log.info("GetObject etag: {any}", .{result.response.e_tag.?});
-                //     std.log.info("GetObject last modified (seconds since epoch): {d}", .{result.response.last_modified.?});
-                //     defer result.deinit();
-                // }
-                // TODO: This block triggers the free(bool) problem. Note that the rest of this will have runtime issues
-                // {
-                //     const result = try aws.Request(services.s3.delete_object).call(.{
-                //         .bucket = bucket,
-                //         .key = key,
-                //     }, s3opts);
-                //     std.log.info("DeleteObject Request id: {any}", .{result.response_metadata.request_id});
-                //     defer result.deinit();
-                // }
+                {
+                    const result = try aws.Request(services.s3.put_object).call(.{
+                        .bucket = bucket,
+                        .key = key,
+                        .content_type = "text/plain",
+                        .body = "bar",
+                        .storage_class = "STANDARD",
+                    }, s3opts);
+                    std.log.info("PutObject Request id: {any}", .{result.response_metadata.request_id});
+                    std.log.info("PutObject etag: {any}", .{result.response.e_tag.?});
+                    defer result.deinit();
+                }
+                {
+                    // Note that boto appears to redirect by default, but java
+                    // does not. We will not
+                    const result = try aws.Request(services.s3.get_object).call(.{
+                        .bucket = bucket,
+                        .key = key,
+                    }, s3opts);
+                    std.log.info("GetObject Request id: {any}", .{result.response_metadata.request_id});
+                    std.log.info("GetObject Body: {any}", .{result.response.body});
+                    std.log.info("GetObject etag: {any}", .{result.response.e_tag.?});
+                    std.log.info("GetObject last modified (seconds since epoch): {d}", .{result.response.last_modified.?});
+                    defer result.deinit();
+                }
+                {
+                    const result = try aws.Request(services.s3.delete_object).call(.{
+                        .bucket = bucket,
+                        .key = key,
+                    }, s3opts);
+                    std.log.info("DeleteObject Request id: {any}", .{result.response_metadata.request_id});
+                    defer result.deinit();
+                }
                 {
                     const result = try aws.Request(services.s3.list_objects).call(.{
                         .bucket = bucket,
