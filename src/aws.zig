@@ -1325,11 +1325,18 @@ const TestOptions = struct {
     request_body: []u8 = "",
     request_method: std.http.Method = undefined,
     request_target: []const u8 = undefined,
+    request_headers: *std.http.Headers = undefined,
     test_server_runtime_uri: ?[]u8 = null,
     server_ready: bool = false,
 
     const Self = @This();
 
+    fn expectHeader(self: *Self, name: []const u8, value: []const u8) !void {
+        for (self.request_headers.list.items) |h|
+            if (std.ascii.eqlIgnoreCase(name, h.name) and
+                std.mem.eql(u8, value, h.value)) return;
+        return error.HeaderOrValueNotFound;
+    }
     fn waitForReady(self: *Self) !void {
         // While this doesn't return an error, we can use !void
         // to prepare for addition of timeout
@@ -1341,6 +1348,8 @@ const TestOptions = struct {
         if (self.request_body.len > 0) {
             self.allocator.free(self.request_body);
             self.allocator.free(self.request_target);
+            self.request_headers.deinit();
+            self.allocator.destroy(self.request_headers);
         }
         if (self.test_server_runtime_uri) |_|
             self.allocator.free(self.test_server_runtime_uri.?);
@@ -1402,6 +1411,13 @@ fn processRequest(options: *TestOptions, server: *std.http.Server) !void {
         options.request_body = try res.reader().readAllAlloc(options.allocator, @as(usize, l));
     options.request_method = res.request.method;
     options.request_target = try options.allocator.dupe(u8, res.request.target);
+    options.request_headers = try options.allocator.create(std.http.Headers);
+    options.request_headers.allocator = options.allocator;
+    options.request_headers.list = .{};
+    options.request_headers.index = .{};
+    options.request_headers.owned = true;
+    for (res.request.headers.list.items) |f|
+        try options.request_headers.append(f.name, f.value);
     log.debug(
         "tid {d} (server): {d} bytes read from request",
         .{ std.Thread.getCurrentId(), options.request_body.len },
@@ -1499,7 +1515,7 @@ const TestSetup = struct {
     }
 };
 
-test "sts getCallerIdentity comptime" {
+test "query_no_input: sts getCallerIdentity comptime" {
     const allocator = std.testing.allocator;
     var test_harness = TestSetup.init(allocator, .{
         .allocator = allocator,
@@ -1533,7 +1549,7 @@ test "sts getCallerIdentity comptime" {
     try std.testing.expectEqualStrings("123456789012", call.response.account.?);
     try std.testing.expectEqualStrings("8f0d54da-1230-40f7-b4ac-95015c4b84cd", call.response_metadata.request_id);
 }
-test "sqs listQueues runtime" {
+test "query_with_input: sqs listQueues runtime" {
     const allocator = std.testing.allocator;
     var test_harness = TestSetup.init(allocator, .{
         .allocator = allocator,
@@ -1561,7 +1577,42 @@ test "sqs listQueues runtime" {
     , test_harness.request_options.request_body);
     // Response expectations
     // TODO: We can get a lot better with this under test
-    std.log.info("request id: {any}", .{call.response_metadata.request_id});
-    std.log.info("account has queues with prefix 's': {}", .{call.response.queue_urls != null});
+    try std.testing.expect(call.response.queue_urls == null);
     try std.testing.expectEqualStrings("a85e390b-b866-590e-8cae-645f2bbe59c5", call.response_metadata.request_id);
+}
+test "json_1_0_query_with_input: dynamodb listTables runtime" {
+    const allocator = std.testing.allocator;
+    var test_harness = TestSetup.init(allocator, .{
+        .allocator = allocator,
+        .server_response =
+        \\{"LastEvaluatedTableName":"Customer","TableNames":["Customer"]}
+        ,
+        .server_response_headers = @constCast(&[_][2][]const u8{
+            .{ "Content-Type", "application/json" },
+            .{ "x-amzn-RequestId", "QBI72OUIN8U9M9AG6PCSADJL4JVV4KQNSO5AEMVJF66Q9ASUAAJG" },
+        }),
+    });
+    defer test_harness.deinit();
+    const options = try test_harness.start();
+    const dynamo_db = (Services(.{.dynamo_db}){}).dynamo_db;
+    const call = try test_harness.client.call(dynamo_db.list_tables.Request{
+        .limit = 1,
+    }, options);
+    defer call.deinit();
+    test_harness.stop();
+    // Request expectations
+    try std.testing.expectEqual(std.http.Method.POST, test_harness.request_options.request_method);
+    try std.testing.expectEqualStrings("/", test_harness.request_options.request_target);
+    try test_harness.request_options.expectHeader("X-Amz-Target", "DynamoDB_20120810.ListTables");
+    try std.testing.expectEqualStrings(
+        \\{
+        \\    "ExclusiveStartTableName": null,
+        \\    "Limit": 1
+        \\}
+    , test_harness.request_options.request_body);
+    // Response expectations
+    // TODO: We can get a lot better with this under test
+    try std.testing.expectEqualStrings("QBI72OUIN8U9M9AG6PCSADJL4JVV4KQNSO5AEMVJF66Q9ASUAAJG", call.response_metadata.request_id);
+    try std.testing.expectEqual(@as(usize, 1), call.response.table_names.?.len);
+    try std.testing.expectEqualStrings("Customer", call.response.table_names.?[0]);
 }
