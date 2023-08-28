@@ -59,8 +59,6 @@ WebIdentityToken is not yet implemented.
 
 TODO List:
 
-* re-enable all demos. Some are causing compilation errors, and these errors
-  do not have reference tracing as they exist within monomorphised code
 * Implement all demos as tests in src/aws.zig. This has been done for
   STS GetCallerIdentity, but needs to be extended for the others
 * Json parsing is based on a fork of the 0.9.0 (maybe earlier?) json parser.
