@@ -268,7 +268,7 @@ fn endpointForRequest(allocator: std.mem.Allocator, service: []const u8, request
     const environment_override = endpoint_override orelse try getEnvironmentVariable(allocator, "AWS_ENDPOINT_URL");
     if (environment_override) |override| {
         const uri = try allocator.dupe(u8, override);
-        return endPointFromUri(allocator, uri);
+        return endPointFromUri(allocator, uri, request.path);
     }
     // Fallback to us-east-1 if global endpoint does not exist.
     const realregion = if (std.mem.eql(u8, options.region, "aws-global")) "us-east-1" else options.region;
@@ -359,7 +359,7 @@ fn s3BucketFromPath(path: []const u8) []const u8 {
 ///
 /// allocator: Will be used only to construct the EndPoint struct
 /// uri: string constructed in such a way that deallocation is needed
-fn endPointFromUri(allocator: std.mem.Allocator, uri: []const u8) !EndPoint {
+fn endPointFromUri(allocator: std.mem.Allocator, uri: []const u8, path: []const u8) !EndPoint {
     var scheme: []const u8 = "";
     var host: []const u8 = "";
     var port: u16 = 443;
@@ -401,7 +401,7 @@ fn endPointFromUri(allocator: std.mem.Allocator, uri: []const u8) !EndPoint {
         .scheme = scheme,
         .allocator = allocator,
         .port = port,
-        .path = try allocator.dupe(u8, "/"),
+        .path = try allocator.dupe(u8, path),
     };
 }
 
