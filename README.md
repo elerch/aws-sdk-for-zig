@@ -3,6 +3,9 @@ AWS SDK for Zig
 
 [![Build Status](https://actions-status.lerch.org/lobo/aws-sdk-for-zig/build)](https://git.lerch.org/lobo/aws-sdk-for-zig/actions?workflow=build.yaml&state=closed)
 
+**NOTE: THIS SDK IS ONLY CURRENTLY USABLE FOR A SMALL SUBSET OF AWS SERVICES
+            WITHOUT A PROXY. SEE LIMITATIONS SECTION BELOW**
+
 Current executable size for the demo is 980k after compiling with -Doptimize=ReleaseSmall
 in x86_linux, and will vary based on services used. Tested targets:
 
@@ -55,12 +58,21 @@ file an issue.
 Limitations
 -----------
 
+The zig 0.11 HTTP client supports TLS 1.3 only. This, IMHO, is a reasonable
+restriction given its introduction 5 years ago, but is inflicting some short
+term pain on this project as AWS has not yet fully implemented the protocol. AWS has
+committed to [TLS 1.3 support across all services by the end of 2023](https://aws.amazon.com/blogs/security/faster-aws-cloud-connections-with-tls-1-3/), but many (most) services as of August 28th have not yet
+been upgraded. Proxy support is available in the client but is not yet implemented.
+In the meantime, it's possible that proxychains is your friend.
+
 WebIdentityToken is not yet implemented.
 
 TODO List:
 
 * Implement all demos as tests in src/aws.zig. This has been done for
-  STS GetCallerIdentity, but needs to be extended for the others
+  all AWS protocols except rest XML. Due to the similarity of EC2 Query
+  protocol and rest XML it is likely that things are fully functional (with
+  a proxy).
 * Json parsing is based on a fork of the 0.9.0 (maybe earlier?) json parser.
   Upgrading to 0.11 caused some commenting of things that probably broke some
   stuff. JSON parsing in general needs a re-visit. Note also that a json.zig

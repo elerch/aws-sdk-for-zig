@@ -233,9 +233,6 @@ pub fn main() anyerror!void {
                 std.log.info("key group quantity: {d}", .{list.quantity});
             },
             .rest_xml_work_with_s3 => {
-                // TODO: This test makes the compiler try to create a monomorphic function
-                //       that frees both a bool and an i64
-                std.log.err("This demo (rest_xml_work_with_s3) is not yet fully functional in 0.11", .{});
                 const key = "i/am/a/teapot/foo";
                 // // const key = "foo";
                 //
