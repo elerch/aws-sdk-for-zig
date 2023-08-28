@@ -1817,36 +1817,37 @@ fn parseInternal(comptime T: type, token: Token, tokens: *TokenStream, options: 
                             }
                         },
                         .ObjectBegin => {
-                            // TODO: Fix this, or better yet, try to switch
-                            //       back to standard json parse
-                            return error.NotConvertedToZig11;
                             // We are parsing into a slice, but we have an
                             // ObjectBegin. This might be ok, iff the type
                             // follows this pattern: []struct { key: []const u8, value: anytype }
                             // (could key be anytype?).
-                            // if (!isMapPattern(T))
-                            //     return error.UnexpectedToken;
-                            // var arraylist = std.ArrayList(ptrInfo.child).init(allocator);
-                            // errdefer {
-                            //     while (arraylist.popOrNull()) |v| {
-                            //         parseFree(ptrInfo.child, v, options);
-                            //     }
-                            //     arraylist.deinit();
-                            // }
-                            // while (true) {
-                            //     const key = (try tokens.next()) orelse return error.UnexpectedEndOfJson;
-                            //     switch (key) {
-                            //         .ObjectEnd => break,
-                            //         else => {},
-                            //     }
-                            //
-                            //     try arraylist.ensureTotalCapacity(arraylist.items.len + 1);
-                            //     const key_val = try parseInternal(try typeForField(ptrInfo.child, "key"), key, tokens, options);
-                            //     const val = (try tokens.next()) orelse return error.UnexpectedEndOfJson;
-                            //     const val_val = try parseInternal(try typeForField(ptrInfo.child, "value"), val, tokens, options);
-                            //     arraylist.appendAssumeCapacity(.{ .key = key_val, .value = val_val });
-                            // }
-                            // return arraylist.toOwnedSlice();
+                            if (!isMapPattern(T))
+                                return error.UnexpectedToken;
+                            const key_type = typeForField(ptrInfo.child, "key");
+                            if (key_type == null) return error.UnexpectedToken;
+                            const value_type = typeForField(ptrInfo.child, "value");
+                            if (value_type == null) return error.UnexpectedToken;
+                            var arraylist = std.ArrayList(ptrInfo.child).init(allocator);
+                            errdefer {
+                                while (arraylist.popOrNull()) |v| {
+                                    parseFree(ptrInfo.child, v, options);
+                                }
+                                arraylist.deinit();
+                            }
+                            while (true) {
+                                const key = (try tokens.next()) orelse return error.UnexpectedEndOfJson;
+                                switch (key) {
+                                    .ObjectEnd => break,
+                                    else => {},
+                                }
+
+                                try arraylist.ensureTotalCapacity(arraylist.items.len + 1);
+                                const key_val = try parseInternal(key_type.?, key, tokens, options);
+                                const val = (try tokens.next()) orelse return error.UnexpectedEndOfJson;
+                                const val_val = try parseInternal(value_type.?, val, tokens, options);
+                                arraylist.appendAssumeCapacity(.{ .key = key_val, .value = val_val });
+                            }
+                            return arraylist.toOwnedSlice();
                         },
                         else => return error.UnexpectedToken,
                     }
@@ -1859,7 +1860,7 @@ fn parseInternal(comptime T: type, token: Token, tokens: *TokenStream, options: 
     unreachable;
 }
 
-fn typeForField(comptime T: type, comptime field_name: []const u8) !type {
+fn typeForField(comptime T: type, comptime field_name: []const u8) ?type {
     const ti = @typeInfo(T);
     switch (ti) {
         .Struct => {
@@ -1868,9 +1869,9 @@ fn typeForField(comptime T: type, comptime field_name: []const u8) !type {
                     return field.type;
             }
         },
-        else => return error.TypeIsNotAStruct, // should not hit this
+        else => return null, //error.TypeIsNotAStruct, // should not hit this
     }
-    return error.FieldNotFound;
+    return null; //error.FieldNotFound;
 }
 
 fn isMapPattern(comptime T: type) bool {
@@ -1999,7 +2000,6 @@ test "parse into that allocates a slice" {
 }
 
 test "parse into that uses a map pattern" {
-    if (true) return error.SkipZigTest; // TODO: re-enable when we work through json changes in 0.11 and see if we can move to upstream
     const options = ParseOptions{ .allocator = testing.allocator };
     const Map = []struct { key: []const u8, value: []const u8 };
     const r = try parse(Map, @constCast(&TokenStream.init("{\"foo\": \"bar\"}")), options);
