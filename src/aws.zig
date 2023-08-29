@@ -479,7 +479,13 @@ pub fn Request(comptime request_action: anytype) type {
             const xml_options = xml_shaper.ParseOptions{ .allocator = options.client.allocator };
             var body: []const u8 = result.body;
             var free_body = false;
-            if (result.body.len < 20) return error.UnexpectedResponse;
+            if (result.body.len < 20) {
+                std.log.err(
+                    "Unexpected response from server. Looking for XML that ends in 'Response' or 'Result'. Found:\n{s}␃\n===",
+                    .{result.body},
+                );
+                return error.UnexpectedResponse;
+            }
             if (std.mem.lastIndexOf(u8, result.body[result.body.len - 20 ..], "Response>") == null and
                 std.mem.lastIndexOf(u8, result.body[result.body.len - 20 ..], "Result>") == null)
             {
