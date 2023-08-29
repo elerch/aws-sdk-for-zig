@@ -181,32 +181,35 @@ pub fn main() anyerror!void {
                 std.log.info("account has functions: {}", .{call.response.functions.?.len > 0});
             },
             .rest_json_1_work_with_lambda => {
-                const call = try client.call(services.lambda.list_functions.Request{}, options);
-                defer call.deinit();
-                std.log.info("list request id: {s}", .{call.response_metadata.request_id});
-                if (call.response.functions) |fns| {
-                    if (fns.len > 0) {
-                        const func = fns[0];
-                        const arn = func.function_arn.?;
-                        // This is a bit ugly. Maybe a helper function in the library would help?
-                        var tags = try std.ArrayList(@typeInfo(try typeForField(services.lambda.tag_resource.Request, "tags")).Pointer.child).initCapacity(allocator, 1);
-                        defer tags.deinit();
-                        tags.appendAssumeCapacity(.{ .key = "Foo", .value = "Bar" });
-                        const req = services.lambda.tag_resource.Request{ .resource = arn, .tags = tags.items };
-                        const addtag = try aws.Request(services.lambda.tag_resource).call(req, options);
-                        defer addtag.deinit();
-                        // const addtag = try client.call(services.lambda.tag_resource.Request{ .resource = arn, .tags = &.{.{ .key = "Foo", .value = "Bar" }} }, options);
-                        std.log.info("add tag request id: {s}", .{addtag.response_metadata.request_id});
-                        var keys = [_][]const u8{"Foo"}; // Would love to have a way to express this without burning a var here
-                        const deletetag = try aws.Request(services.lambda.untag_resource).call(.{ .tag_keys = keys[0..], .resource = arn }, options);
-                        defer deletetag.deinit();
-                        std.log.info("delete tag request id: {s}", .{deletetag.response_metadata.request_id});
-                    } else {
-                        std.log.err("no functions to work with", .{});
-                    }
-                } else {
-                    std.log.err("no functions to work with", .{});
-                }
+                // const call = try client.call(services.lambda.list_functions.Request{}, options);
+                // defer call.deinit();
+                // std.log.info("list request id: {s}", .{call.response_metadata.request_id});
+                // if (call.response.functions) |fns| {
+                //     if (fns.len > 0) {
+                //         const func = fns[0];
+                //         const arn = func.function_arn.?;
+                //         // This is a bit ugly. Maybe a helper function in the library would help?
+                //         var tags = try std.ArrayList(@typeInfo(try typeForField(services.lambda.tag_resource.Request, "tags")).Pointer.child).initCapacity(allocator, 1);
+                //         defer tags.deinit();
+                //         tags.appendAssumeCapacity(.{ .key = "Foo", .value = "Bar" });
+                //         const req = services.lambda.tag_resource.Request{ .resource = arn, .tags = tags.items };
+                //         const addtag = try aws.Request(services.lambda.tag_resource).call(req, options);
+                // TODO: Something is up with signature calculation. I believe it's with the encoding, because the url used
+                // here is totally crazy with the arn of the resource directly in it
+                // Example: https://lambda.us-west-2.amazonaws.com/2017-03-31/tags/arn%253Aaws%253Alambda%253Aus-west-2%253A550620852718%253Afunction%253ADevelopmentFrontendStack--amplifyassetdeploymentha-aZqB9IbZLIKU
+                //         defer addtag.deinit();
+                //         // const addtag = try client.call(services.lambda.tag_resource.Request{ .resource = arn, .tags = &.{.{ .key = "Foo", .value = "Bar" }} }, options);
+                //         std.log.info("add tag request id: {s}", .{addtag.response_metadata.request_id});
+                //         var keys = [_][]const u8{"Foo"}; // Would love to have a way to express this without burning a var here
+                //         const deletetag = try aws.Request(services.lambda.untag_resource).call(.{ .tag_keys = keys[0..], .resource = arn }, options);
+                //         defer deletetag.deinit();
+                //         std.log.info("delete tag request id: {s}", .{deletetag.response_metadata.request_id});
+                //     } else {
+                //         std.log.err("no functions to work with", .{});
+                //     }
+                // } else {
+                //     std.log.err("no functions to work with", .{});
+                // }
             },
             .ec2_query_no_input => {
                 // Describe regions is a simpler request and easier to debug
@@ -270,7 +273,7 @@ pub fn main() anyerror!void {
                     defer result.deinit();
                     const bucket = result.response.buckets.?[result.response.buckets.?.len - 1];
                     std.log.info("ListBuckets request id: {s}", .{result.response_metadata.request_id});
-                    std.log.info("bucket name: {any}", .{bucket.name.?});
+                    std.log.info("bucket name: {s}", .{bucket.name.?});
                     break :blk try allocator.dupe(u8, bucket.name.?);
                 };
                 defer allocator.free(bucket);
@@ -281,7 +284,7 @@ pub fn main() anyerror!void {
                     defer result.deinit();
                     const location = result.response.location_constraint.?;
                     std.log.info("GetBucketLocation request id: {s}", .{result.response_metadata.request_id});
-                    std.log.info("location: {any}", .{location});
+                    std.log.info("location: {s}", .{location});
                     break :blk try allocator.dupe(u8, location);
                 };
                 defer allocator.free(location);
@@ -298,8 +301,8 @@ pub fn main() anyerror!void {
                         .body = "bar",
                         .storage_class = "STANDARD",
                     }, s3opts);
-                    std.log.info("PutObject Request id: {any}", .{result.response_metadata.request_id});
-                    std.log.info("PutObject etag: {any}", .{result.response.e_tag.?});
+                    std.log.info("PutObject Request id: {s}", .{result.response_metadata.request_id});
+                    std.log.info("PutObject etag: {s}", .{result.response.e_tag.?});
                     defer result.deinit();
                 }
                 {
@@ -309,9 +312,9 @@ pub fn main() anyerror!void {
                         .bucket = bucket,
                         .key = key,
                     }, s3opts);
-                    std.log.info("GetObject Request id: {any}", .{result.response_metadata.request_id});
-                    std.log.info("GetObject Body: {any}", .{result.response.body});
-                    std.log.info("GetObject etag: {any}", .{result.response.e_tag.?});
+                    std.log.info("GetObject Request id: {s}", .{result.response_metadata.request_id});
+                    std.log.info("GetObject Body: {s}", .{result.response.body.?});
+                    std.log.info("GetObject etag: {s}", .{result.response.e_tag.?});
                     std.log.info("GetObject last modified (seconds since epoch): {d}", .{result.response.last_modified.?});
                     defer result.deinit();
                 }
@@ -320,14 +323,14 @@ pub fn main() anyerror!void {
                         .bucket = bucket,
                         .key = key,
                     }, s3opts);
-                    std.log.info("DeleteObject Request id: {any}", .{result.response_metadata.request_id});
+                    std.log.info("DeleteObject Request id: {s}", .{result.response_metadata.request_id});
                     defer result.deinit();
                 }
                 {
                     const result = try aws.Request(services.s3.list_objects).call(.{
                         .bucket = bucket,
                     }, s3opts);
-                    std.log.info("ListObject Request id: {any}", .{result.response_metadata.request_id});
+                    std.log.info("ListObject Request id: {s}", .{result.response_metadata.request_id});
                     std.log.info("Object count: {d}", .{result.response.contents.?.len});
                     defer result.deinit();
                 }
