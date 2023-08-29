@@ -27,18 +27,19 @@ pub const services = servicemodel.services;
 /// This will give you a constant with service data for sts, ec2, s3 and ddb only
 pub const Services = servicemodel.Services;
 
-pub const ClientOptions = struct {};
+pub const ClientOptions = struct {
+    proxy: ?std.http.Client.HttpProxy = null,
+};
 pub const Client = struct {
     allocator: std.mem.Allocator,
     aws_http: awshttp.AwsHttp,
 
     const Self = @This();
 
-    pub fn init(allocator: std.mem.Allocator, options: ClientOptions) !Self {
-        _ = options;
+    pub fn init(allocator: std.mem.Allocator, options: ClientOptions) Self {
         return Self{
             .allocator = allocator,
-            .aws_http = try awshttp.AwsHttp.init(allocator),
+            .aws_http = awshttp.AwsHttp.init(allocator, options.proxy),
         };
     }
     pub fn deinit(self: *Client) void {

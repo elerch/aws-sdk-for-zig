@@ -68,11 +68,12 @@ pub fn main() anyerror!void {
     defer bw.flush() catch unreachable;
     const stdout = bw.writer();
     var arg0: ?[]const u8 = null;
+    var proxy: ?std.http.Client.HttpProxy = null;
     while (args.next()) |arg| {
         if (arg0 == null) arg0 = arg;
         if (std.mem.eql(u8, "-h", arg) or std.mem.eql(u8, "--help", arg)) {
             try stdout.print(
-                \\usage: {?s} [-h|--help] [-v][-v][-v] [test_name...]
+                \\usage: {?s} [-h|--help] [-v][-v][-v] [-x|--proxy <proxy url>] [tests...]
                 \\
                 \\Where tests are one of the following:
                 \\
@@ -81,6 +82,10 @@ pub fn main() anyerror!void {
                 try stdout.print("* {s}\n", .{enumfield.name});
             }
             return;
+        }
+        if (std.mem.eql(u8, "-x", arg) or std.mem.eql(u8, "--proxy", arg)) {
+            proxy = try proxyFromString(args.next().?); // parse stuff
+            continue;
         }
         if (std.mem.eql(u8, "-v", arg)) {
             verbose += 1;
@@ -99,7 +104,8 @@ pub fn main() anyerror!void {
     }
 
     std.log.info("Start\n", .{});
-    var client = try aws.Client.init(allocator, .{});
+    const client_options = aws.ClientOptions{ .proxy = proxy };
+    var client = aws.Client.init(allocator, client_options);
     const options = aws.Options{
         .region = "us-west-2",
         .client = client,
@@ -338,6 +344,26 @@ pub fn main() anyerror!void {
     // }
 
     std.log.info("===== Tests complete =====", .{});
+}
+
+fn proxyFromString(string: []const u8) !std.http.Client.HttpProxy {
+    var rc = std.http.Client.HttpProxy{
+        .protocol = undefined,
+        .host = undefined,
+    };
+    var remaining: []const u8 = string;
+    if (std.mem.startsWith(u8, string, "http://")) {
+        remaining = remaining["http://".len..];
+        rc.protocol = .plain;
+    } else if (std.mem.startsWith(u8, string, "https://")) {
+        remaining = remaining["https://".len..];
+        rc.protocol = .tls;
+    } else return error.InvalidScheme;
+    var split_iterator = std.mem.split(u8, remaining, ":");
+    rc.host = std.mem.trimRight(u8, split_iterator.first(), "/");
+    if (split_iterator.next()) |port|
+        rc.port = try std.fmt.parseInt(u16, port, 10);
+    return rc;
 }
 fn typeForField(comptime T: type, comptime field_name: []const u8) !type {
     const ti = @typeInfo(T);

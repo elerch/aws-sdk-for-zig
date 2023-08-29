@@ -61,14 +61,14 @@ const EndPoint = struct {
 };
 pub const AwsHttp = struct {
     allocator: std.mem.Allocator,
+    proxy: ?std.http.Client.HttpProxy,
 
     const Self = @This();
 
-    /// Recommend usage is init(allocator, awshttp.default_root_ca)
-    /// Passing null for root_pem will result in no TLS verification
-    pub fn init(allocator: std.mem.Allocator) !Self {
+    pub fn init(allocator: std.mem.Allocator, proxy: ?std.http.Client.HttpProxy) Self {
         return Self{
             .allocator = allocator,
+            .proxy = proxy,
             // .credentialsProvider = // creds provider could be useful
         };
     }
@@ -171,7 +171,7 @@ pub const AwsHttp = struct {
         const url = try std.fmt.allocPrint(self.allocator, "{s}{s}{s}", .{ endpoint.uri, request_cp.path, request_cp.query });
         defer self.allocator.free(url);
         log.debug("Request url: {s}", .{url});
-        var cl = std.http.Client{ .allocator = self.allocator };
+        var cl = std.http.Client{ .allocator = self.allocator, .proxy = self.proxy };
         defer cl.deinit(); // TODO: Connection pooling
         //
         // var req = try zfetch.Request.init(self.allocator, url, self.trust_chain);
