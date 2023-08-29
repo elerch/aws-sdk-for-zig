@@ -90,8 +90,11 @@ pub fn main() anyerror!void {
             proxy = try proxyFromString(args.next().?); // parse stuff
             continue;
         }
-        if (std.mem.eql(u8, "-v", arg)) {
-            verbose += 1;
+        if (std.mem.startsWith(u8, arg, "-v")) {
+            for (arg[1..]) |c| {
+                if (c != 'v') return error.InvalidArgument;
+                verbose += 1;
+            }
             continue;
         }
         inline for (@typeInfo(Tests).Enum.fields) |f| {
