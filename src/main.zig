@@ -63,7 +63,25 @@ pub fn main() anyerror!void {
     defer tests.deinit();
     var args = try std.process.argsWithAllocator(allocator);
     defer args.deinit();
+    const stdout_raw = std.io.getStdOut().writer();
+    var bw = std.io.bufferedWriter(stdout_raw);
+    defer bw.flush() catch unreachable;
+    const stdout = bw.writer();
+    var arg0: ?[]const u8 = null;
     while (args.next()) |arg| {
+        if (arg0 == null) arg0 = arg;
+        if (std.mem.eql(u8, "-h", arg) or std.mem.eql(u8, "--help", arg)) {
+            try stdout.print(
+                \\usage: {?s} [-h|--help] [-v][-v][-v] [test_name...]
+                \\
+                \\Where tests are one of the following:
+                \\
+            , .{arg0});
+            inline for (std.meta.fields(Tests)) |enumfield| {
+                try stdout.print("* {s}\n", .{enumfield.name});
+            }
+            return;
+        }
         if (std.mem.eql(u8, "-v", arg)) {
             verbose += 1;
             continue;
