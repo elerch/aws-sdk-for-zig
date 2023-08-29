@@ -1845,3 +1845,98 @@ test "ec2_query_with_input: EC2 describe instances" {
     try std.testing.expectEqualStrings("i-0212d7d1f62b96676", call.response.reservations.?[1].instances.?[0].instance_id.?);
     try std.testing.expectEqualStrings("123456789012:found-me", call.response.reservations.?[1].instances.?[0].tags.?[0].value.?);
 }
+test "rest_xml_no_input: S3 list buckets" {
+    const allocator = std.testing.allocator;
+    var test_harness = TestSetup.init(allocator, .{
+        .allocator = allocator,
+        .server_response =
+        \\<ListAllMyBucketsResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Owner><ID>3367189aa775bd98da38e55093705f2051443c1e775fc0971d6d77387a47c8d0</ID><DisplayName>emilerch+sub1</DisplayName></Owner><Buckets><Bucket><Name>550620852718-backup</Name><CreationDate>2020-06-17T16:26:51.000Z</CreationDate></Bucket><Bucket><Name>amplify-letmework-staging-185741-deployment</Name><CreationDate>2023-03-10T18:57:49.000Z</CreationDate></Bucket><Bucket><Name>aws-cloudtrail-logs-550620852718-224022a7</Name><CreationDate>2021-06-21T18:32:44.000Z</CreationDate></Bucket><Bucket><Name>aws-sam-cli-managed-default-samclisourcebucket-1gy0z00mj47xe</Name><CreationDate>2021-10-05T16:38:07.000Z</CreationDate></Bucket><Bucket><Name>awsomeprojectstack-pipelineartifactsbucketaea9a05-1uzwo6c86ecr</Name><CreationDate>2021-10-05T22:55:09.000Z</CreationDate></Bucket><Bucket><Name>cdk-hnb659fds-assets-550620852718-us-west-2</Name><CreationDate>2023-02-28T21:49:36.000Z</CreationDate></Bucket><Bucket><Name>cf-templates-12iy6putgdxtk-us-west-2</Name><CreationDate>2020-06-26T02:31:59.000Z</CreationDate></Bucket><Bucket><Name>codepipeline-us-west-2-46714083637</Name><CreationDate>2021-09-14T18:43:07.000Z</CreationDate></Bucket><Bucket><Name>elasticbeanstalk-us-west-2-550620852718</Name><CreationDate>2022-04-15T16:22:42.000Z</CreationDate></Bucket><Bucket><Name>lobo-west</Name><CreationDate>2021-06-21T17:17:22.000Z</CreationDate></Bucket><Bucket><Name>lobo-west-2</Name><CreationDate>2021-11-19T20:12:31.000Z</CreationDate></Bucket><Bucket><Name>logging-backup-550620852718-us-east-2</Name><CreationDate>2022-05-29T21:55:16.000Z</CreationDate></Bucket><Bucket><Name>mysfitszj3t6webstack-hostingbucketa91a61fe-1ep3ezkgwpxr0</Name><CreationDate>2023-03-01T04:53:55.000Z</CreationDate></Bucket></Buckets></ListAllMyBucketsResult>
+        ,
+        .server_response_headers = @constCast(&[_][2][]const u8{
+            .{ "Content-Type", "application/xml" },
+            .{ "x-amzn-RequestId", "9PEYBAZ9J7TPRX43" },
+        }),
+    });
+    defer test_harness.deinit();
+    const options = try test_harness.start();
+    const s3 = (Services(.{.s3}){}).s3;
+    const call = try test_harness.client.call(s3.list_buckets.Request{}, options);
+    defer call.deinit();
+    test_harness.stop();
+    // Request expectations
+    try std.testing.expectEqual(std.http.Method.GET, test_harness.request_options.request_method);
+    try std.testing.expectEqualStrings("/", test_harness.request_options.request_target);
+    try std.testing.expectEqualStrings("", test_harness.request_options.request_body);
+    // Response expectations
+    try std.testing.expectEqualStrings("9PEYBAZ9J7TPRX43", call.response_metadata.request_id);
+    try std.testing.expectEqual(@as(usize, 13), call.response.buckets.?.len);
+}
+test "rest_xml_anything_but_s3: CloudFront list key groups" {
+    const allocator = std.testing.allocator;
+    var test_harness = TestSetup.init(allocator, .{
+        .allocator = allocator,
+        .server_response =
+        \\{"Items":null,"MaxItems":100,"NextMarker":null,"Quantity":0}
+        ,
+        .server_response_headers = @constCast(&[_][2][]const u8{
+            .{ "Content-Type", "application/json" },
+            .{ "x-amzn-RequestId", "d3382082-5291-47a9-876b-8df3accbb7ea" },
+        }),
+    });
+    defer test_harness.deinit();
+    const options = try test_harness.start();
+    const cloudfront = (Services(.{.cloudfront}){}).cloudfront;
+    const call = try test_harness.client.call(cloudfront.list_key_groups.Request{}, options);
+    defer call.deinit();
+    test_harness.stop();
+    // Request expectations
+    try std.testing.expectEqual(std.http.Method.GET, test_harness.request_options.request_method);
+    try std.testing.expectEqualStrings("/2020-05-31/key-group", test_harness.request_options.request_target);
+    try std.testing.expectEqualStrings("", test_harness.request_options.request_body);
+    // Response expectations
+    try std.testing.expectEqualStrings("d3382082-5291-47a9-876b-8df3accbb7ea", call.response_metadata.request_id);
+    try std.testing.expectEqual(@as(i64, 100), call.response.key_group_list.?.max_items);
+}
+test "rest_xml_with_input: S3 put object" {
+    const allocator = std.testing.allocator;
+    var test_harness = TestSetup.init(allocator, .{
+        .allocator = allocator,
+        .server_response = "",
+        .server_response_headers = @constCast(&[_][2][]const u8{
+            // .{ "Content-Type", "application/xml" },
+            .{ "x-amzn-RequestId", "9PEYBAZ9J7TPRX43" },
+            .{ "x-amz-id-2", "jdRDo30t7Ge9lf6F+4WYpg+YKui8z0mz2+rwinL38xDZzvloJqrmpCAiKG375OSvHA9OBykJS44=" },
+            .{ "x-amz-server-side-encryption", "AES256" },
+            .{ "ETag", "37b51d194a7513e45b56f6524f2d51f2" },
+        }),
+    });
+    defer test_harness.deinit();
+    const options = try test_harness.start();
+    const s3opts = Options{
+        .region = "us-west-2",
+        .client = options.client,
+    };
+    const result = try Request(services.s3.put_object).call(.{
+        .bucket = "mysfitszj3t6webstack-hostingbucketa91a61fe-1ep3ezkgwpxr0",
+        .key = "i/am/a/teapot/foo",
+        .content_type = "text/plain",
+        .body = "bar",
+        .storage_class = "STANDARD",
+    }, s3opts);
+    std.log.info("PutObject Request id: {any}", .{result.response_metadata.request_id});
+    std.log.info("PutObject etag: {any}", .{result.response.e_tag.?});
+    //mysfitszj3t6webstack-hostingbucketa91a61fe-1ep3ezkgwpxr0.s3.us-west-2.amazonaws.com
+    defer result.deinit();
+    test_harness.stop();
+    // Request expectations
+    try std.testing.expectEqual(std.http.Method.PUT, test_harness.request_options.request_method);
+    // I don't think this will work since we're overriding the url
+    // try test_harness.request_options.expectHeader("Host", "mysfitszj3t6webstack-hostingbucketa91a61fe-1ep3ezkgwpxr0.s3.us-west-2.amazonaws.com");
+    try test_harness.request_options.expectHeader("x-amz-storage-class", "STANDARD");
+    try std.testing.expectEqualStrings("/mysfitszj3t6webstack-hostingbucketa91a61fe-1ep3ezkgwpxr0/i/am/a/teapot/foo?x-id=PutObject", test_harness.request_options.request_target);
+    try std.testing.expectEqualStrings("bar", test_harness.request_options.request_body);
+    // Response expectations
+    try std.testing.expectEqualStrings("9PEYBAZ9J7TPRX43, host_id: jdRDo30t7Ge9lf6F+4WYpg+YKui8z0mz2+rwinL38xDZzvloJqrmpCAiKG375OSvHA9OBykJS44=", result.response_metadata.request_id);
+    try std.testing.expectEqualStrings("AES256", result.response.server_side_encryption.?);
+    try std.testing.expectEqualStrings("37b51d194a7513e45b56f6524f2d51f2", result.response.e_tag.?);
+}

@@ -69,15 +69,9 @@ WebIdentityToken is not yet implemented.
 
 TODO List:
 
-* Implement all demos as tests in src/aws.zig. This has been done for
-  all AWS protocols except rest XML. Due to the similarity of EC2 Query
-  protocol and rest XML it is likely that things are fully functional (with
-  a proxy).
 * Json parsing is based on a fork of the 0.9.0 (maybe earlier?) json parser.
-  Upgrading to 0.11 caused some commenting of things that probably broke some
-  stuff. JSON parsing in general needs a re-visit. Note also that a json.zig
-  file is embedded/copied from the codegen project, so that also needs a second
-  look.
+  This needs a re-visit. Note also that a json.zig file is embedded/copied
+  from the codegen project, so that also needs a second look.
 * Take a look to see about compilation speed. With codegen caching this is
   reasonable, but still takes longer than needed.
 * Upgrade the model files. This is a simple tasks, but I'd like the first
