@@ -211,9 +211,16 @@ pub const AwsHttp = struct {
                 content_length = std.fmt.parseInt(usize, h.value, 10) catch 0;
         }
 
-        var response_data = try self.allocator.alloc(u8, content_length);
-        errdefer self.allocator.free(response_data);
-        _ = try req.readAll(response_data);
+        var response_data: []u8 =
+            if (req.response.transfer_encoding) |_| // the only value here is "chunked"
+            try req.reader().readAllAlloc(self.allocator, std.math.maxInt(usize))
+        else blk: {
+            // content length
+            var tmp_data = try self.allocator.alloc(u8, content_length);
+            errdefer self.allocator.free(tmp_data);
+            _ = try req.readAll(tmp_data);
+            break :blk tmp_data;
+        };
         log.debug("raw response body:\n{s}", .{response_data});
 
         const rc = HttpResult{
