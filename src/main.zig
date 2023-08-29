@@ -38,6 +38,9 @@ pub fn log(
     nosuspend stderr.print(prefix ++ format ++ "\n", args) catch return;
 }
 
+pub const std_options = struct {
+    pub const logFn = log;
+};
 const Tests = enum {
     query_no_input,
     query_with_input,
