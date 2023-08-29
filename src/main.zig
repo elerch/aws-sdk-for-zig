@@ -126,17 +126,17 @@ pub fn main() anyerror!void {
                 const call = try aws.Request(services.sts.get_caller_identity).call(.{}, options);
                 // const call = try client.call(services.sts.get_caller_identity.Request{}, options);
                 defer call.deinit();
-                std.log.info("arn: {any}", .{call.response.arn});
-                std.log.info("id: {any}", .{call.response.user_id});
-                std.log.info("account: {any}", .{call.response.account});
-                std.log.info("requestId: {any}", .{call.response_metadata.request_id});
+                std.log.info("arn: {s}", .{call.response.arn.?});
+                std.log.info("id: {s}", .{call.response.user_id.?});
+                std.log.info("account: {s}", .{call.response.account.?});
+                std.log.info("requestId: {s}", .{call.response_metadata.request_id});
             },
             .query_with_input => {
                 const call = try client.call(services.sqs.list_queues.Request{
                     .queue_name_prefix = "s",
                 }, options);
                 defer call.deinit();
-                std.log.info("request id: {any}", .{call.response_metadata.request_id});
+                std.log.info("request id: {s}", .{call.response_metadata.request_id});
                 std.log.info("account has queues with prefix 's': {}", .{call.response.queue_urls != null});
             },
             .json_1_0_query_with_input => {
@@ -144,7 +144,7 @@ pub fn main() anyerror!void {
                     .limit = 1,
                 }, options);
                 defer call.deinit();
-                std.log.info("request id: {any}", .{call.response_metadata.request_id});
+                std.log.info("request id: {s}", .{call.response_metadata.request_id});
                 std.log.info("account has tables: {}", .{call.response.table_names.?.len > 0});
             },
             .json_1_0_query_no_input => {
@@ -157,13 +157,13 @@ pub fn main() anyerror!void {
                     .max_results = 1,
                 }, options);
                 defer call.deinit();
-                std.log.info("request id: {any}", .{call.response_metadata.request_id});
+                std.log.info("request id: {s}", .{call.response_metadata.request_id});
                 std.log.info("account has clusters: {}", .{call.response.cluster_arns.?.len > 0});
             },
             .json_1_1_query_no_input => {
                 const call = try client.call(services.ecs.list_clusters.Request{}, options);
                 defer call.deinit();
-                std.log.info("request id: {any}", .{call.response_metadata.request_id});
+                std.log.info("request id: {s}", .{call.response_metadata.request_id});
                 std.log.info("account has clusters: {}", .{call.response.cluster_arns.?.len > 0});
             },
             .rest_json_1_query_with_input => {
@@ -171,19 +171,19 @@ pub fn main() anyerror!void {
                     .max_items = 1,
                 }, options);
                 defer call.deinit();
-                std.log.info("request id: {any}", .{call.response_metadata.request_id});
+                std.log.info("request id: {s}", .{call.response_metadata.request_id});
                 std.log.info("account has functions: {}", .{call.response.functions.?.len > 0});
             },
             .rest_json_1_query_no_input => {
                 const call = try client.call(services.lambda.list_functions.Request{}, options);
                 defer call.deinit();
-                std.log.info("request id: {any}", .{call.response_metadata.request_id});
+                std.log.info("request id: {s}", .{call.response_metadata.request_id});
                 std.log.info("account has functions: {}", .{call.response.functions.?.len > 0});
             },
             .rest_json_1_work_with_lambda => {
                 const call = try client.call(services.lambda.list_functions.Request{}, options);
                 defer call.deinit();
-                std.log.info("list request id: {any}", .{call.response_metadata.request_id});
+                std.log.info("list request id: {s}", .{call.response_metadata.request_id});
                 if (call.response.functions) |fns| {
                     if (fns.len > 0) {
                         const func = fns[0];
@@ -196,11 +196,11 @@ pub fn main() anyerror!void {
                         const addtag = try aws.Request(services.lambda.tag_resource).call(req, options);
                         defer addtag.deinit();
                         // const addtag = try client.call(services.lambda.tag_resource.Request{ .resource = arn, .tags = &.{.{ .key = "Foo", .value = "Bar" }} }, options);
-                        std.log.info("add tag request id: {any}", .{addtag.response_metadata.request_id});
+                        std.log.info("add tag request id: {s}", .{addtag.response_metadata.request_id});
                         var keys = [_][]const u8{"Foo"}; // Would love to have a way to express this without burning a var here
                         const deletetag = try aws.Request(services.lambda.untag_resource).call(.{ .tag_keys = keys[0..], .resource = arn }, options);
                         defer deletetag.deinit();
-                        std.log.info("delete tag request id: {any}", .{deletetag.response_metadata.request_id});
+                        std.log.info("delete tag request id: {s}", .{deletetag.response_metadata.request_id});
                     } else {
                         std.log.err("no functions to work with", .{});
                     }
@@ -212,7 +212,7 @@ pub fn main() anyerror!void {
                 // Describe regions is a simpler request and easier to debug
                 const result = try client.call(services.ec2.describe_regions.Request{}, options);
                 defer result.deinit();
-                std.log.info("request id: {any}", .{result.response_metadata.request_id});
+                std.log.info("request id: {s}", .{result.response_metadata.request_id});
                 std.log.info("region count: {d}", .{result.response.regions.?.len});
             },
             .ec2_query_with_input => {
@@ -250,13 +250,13 @@ pub fn main() anyerror!void {
             .rest_xml_no_input => {
                 const result = try client.call(services.s3.list_buckets.Request{}, options);
                 defer result.deinit();
-                std.log.info("request id: {any}", .{result.response_metadata.request_id});
+                std.log.info("request id: {s}", .{result.response_metadata.request_id});
                 std.log.info("bucket count: {d}", .{result.response.buckets.?.len});
             },
             .rest_xml_anything_but_s3 => {
                 const result = try client.call(services.cloudfront.list_key_groups.Request{}, options);
                 defer result.deinit();
-                std.log.info("request id: {any}", .{result.response_metadata.request_id});
+                std.log.info("request id: {s}", .{result.response_metadata.request_id});
                 const list = result.response.key_group_list.?;
                 std.log.info("key group list max: {?d}", .{list.max_items});
                 std.log.info("key group quantity: {d}", .{list.quantity});
@@ -269,7 +269,7 @@ pub fn main() anyerror!void {
                     const result = try client.call(services.s3.list_buckets.Request{}, options);
                     defer result.deinit();
                     const bucket = result.response.buckets.?[result.response.buckets.?.len - 1];
-                    std.log.info("ListBuckets request id: {any}", .{result.response_metadata.request_id});
+                    std.log.info("ListBuckets request id: {s}", .{result.response_metadata.request_id});
                     std.log.info("bucket name: {any}", .{bucket.name.?});
                     break :blk try allocator.dupe(u8, bucket.name.?);
                 };
@@ -280,7 +280,7 @@ pub fn main() anyerror!void {
                     }, options);
                     defer result.deinit();
                     const location = result.response.location_constraint.?;
-                    std.log.info("GetBucketLocation request id: {any}", .{result.response_metadata.request_id});
+                    std.log.info("GetBucketLocation request id: {s}", .{result.response_metadata.request_id});
                     std.log.info("location: {any}", .{location});
                     break :blk try allocator.dupe(u8, location);
                 };
