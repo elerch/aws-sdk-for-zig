@@ -1330,6 +1330,7 @@ const TestOptions = struct {
     server_remaining_requests: usize = 1,
     server_response: []const u8 = "unset",
     server_response_headers: [][2][]const u8 = &[_][2][]const u8{},
+    server_response_transfer_encoding: ?std.http.TransferEncoding = null,
     request_body: []u8 = "",
     request_method: std.http.Method = undefined,
     request_target: []const u8 = undefined,
@@ -1445,7 +1446,11 @@ fn processRequest(options: *TestOptions, server: *std.http.Server) !void {
         }
         break :brk "Unexpected error generating request to lambda";
     };
-    res.transfer_encoding = .{ .content_length = response_bytes.len };
+    if (options.server_response_transfer_encoding == null)
+        res.transfer_encoding = .{ .content_length = response_bytes.len }
+    else
+        res.transfer_encoding = .chunked;
+
     try res.do();
     _ = try res.writer().writeAll(response_bytes);
     try res.finish();
@@ -1504,7 +1509,7 @@ const TestSetup = struct {
             null,
         );
         aws_creds.static_credentials = self.creds;
-        var client = try Client.init(self.allocator, .{});
+        var client = Client.init(self.allocator, .{});
         self.client = &client;
         return .{
             .region = "us-west-2",
@@ -1806,6 +1811,7 @@ test "ec2_query_no_input: EC2 describe regions" {
             .{ "Content-Type", "text/xml;charset=UTF-8" },
             .{ "x-amzn-RequestId", "4cdbdd69-800c-49b5-8474-ae4c17709782" },
         }),
+        .server_response_transfer_encoding = .chunked,
     });
     defer test_harness.deinit();
     const options = try test_harness.start();
