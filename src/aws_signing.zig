@@ -409,7 +409,11 @@ fn canonicalUri(allocator: std.mem.Allocator, path: []const u8, double_encode: b
     log.debug("encoding path: {s}", .{path});
     var encoded_once = try encodeUri(allocator, path);
     log.debug("encoded path (1): {s}", .{encoded_once});
-    if (!double_encode or std.mem.indexOf(u8, path, "%") != null) { // TODO: Is the indexOf condition universally true?
+    // The line below had this condition, with the additional comment
+    // "Is the indexOf condition universally true?"
+    // Right now I'm not sure why this was added, but it seems to be a mistake
+    // or std.mem.indexOf(u8, path, "%") != null) { // Is the indexOf condition universally true?
+    if (!double_encode) {
         if (std.mem.lastIndexOf(u8, encoded_once, "?")) |i| {
             _ = allocator.resize(encoded_once, i);
             return encoded_once[0..i];
@@ -452,11 +456,30 @@ fn encodeParamPart(allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
     }
     return encoded.toOwnedSlice();
 }
+
+// URI encode every byte except the unreserved characters:
+//   'A'-'Z', 'a'-'z', '0'-'9', '-', '.', '_', and '~'.
+//
+// The space character is a reserved character and must be encoded as "%20"
+// (and not as "+").
+//
+// Each URI encoded byte is formed by a '%' and the two-digit hexadecimal value of the byte.
+//
+// Letters in the hexadecimal value must be uppercase, for example "%1A".
+//
+// Encode the forward slash character, '/', everywhere except in the object key
+// name. For example, if the object key name is photos/Jan/sample.jpg, the
+// forward slash in the key name is not encoded.
+
 fn encodeUri(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
     const reserved_characters = ";,/?:@&=+$#";
     const unreserved_marks = "-_.!~*'()";
     var encoded = try std.ArrayList(u8).initCapacity(allocator, path.len);
     defer encoded.deinit();
+    // if (std.mem.startsWith(u8, path, "/2017-03-31/tags/arn")) {
+    //     try encoded.appendSlice("/2017-03-31/tags/arn%25253Aaws%25253Alambda%25253Aus-west-2%25253A550620852718%25253Afunction%25253Aawsome-lambda-LambdaStackawsomeLambda");
+    //     return encoded.toOwnedSlice();
+    // }
     for (path) |c| {
         var should_encode = true;
         for (reserved_characters) |r|
