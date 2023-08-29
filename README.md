@@ -62,8 +62,9 @@ The zig 0.11 HTTP client supports TLS 1.3 only. This, IMHO, is a reasonable
 restriction given its introduction 5 years ago, but is inflicting some short
 term pain on this project as AWS has not yet fully implemented the protocol. AWS has
 committed to [TLS 1.3 support across all services by the end of 2023](https://aws.amazon.com/blogs/security/faster-aws-cloud-connections-with-tls-1-3/), but many (most) services as of August 28th have not yet
-been upgraded. Proxy support is available in the client but is not yet implemented.
-In the meantime, it's possible that proxychains is your friend.
+been upgraded. Proxy support has been added, so to get to the services that
+do not yet support TLS 1.3, you can use something like [mitmproxy](https://mitmproxy.org/)
+to proxy those requests. Of course, this is not a good production solution...
 
 WebIdentityToken is not yet implemented.
 
