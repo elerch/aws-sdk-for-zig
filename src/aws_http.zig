@@ -248,7 +248,7 @@ fn addHeaders(allocator: std.mem.Allocator, headers: *std.ArrayList(base.Header)
     }
     try headers.append(.{ .name = "Accept", .value = "application/json" });
     try headers.append(.{ .name = "Host", .value = host });
-    try headers.append(.{ .name = "User-Agent", .value = "zig-aws 1.0, Powered by the AWS Common Runtime." });
+    try headers.append(.{ .name = "User-Agent", .value = "zig-aws 1.0" });
     if (!has_content_type)
         try headers.append(.{ .name = "Content-Type", .value = content_type });
     try headers.appendSlice(additional_headers);
