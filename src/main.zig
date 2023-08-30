@@ -187,31 +187,30 @@ pub fn main() anyerror!void {
                 const call = try client.call(services.lambda.list_functions.Request{}, options);
                 defer call.deinit();
                 std.log.info("list request id: {s}", .{call.response_metadata.request_id});
-                std.log.err("Double encoding issue prevents test from completing - skipping test", .{});
-                // if (call.response.functions) |fns| {
-                //     if (fns.len > 0) {
-                //         const func = fns[0];
-                //         const arn = func.function_arn.?;
-                //         // This is a bit ugly. Maybe a helper function in the library would help?
-                //         var tags = try std.ArrayList(@typeInfo(try typeForField(services.lambda.tag_resource.Request, "tags")).Pointer.child).initCapacity(allocator, 1);
-                //         defer tags.deinit();
-                //         tags.appendAssumeCapacity(.{ .key = "Foo", .value = "Bar" });
-                //         const req = services.lambda.tag_resource.Request{ .resource = arn, .tags = tags.items };
-                //         const addtag = try aws.Request(services.lambda.tag_resource).call(req, options);
-                //         // TODO: This is failing due to double-encoding (see zig issue 17015)
-                //         defer addtag.deinit();
-                //         // const addtag = try client.call(services.lambda.tag_resource.Request{ .resource = arn, .tags = &.{.{ .key = "Foo", .value = "Bar" }} }, options);
-                //         std.log.info("add tag request id: {s}", .{addtag.response_metadata.request_id});
-                //         var keys = [_][]const u8{"Foo"}; // Would love to have a way to express this without burning a var here
-                //         const deletetag = try aws.Request(services.lambda.untag_resource).call(.{ .tag_keys = keys[0..], .resource = arn }, options);
-                //         defer deletetag.deinit();
-                //         std.log.info("delete tag request id: {s}", .{deletetag.response_metadata.request_id});
-                //     } else {
-                //         std.log.err("no functions to work with", .{});
-                //     }
-                // } else {
-                //     std.log.err("no functions to work with", .{});
-                // }
+                if (call.response.functions) |fns| {
+                    if (fns.len > 0) {
+                        const func = fns[0];
+                        const arn = func.function_arn.?;
+                        // This is a bit ugly. Maybe a helper function in the library would help?
+                        var tags = try std.ArrayList(@typeInfo(try typeForField(services.lambda.tag_resource.Request, "tags")).Pointer.child).initCapacity(allocator, 1);
+                        defer tags.deinit();
+                        tags.appendAssumeCapacity(.{ .key = "Foo", .value = "Bar" });
+                        const req = services.lambda.tag_resource.Request{ .resource = arn, .tags = tags.items };
+                        const addtag = try aws.Request(services.lambda.tag_resource).call(req, options);
+                        // TODO: This is failing due to double-encoding (see zig issue 17015)
+                        defer addtag.deinit();
+                        // const addtag = try client.call(services.lambda.tag_resource.Request{ .resource = arn, .tags = &.{.{ .key = "Foo", .value = "Bar" }} }, options);
+                        std.log.info("add tag request id: {s}", .{addtag.response_metadata.request_id});
+                        var keys = [_][]const u8{"Foo"}; // Would love to have a way to express this without burning a var here
+                        const deletetag = try aws.Request(services.lambda.untag_resource).call(.{ .tag_keys = keys[0..], .resource = arn }, options);
+                        defer deletetag.deinit();
+                        std.log.info("delete tag request id: {s}", .{deletetag.response_metadata.request_id});
+                    } else {
+                        std.log.err("no functions to work with", .{});
+                    }
+                } else {
+                    std.log.err("no functions to work with", .{});
+                }
             },
             .ec2_query_no_input => {
                 // Describe regions is a simpler request and easier to debug
