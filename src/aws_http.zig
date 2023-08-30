@@ -178,6 +178,33 @@ pub const AwsHttp = struct {
         // defer req.deinit();
 
         const method = std.meta.stringToEnum(std.http.Method, request_cp.method).?;
+        // std.Uri has a format function here that is used by start() (below)
+        // to escape the string we're about to send. But we don't want that...
+        // we need the control, because the signing above relies on the url above.
+        // We can't seem to have our cake and eat it too, because we need escaped
+        // ':' characters, but if we escape them, we'll get them double encoded.
+        // If we don't escape them, they won't get encoded at all. I believe the
+        // only answer may be to copy the Request.start function from the
+        // standard library and tweak the print statements such that they don't
+        // escape (but do still handle full uri (in proxy) vs path only (normal)
+        //
+        // Bug report filed here:
+        // https://github.com/ziglang/zig/issues/17015
+        //
+        // https://github.com/ziglang/zig/blob/0.11.0/lib/std/http/Client.zig#L538-L636
+        //
+        // Look at lines 551 and 553:
+        // https://github.com/ziglang/zig/blob/0.11.0/lib/std/http/Client.zig#L551
+        //
+        // This ends up executing the format function here:
+        // https://github.com/ziglang/zig/blob/0.11.0/lib/std/http/Client.zig#L551
+        //
+        // Which is basically the what we want, without the escaping on lines
+        // 249, 254, and 260:
+        // https://github.com/ziglang/zig/blob/0.11.0/lib/std/Uri.zig#L249
+        //
+        // const unescaped_url = try std.Uri.unescapeString(self.allocator, url);
+        // defer self.allocator.free(unescaped_url);
         var req = try cl.request(method, try std.Uri.parse(url), headers, .{});
         defer req.deinit();
         if (request_cp.body.len > 0)
