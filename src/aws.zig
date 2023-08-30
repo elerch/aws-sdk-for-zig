@@ -934,6 +934,8 @@ fn buildPath(
                             replacement_writer,
                         );
                         const trimmed_replacement_val = std.mem.trim(u8, replacement_buffer.items, "\"");
+                        // NOTE: We have to encode here as it is a portion of the rest JSON protocol.
+                        // This makes the encoding in the standard library wrong
                         try uriEncode(trimmed_replacement_val, encoded_buffer.writer(), encode_slash);
                         try buffer.appendSlice(encoded_buffer.items);
                     }
@@ -1329,6 +1331,7 @@ const TestOptions = struct {
     server_port: ?u16 = null,
     server_remaining_requests: usize = 1,
     server_response: []const u8 = "unset",
+    server_response_status: std.http.Status = .ok,
     server_response_headers: [][2][]const u8 = &[_][2][]const u8{},
     server_response_transfer_encoding: ?std.http.TransferEncoding = null,
     request_body: []u8 = "",
@@ -1461,6 +1464,7 @@ fn processRequest(options: *TestOptions, server: *std.http.Server) !void {
 }
 
 fn serve(options: *TestOptions, res: *std.http.Server.Response) ![]const u8 {
+    res.status = options.server_response_status;
     for (options.server_response_headers) |h|
         try res.headers.append(h[0], h[1]);
     // try res.headers.append("content-length", try std.fmt.allocPrint(allocator, "{d}", .{server_response.len}));
@@ -1798,9 +1802,41 @@ test "rest_json_1_query_no_input: lambda listFunctions runtime" {
         call.response.functions.?[12].function_name.?,
     );
 }
-test "rest_json_1_work_with_lambda: lambda multiple functions (blank test)" {
-    // Replicating this test would not provide additional coverage. It is
-    // here for completeness only
+test "rest_json_1_work_with_lambda: lambda tagResource (only), to excercise zig issue 17015" {
+    const allocator = std.testing.allocator;
+    var test_harness = TestSetup.init(allocator, .{
+        .allocator = allocator,
+        .server_response = "",
+        .server_response_status = .no_content,
+        .server_response_headers = @constCast(&[_][2][]const u8{
+            .{ "Content-Type", "application/json" },
+            .{ "x-amzn-RequestId", "a521e152-6e32-4e67-9fb3-abc94e34551b" },
+        }),
+    });
+    defer test_harness.deinit();
+    const options = try test_harness.start();
+    const lambda = (Services(.{.lambda}){}).lambda;
+    var tags = try std.ArrayList(@typeInfo(try typeForField(lambda.tag_resource.Request, "tags")).Pointer.child).initCapacity(allocator, 1);
+    defer tags.deinit();
+    tags.appendAssumeCapacity(.{ .key = "Foo", .value = "Bar" });
+    const req = services.lambda.tag_resource.Request{ .resource = "arn:aws:lambda:us-west-2:550620852718:function:awsome-lambda-LambdaStackawsomeLambda", .tags = tags.items };
+    const call = try Request(lambda.tag_resource).call(req, options);
+    defer call.deinit();
+    test_harness.stop();
+    // Request expectations
+    try std.testing.expectEqual(std.http.Method.POST, test_harness.request_options.request_method);
+    try std.testing.expectEqualStrings(
+        \\{
+        \\    "Resource": "arn:aws:lambda:us-west-2:550620852718:function:awsome-lambda-LambdaStackawsomeLambda",
+        \\    "Tags": {
+        \\        "Foo": "Bar"
+        \\    }
+        \\}
+    , test_harness.request_options.request_body);
+    // Due to 17015, we see %253A instead of %3A
+    try std.testing.expectEqualStrings("/2017-03-31/tags/arn%3Aaws%3Alambda%3Aus-west-2%3A550620852718%3Afunction%3Aawsome-lambda-LambdaStackawsomeLambda", test_harness.request_options.request_target);
+    // Response expectations
+    try std.testing.expectEqualStrings("a521e152-6e32-4e67-9fb3-abc94e34551b", call.response_metadata.request_id);
 }
 test "ec2_query_no_input: EC2 describe regions" {
     const allocator = std.testing.allocator;
