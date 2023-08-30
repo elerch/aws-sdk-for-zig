@@ -184,9 +184,10 @@ pub fn main() anyerror!void {
                 std.log.info("account has functions: {}", .{call.response.functions.?.len > 0});
             },
             .rest_json_1_work_with_lambda => {
-                // const call = try client.call(services.lambda.list_functions.Request{}, options);
-                // defer call.deinit();
-                // std.log.info("list request id: {s}", .{call.response_metadata.request_id});
+                const call = try client.call(services.lambda.list_functions.Request{}, options);
+                defer call.deinit();
+                std.log.info("list request id: {s}", .{call.response_metadata.request_id});
+                std.log.err("Double encoding issue prevents test from completing - skipping test", .{});
                 // if (call.response.functions) |fns| {
                 //     if (fns.len > 0) {
                 //         const func = fns[0];
@@ -197,9 +198,7 @@ pub fn main() anyerror!void {
                 //         tags.appendAssumeCapacity(.{ .key = "Foo", .value = "Bar" });
                 //         const req = services.lambda.tag_resource.Request{ .resource = arn, .tags = tags.items };
                 //         const addtag = try aws.Request(services.lambda.tag_resource).call(req, options);
-                // TODO: Something is up with signature calculation. I believe it's with the encoding, because the url used
-                // here is totally crazy with the arn of the resource directly in it
-                // Example: https://lambda.us-west-2.amazonaws.com/2017-03-31/tags/arn%253Aaws%253Alambda%253Aus-west-2%253A550620852718%253Afunction%253ADevelopmentFrontendStack--amplifyassetdeploymentha-aZqB9IbZLIKU
+                //         // TODO: This is failing due to double-encoding (see zig issue 17015)
                 //         defer addtag.deinit();
                 //         // const addtag = try client.call(services.lambda.tag_resource.Request{ .resource = arn, .tags = &.{.{ .key = "Foo", .value = "Bar" }} }, options);
                 //         std.log.info("add tag request id: {s}", .{addtag.response_metadata.request_id});
