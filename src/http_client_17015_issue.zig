@@ -1,7 +1,5 @@
-const std = @import("../std.zig");
-const Uri = std.http.Uri;
-
-pub const StartError = std.http.Connection.WriteError || error{ InvalidContentLength, UnsupportedTransferEncoding };
+const std = @import("std");
+const Uri = std.Uri;
 
 ///////////////////////////////////////////////////////////////////////////
 /// This function imported from:
@@ -12,7 +10,7 @@ pub const StartError = std.http.Connection.WriteError || error{ InvalidContentLe
 /// only the two w.print lines for req.uri 16 and 18 lines down from this comment
 ///////////////////////////////////////////////////////////////////////////
 /// Send the request to the server.
-pub fn start(req: *std.http.Client.Request) StartError!void {
+pub fn start(req: *std.http.Client.Request) std.http.Client.Request.StartError!void {
     var buffered = std.io.bufferedWriter(req.connection.?.data.writer());
     const w = buffered.writer();
 
@@ -25,9 +23,9 @@ pub fn start(req: *std.http.Client.Request) StartError!void {
         try w.print("{}", .{req.uri.port.?});
     } else if (req.connection.?.data.proxied) {
         // proxied connections require the full uri
-        try w.print("{+/}", .{req.uri});
+        try format(req.uri, "+/", .{}, w);
     } else {
-        try w.print("{/}", .{req.uri});
+        try format(req.uri, "/", .{}, w);
     }
 
     try w.writeByte(' ');
@@ -139,7 +137,7 @@ pub fn format(
         if (uri.path.len == 0) {
             try writer.writeAll("/");
         } else {
-            try Uri.writeEscapedPath(writer, uri.path);
+            try writer.writeAll(uri.path); // do not mess with our path
         }
 
         if (uri.query) |q| {

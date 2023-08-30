@@ -209,7 +209,8 @@ pub const AwsHttp = struct {
         defer req.deinit();
         if (request_cp.body.len > 0)
             req.transfer_encoding = .{ .content_length = request_cp.body.len };
-        try req.start();
+        try @import("http_client_17015_issue.zig").start(&req);
+        // try req.start();
         if (request_cp.body.len > 0) {
             try req.writeAll(request_cp.body);
             try req.finish();
