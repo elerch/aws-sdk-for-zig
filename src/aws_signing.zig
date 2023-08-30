@@ -409,11 +409,7 @@ fn canonicalUri(allocator: std.mem.Allocator, path: []const u8, double_encode: b
     log.debug("encoding path: {s}", .{path});
     var encoded_once = try encodeUri(allocator, path);
     log.debug("encoded path (1): {s}", .{encoded_once});
-    // The line below had this condition, with the additional comment
-    // "Is the indexOf condition universally true?"
-    // Right now I'm not sure why this was added, but it seems to be a mistake
-    // or std.mem.indexOf(u8, path, "%") != null) { // Is the indexOf condition universally true?
-    if (!double_encode) {
+    if (!double_encode or std.mem.indexOf(u8, path, "%") != null) { // TODO: Is the indexOf condition universally true?
         if (std.mem.lastIndexOf(u8, encoded_once, "?")) |i| {
             _ = allocator.resize(encoded_once, i);
             return encoded_once[0..i];
