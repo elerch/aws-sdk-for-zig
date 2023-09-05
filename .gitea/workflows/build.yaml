@@ -15,7 +15,6 @@ jobs:
       ZIG_VERSION: 0.11.0
       ARCH: x86_64
     steps:
-      - run: echo ${ACTIONS_RUNTIME_URL}
       - name: Check out repository code
         uses: actions/checkout@v3
       # ARCH is fine, but we can't substitute directly because zig
@@ -33,12 +32,29 @@ jobs:
       - run: zig build -Dtarget=riscv64-linux
       - run: zig build -Dtarget=x86_64-macos
       - run: zig build -Dtarget=aarch64-macos
-      - run: tar -czf ${{ runner.temp }}/${{ github.sha }}-with-models.tgz --exclude 'zig-*' *
+      - run: tar -czf ${{ runner.temp }}/${{ github.sha }}-with-models.tar.gz --exclude 'zig-*' *
+      # - name: Sign
+      #   id: sign
+      #   uses: https://git.lerch.org/lobo/action-hsm-sign@v1
+      #   with:
+      #     pin: ${{ secrets.HSM_USER_PIN }}
+      #     files: ???
+      #     public_key: 'https://emil.lerch.org/serverpublic.pem'
+      # - run: |
+      #     echo "Source 0 should be ./bar: ${{ steps.sign.outputs.SOURCE_0 }}"
+      # - run: |
+      #     echo "Signature 0 should be ./bar.sig: ${{ steps.sign.outputs.SIG_0 }}"
+      # - run: echo "URL of bar (0) is ${{ steps.sign.outputs.URL_0 }}"
+      # - run: |
+      #     echo "Source 1 should be ./foo: ${{ steps.sign.outputs.SOURCE_1 }}"
+      # - run: |
+      #     echo "Signature 1 should be ./foo.sig: ${{ steps.sign.outputs.SIG_1 }}"
+      # - run: echo "URL of foo (1) is ${{ steps.sign.outputs.URL_1 }}"
       - name: Upload
         uses: actions/upload-artifact@v3
         with:
-          name: ${{ github.sha }}-with-models.tgz
-          path: '${{ runner.temp }}/${{ github.sha }}-with-models.tgz'
+          name: ${{ github.sha }}-with-models.tar.gz
+          path: '${{ runner.temp }}/${{ github.sha }}-with-models.tar.gz'
       - name: Notify
         uses: https://git.lerch.org/lobo/action-notify-ntfy@v2
         if: always()
