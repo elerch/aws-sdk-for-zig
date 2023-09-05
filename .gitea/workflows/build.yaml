@@ -33,6 +33,9 @@ jobs:
       - run: zig build -Dtarget=x86_64-macos
       - run: zig build -Dtarget=aarch64-macos
       - run: tar -czf ${{ runner.temp }}/${{ github.sha }}-with-models.tgz --exclude 'zig-*' *
+      - run: ls -l ${{ runner.temp }}/${{ github.sha }}-with-models.tgz
+      - run: tar -tzf ${{ runner.temp }}/${{ github.sha }}-with-models.tgz
+      - run: echo '${{ github.server_url }}/api/actions_pipeline'
       - name: Upload
         uses: actions/upload-artifact@v3
         with:
