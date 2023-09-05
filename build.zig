@@ -29,6 +29,8 @@ pub fn build(b: *Builder) !void {
     // to use, but that should be easy. It may also give some ideas on the
     // code gen piece itself, though it might be nice to leave as a seperate
     // executable
+    // TODO: This executable should not be built when importing as a package.
+    // It relies on code gen and is all fouled up when getting imported
     const exe = b.addExecutable(.{
         .name = "demo",
         .root_source_file = .{ .path = "src/main.zig" },
@@ -105,7 +107,6 @@ pub fn build(b: *Builder) !void {
             b.allocator,
             &[_][]const u8{ b.global_cache_root.path.?, models_dir },
         ));
-        // cg_cmd.addDirectoryArg(std.Build.FileSource.relative("codegen/models"));
         cg_cmd.addArg("--output");
         cg_cmd.addDirectoryArg(std.Build.FileSource.relative("src/models"));
         if (b.verbose)
@@ -124,16 +125,6 @@ pub fn build(b: *Builder) !void {
         // file, generator exe hash. Each import has comment
         // with both input and output hash and we can decide
         // later about warning on manual changes...
-        //
-        // this scheme would permit cross plat codegen and maybe
-        // we can have codegen added in a seperate repo,
-        // though not sure how necessary that is
-        // cg.dependOn(&b.addSystemCommand(&.{
-        //     b.zig_exe,
-        //     "build",
-        //     "run",
-        //     "-Doptimize=ReleaseSafe",
-        // }).step);
 
         cg.dependOn(&cg_cmd.step);
         exe.step.dependOn(cg);
