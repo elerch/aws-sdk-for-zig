@@ -29,6 +29,12 @@ jobs:
       - run: zig build -Dtarget=riscv64-linux
       - run: zig build -Dtarget=x86_64-macos
       - run: zig build -Dtarget=aarch64-macos
+      - run: tar -czf ${{ runner.temp }}/${{ github.sha }}-with-models.tgz --exclude 'zig-*' *
+      - name: Upload
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ github.sha }}-with-models.tgz
+          path: '${{ runner.temp }}/${{ github.sha }}-with-models.tgz'
       - name: Notify
         uses: https://git.lerch.org/lobo/action-notify-ntfy@v2
         if: always()
