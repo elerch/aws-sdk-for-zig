@@ -42,10 +42,14 @@ pub fn build(b: *Builder) !void {
         .target = target,
         .optimize = optimize,
     });
-    exe.addModule("smithy", smithy_dep.module("smithy"));
+    const smithy_module = smithy_dep.module("smithy");
+    exe.addModule("smithy", smithy_module); // not sure this should be here...
 
     const module = b.addModule("aws", .{
         .source_file = .{ .path = "src/aws.zig" },
+        .dependencies = &[_]std.build.ModuleDependency{
+            .{ .name = "smithy", .module = smithy_module },
+        },
     });
     exe.addModule("aws", module);
     // TODO: This does not work correctly due to https://github.com/ziglang/zig/issues/16354
