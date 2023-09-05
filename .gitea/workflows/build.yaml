@@ -35,7 +35,7 @@ jobs:
       # Zig package manager expects everything to be inside a directory in the archive,
       # which it then strips out on download. So we need to shove everything inside a directory
       # the way GitHub/Gitea does for repo archives
-      - run: tar -czf ${{ runner.temp }}/${{ github.sha }}-with-models.tar.gz --exclude 'zig-*' --transform 's,^,${{ github.sha }}/,' *
+      - run: tar -czf ${{ runner.temp }}/${{ github.sha }}-with-models.tar.gz --format posix --exclude 'zig-*' --transform 's,^,${{ github.sha }}/,' *
       # - name: Sign
       #   id: sign
       #   uses: https://git.lerch.org/lobo/action-hsm-sign@v1
