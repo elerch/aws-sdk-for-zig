@@ -26,34 +26,39 @@ Building
 files from upstream AWS Go SDK v2, run the code generation, then build the main
 project with the generated code. Testing can be done with `zig test`.
 
-Note that there are some loose ends on this version as compared to the [0.9.0
-branch](https://git.lerch.org/lobo/aws-sdk-for-zig/src/branch/0.9.0). More
-details below in Limitations. This branch overall is superior, as is the 0.11
-compiler, but if you need an edge case and don't want to issue a PR, feel free
-to use that branch.
 
 Using
 -----
 
 This is designed for use with the Zig 0.11 package manager, and exposes a module
 called "aws". Set up `build.zig.zon` and add the dependency/module to your project
-as normal and the package manager should do its thing.
+as normal and the package manager should do its thing. A full example can be found
+in [/example](example/README.md).
 
-Running the demo
-----------------
+Configuring the module and/or Running the demo
+----------------------------------------------
 
 This library mimics the aws c libraries for it's work, so it operates like most
-other 'AWS things'. main.zig gives you a handful of examples for working with services.
-For local testing or alternative endpoints, there's no real standard, so
-there is code to look for `AWS_ENDPOINT_URL` environment variable that will
-supersede all other configuration. Note that an alternative endpoint may
-require passing in a client option to specify an different TLS root certificate
-(pass null to disable certificate verification).
+other 'AWS things'. [/src/main.zig](src/main.zig) gives you a handful of examples
+for working with services. For local testing or alternative endpoints, there's
+no real standard, so there is code to look for `AWS_ENDPOINT_URL` environment
+variable that will supersede all other configuration.
+
+Other branches
+--------------
+
+The default branch is fully functional but requires TLS 1.3. Until AWS Services
+support TLS 1.3 at the end of 2023, the [0.9.0 branch](https://git.lerch.org/lobo/aws-sdk-for-zig/src/branch/0.9.0)
+may be of use. More details below in limitations. This branch overall is
+superior, as is the 0.11 compiler, but if you need a service that doesn't support
+TLS 1.3 and you need it right away, feel free to use that branch. Note I do not
+intend to update code in the 0.9.0 branch, but will accept PRs.
 
 An [old branch based on aws-crt](https://github.com/elerch/aws-sdk-for-zig/tree/aws-crt) exists
 for posterity, and supports x86_64 linux. The old branch is deprecated, so if
 there are issues you see that work correctly in the aws-crt branch, please
-file an issue.
+file an issue. I can't think of a reason to use this branch any more. I do not
+intend to entertain PRs on this branch, but reach out if you think it is important.
 
 Limitations
 -----------
@@ -85,3 +90,269 @@ TODO List:
 Compiler wishlist/watchlist:
 
 * [comptime allocations](https://github.com/ziglang/zig/issues/1291) so we can read files, etc (or is there another way)
+
+Services with TLS 1.3 Support (115 services)
+--------------------------------------------
+```
+acm
+amplify
+apigateway
+apigateway
+appconfig
+application-autoscaling
+applicationinsights
+apprunner
+appstream2
+appsync
+athena
+backup
+batch
+cloud9
+clouddirectory
+cloudformation
+cloudhsmv2
+cloudsearch
+cloudtrail
+events
+codeartifact
+codebuild
+codedeploy
+codeguru-profiler
+codepipeline
+codestar-connections
+comprehend
+comprehendmedical
+compute-optimizer
+dms
+databrew
+dataexchange
+datasync
+devicefarm
+directconnect
+ds
+ec2-instance-connect
+api.ecr
+api.ecr-public
+ecs
+elasticfilesystem
+es
+elastictranscoder
+elasticmapreduce
+events
+finspace
+finspace-api
+fms
+frauddetector
+fsx
+gamelift
+glacier
+globalaccelerator
+glue
+healthlake
+honeycode
+identitystore
+inspector
+iot
+iotanalytics
+iotevents
+data.iotevents
+api.iotwireless
+ivs
+kafka
+kendra
+kinesisanalytics
+kms
+lakeformation
+license-manager
+lookoutvision
+metering.marketplace
+mediaconnect
+medialive
+mediapackage-vod
+mediastore
+mgh
+network-firewall
+networkmanager
+opsworks-cm
+personalize
+pinpoint
+email
+sms-voice.pinpoint
+polly
+qldb
+session.qldb
+quicksight
+rds-data
+redshift-data
+rekognition
+tagging
+route53resolver
+s3-outposts
+api.sagemaker
+edge.sagemaker
+secretsmanager
+servicecatalog
+servicediscovery
+servicequotas
+email
+states
+snowball
+ssm-contacts
+swf
+textract
+transcribe
+transfer
+translate
+waf-regional
+workdocs
+workmail
+workmailmessageflow
+workspaces
+xray
+```
+
+Services without TLS 1.3 support (140 services)
+-----------------------------------------------
+
+```
+access-analyzer
+acm-pca
+amplifybackend
+execute-api
+appflow
+app-integrations
+application-cost-profiler
+discovery
+appmesh
+auditmanager
+autoscaling
+autoscaling-plans
+budgets
+chime
+cloudfront
+cloudsearchdomain
+monitoring
+logs
+codecommit
+codeguru-reviewer
+codestar
+codestar-notifications
+cognito-identity
+cognito-idp
+cognito-sync
+config
+connect
+contact-lens
+participant.connect
+ce
+profile
+datapipeline
+dax
+api.detective
+devops-guru
+dlm
+dynamodb
+streams.dynamodb
+ebs
+ec2
+eks
+elasticache
+elasticbeanstalk
+api.elastic-inference
+elasticloadbalancing
+emr-containers
+firehose
+fis
+forecast
+forecastquery
+greengrass
+groundstation
+guardduty
+health
+iam
+imagebuilder
+devices.iot1click
+projects.iot1click
+data.iot
+api.iotdeviceadvisor
+api.fleethub.iot
+data.jobs.iot
+api.tunneling.iot
+iotsitewise
+iotthingsgraph
+kinesis
+kinesisvideo
+lambda
+models.lex
+models-v2-lex
+runtime.lex
+runtime-v2-lex
+lightsail
+geo
+lookoutequipment
+lookoutmetrics
+machinelearning
+macie
+macie2
+managedblockchain
+catalog.marketplace
+marketplacecommerceanalytics
+entitlement.marketplace
+mediaconvert
+mediapackage
+data.mediastore
+api.mediatailor
+PlaybackEndpointPrefix
+mgn
+migrationhub-config
+mobile
+mq
+mturk-requester
+airflow
+rds
+nimble
+opsworks
+organizations
+outposts
+personalize-events
+personalize-runtime
+pi
+api.pricing
+ram
+rds
+redshift
+resource-groups
+robomaker
+route53
+route53domains
+s3
+s3-control
+a2i-runtime.sagemaker
+featurestore-runtime.sagemaker
+runtime.sagemaker
+savingsplans
+schemas
+securityhub
+serverlessrepo
+servicecatalog-appregistry
+shield
+signer
+sms
+sns
+sqs
+ssm
+ssm-incidents
+portal.sso
+sso
+oidc
+storagegateway
+sts
+support
+synthetics
+query.timestream
+ingest.timestream
+waf
+wafv2
+wellarchitected
+worklink
+```

@@ -1,0 +1,15 @@
+.{
+    .name = "myapp",
+    .version = "0.0.1",
+
+    .dependencies = .{
+        .aws = .{
+            .url = "https://git.lerch.org/lobo/aws-sdk-for-zig/actions/runs/57/artifacts/27",
+            .hash = "1220c054e4ff05072b0eda6a2ab318cffe3a9356d70e0ec116e55835bf5e5c9baafd",
+        },
+        .smithy = .{
+            .url = "https://git.lerch.org/lobo/smithy/archive/41b61745d25a65817209dd5dddbb5f9b66896a99.tar.gz",
+            .hash = "122087deb0ae309b2258d59b40d82fe5921fdfc35b420bb59033244851f7f276fa34",
+        },
+    },
+}
