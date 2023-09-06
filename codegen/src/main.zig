@@ -63,7 +63,7 @@ pub fn main() anyerror!void {
             manifest_file = try output_dir.createFile("service_manifest.zig", .{});
             manifest = manifest_file.writer();
         }
-        try processFile(arg, stdout, output_dir, manifest);
+        try processFile(arg, output_dir, manifest);
         files_processed += 1;
     }
     if (files_processed == 0) {
@@ -76,7 +76,7 @@ pub fn main() anyerror!void {
             defer cwd.setAsCwd() catch unreachable;
 
             try m.dir.setAsCwd();
-            try processDirectories(m, output_dir, stdout);
+            try processDirectories(m, output_dir);
         }
     }
 
@@ -87,7 +87,7 @@ const OutputManifest = struct {
     model_dir_hash_digest: [Hasher.hex_multihash_len]u8,
     output_dir_hash_digest: [Hasher.hex_multihash_len]u8,
 };
-fn processDirectories(models_dir: std.fs.IterableDir, output_dir: std.fs.Dir, stdout: anytype) !void {
+fn processDirectories(models_dir: std.fs.IterableDir, output_dir: std.fs.Dir) !void {
     // Let's get ready to hash!!
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
@@ -118,7 +118,7 @@ fn processDirectories(models_dir: std.fs.IterableDir, output_dir: std.fs.Dir, st
     while (try mi.next()) |e| {
         if ((e.kind == .file or e.kind == .sym_link) and
             std.mem.endsWith(u8, e.name, ".json"))
-            try processFile(e.name, stdout, output_dir, manifest);
+            try processFile(e.name, output_dir, manifest);
     }
     // re-calculate so we can store the manifest
     model_digest = calculated_manifest.model_dir_hash_digest;
@@ -168,7 +168,16 @@ fn calculateDigests(models_dir: std.fs.IterableDir, output_dir: std.fs.Dir, thre
         .output_dir_hash_digest = Hasher.hexDigest(output_hash),
     };
 }
-fn processFile(file_name: []const u8, stdout: anytype, output_dir: std.fs.Dir, manifest: anytype) !void {
+fn processFile(file_name: []const u8, output_dir: std.fs.Dir, manifest: anytype) !void {
+    // The fixed buffer for output will be 2MB, which is twice as large as the size of the EC2
+    // (the largest) model. We'll then flush all this at one go at the end.
+    var buffer = [_]u8{0} ** (1024 * 1024 * 2);
+    var output_stream = std.io.FixedBufferStream([]u8){
+        .buffer = &buffer,
+        .pos = 0,
+    };
+    var writer = output_stream.writer();
+
     // It's probably best to create our own allocator here so we can deint at the end and
     // toss all allocations related to the services in this file
     // I can't guarantee we're not leaking something, and at the end of the
@@ -176,13 +185,6 @@ fn processFile(file_name: []const u8, stdout: anytype, output_dir: std.fs.Dir, m
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
-    var writer = &stdout;
-    var file: std.fs.File = undefined;
-    const output_file_name = try std.fmt.allocPrint(allocator, "{s}.zig", .{file_name});
-    defer allocator.free(output_file_name);
-    file = try output_dir.createFile(output_file_name, .{ .truncate = true });
-    errdefer file.close();
-    writer = &file.writer();
     _ = try writer.write("const std = @import(\"std\");\n");
     _ = try writer.write("const serializeMap = @import(\"json.zig\").serializeMap;\n");
     _ = try writer.write("const smithy = @import(\"smithy\");\n\n");
@@ -195,7 +197,32 @@ fn processFile(file_name: []const u8, stdout: anytype, output_dir: std.fs.Dir, m
         for (service_names) |name| allocator.free(name);
         allocator.free(service_names);
     }
-    file.close();
+    var output_file_name = try std.fmt.allocPrint(allocator, "", .{});
+    defer allocator.free(output_file_name);
+    for (service_names) |name| {
+        const seperator = if (output_file_name.len > 0) "-" else "";
+        var new_output_file_name = try std.fmt.allocPrint(
+            allocator,
+            "{s}{s}{s}",
+            .{ output_file_name, seperator, name },
+        );
+        allocator.free(output_file_name);
+        output_file_name = new_output_file_name;
+    }
+    {
+        // append .zig on to the file name
+        var new_output_file_name = try std.fmt.allocPrint(
+            allocator,
+            "{s}.zig",
+            .{output_file_name},
+        );
+        allocator.free(output_file_name);
+        output_file_name = new_output_file_name;
+    }
+    // Dump our buffer out to disk
+    var file = try output_dir.createFile(output_file_name, .{ .truncate = true });
+    defer file.close();
+    try file.writeAll(output_stream.getWritten());
     for (service_names) |name| {
         try manifest.print("pub const {s} = @import(\"{s}\");\n", .{ name, std.fs.path.basename(output_file_name) });
     }
