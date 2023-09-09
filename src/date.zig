@@ -230,7 +230,7 @@ fn endIsoState(current_state: IsoParsingState, date: *DateTime, prev_data: []con
     }
     return next_state;
 }
-fn dateTimeToTimestamp(datetime: DateTime) !i64 {
+pub fn dateTimeToTimestamp(datetime: DateTime) !i64 {
     const epoch = DateTime{
         .year = 1970,
         .month = 1,
