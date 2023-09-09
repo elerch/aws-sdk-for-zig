@@ -15,6 +15,9 @@ pub const Options = struct {
     dualstack: bool = false,
     success_http_code: i64 = 200,
     client: Client,
+
+    /// Used for testing to provide consistent signing. If null, will use current time
+    signing_time: ?i64 = null,
 };
 
 /// Using this constant may blow up build times. Recommed using Services()
@@ -170,6 +173,7 @@ pub fn Request(comptime request_action: anytype) type {
                 .region = options.region,
                 .dualstack = options.dualstack,
                 .client = options.client,
+                .signing_time = options.signing_time,
             });
         }
 
@@ -261,6 +265,7 @@ pub fn Request(comptime request_action: anytype) type {
                     .region = options.region,
                     .dualstack = options.dualstack,
                     .sigv4_service_name = Self.service_meta.sigv4_name,
+                    .signing_time = options.signing_time,
                 },
             );
             defer response.deinit();
@@ -1489,6 +1494,8 @@ const TestSetup = struct {
 
     const aws_creds = @import("aws_credentials.zig");
     const aws_auth = @import("aws_authentication.zig");
+    const signing_time =
+        date.dateTimeToTimestamp(date.parseIso8601ToDateTime("20230908T170252Z") catch @compileError("Cannot parse date")) catch @compileError("Cannot parse date");
 
     fn init(allocator: std.mem.Allocator, options: TestOptions) Self {
         return .{
@@ -1518,6 +1525,7 @@ const TestSetup = struct {
         return .{
             .region = "us-west-2",
             .client = client,
+            .signing_time = signing_time,
         };
     }
 
@@ -1965,7 +1973,9 @@ test "rest_xml_with_input: S3 put object" {
     const s3opts = Options{
         .region = "us-west-2",
         .client = options.client,
+        .signing_time = TestSetup.signing_time,
     };
+    // std.testing.log_level = .debug;
     const result = try Request(services.s3.put_object).call(.{
         .bucket = "mysfitszj3t6webstack-hostingbucketa91a61fe-1ep3ezkgwpxr0",
         .key = "i/am/a/teapot/foo",
