@@ -39,6 +39,9 @@ pub const Options = struct {
     region: []const u8 = "aws-global",
     dualstack: bool = false,
     sigv4_service_name: ?[]const u8 = null,
+
+    /// Used for testing to provide consistent signing. If null, will use current time
+    signing_time: ?i64 = null,
 };
 
 pub const Header = base.Header;
@@ -110,6 +113,7 @@ pub const AwsHttp = struct {
             .region = getRegion(service, options.region),
             .service = options.sigv4_service_name orelse service,
             .credentials = creds,
+            .signing_time = options.signing_time,
         };
         return try self.makeRequest(endpoint, request, signing_config);
     }
