@@ -1107,7 +1107,13 @@ pub fn IgnoringWriter(comptime WriterType: type) type {
     };
 }
 
-fn reportTraffic(allocator: std.mem.Allocator, info: []const u8, request: awshttp.HttpRequest, response: awshttp.HttpResult, comptime reporter: fn (comptime []const u8, anytype) void) !void {
+fn reportTraffic(
+    allocator: std.mem.Allocator,
+    info: []const u8,
+    request: awshttp.HttpRequest,
+    response: awshttp.HttpResult,
+    comptime reporter: fn (comptime []const u8, anytype) void,
+) !void {
     var msg = std.ArrayList(u8).init(allocator);
     defer msg.deinit();
     const writer = msg.writer();
@@ -1983,8 +1989,11 @@ test "rest_xml_with_input: S3 put object" {
         .body = "bar",
         .storage_class = "STANDARD",
     }, s3opts);
-    std.log.info("PutObject Request id: {any}", .{result.response_metadata.request_id});
-    std.log.info("PutObject etag: {any}", .{result.response.e_tag.?});
+    for (test_harness.request_options.request_headers.list.items) |header| {
+        std.log.info("Request header: {s}: {s}", .{ header.name, header.value });
+    }
+    std.log.info("PutObject Request id: {s}", .{result.response_metadata.request_id});
+    std.log.info("PutObject etag: {s}", .{result.response.e_tag.?});
     //mysfitszj3t6webstack-hostingbucketa91a61fe-1ep3ezkgwpxr0.s3.us-west-2.amazonaws.com
     defer result.deinit();
     test_harness.stop();
