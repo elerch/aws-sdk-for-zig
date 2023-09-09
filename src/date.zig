@@ -147,6 +147,8 @@ pub fn parseIso8601ToDateTime(data: []const u8) !DateTime {
     // Basic format YYYYMMDDThhmmss
     if (data.len == "YYYYMMDDThhmmss".len and data[8] == 'T')
         return try parseIso8601BasicFormatToDateTime(data);
+    if (data.len == "YYYYMMDDThhmmssZ".len and data[8] == 'T')
+        return try parseIso8601BasicFormatToDateTime(data);
 
     var start: usize = 0;
     var state = IsoParsingState.Start;
