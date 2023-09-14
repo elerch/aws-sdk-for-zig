@@ -356,3 +356,50 @@ wafv2
 wellarchitected
 worklink
 ```
+
+Dependency tree
+---------------
+
+No dependencies:
+  * aws_authentication: base structure for credentials (only one type)
+  * aws_http_base: contains basic structures for http requests/results
+  * case: provides functions to change casing
+  * date: provides limited date manipulation functions
+  * http_client_17015_issue: zig 0.11 http client, with changes
+  * json: custom version of earlier stdlib json parser
+  * xml: custom xml parser library
+  * url: custom url encoding
+
+aws_credentials: Allows credential handling
+  aws_authentication
+
+aws_http:
+  http_client_17015_issue
+  aws_http_base
+  aws_signing
+
+aws_signing: handles signing of http requests
+  aws_http_base
+  aws_authentication
+  date
+
+aws: main usage point for libraries
+  aws_http
+  json
+  url
+  case
+  date
+  servicemodel
+  xml_shaper
+  aws_credentials
+  aws_authentication
+
+main: main entrypoint for demo executable
+  aws
+
+servicemodel: Provides access to all aws service generated models
+  all generated model files
+
+xml_shaper: Manages interface from xml to in memory structures
+  xml
+  date
