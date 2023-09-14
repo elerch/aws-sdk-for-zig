@@ -31,11 +31,12 @@ const log = std.log.scoped(.aws_signing);
 //     // If true, this parameter is still added, but omitted from the canonical request.
 //     omit_session_token: bool = true,
 // };
+pub const Credentials = auth.Credentials;
 
 pub const Config = struct {
     // These two should be all you need to set most of the time
     service: []const u8,
-    credentials: auth.Credentials,
+    credentials: Credentials,
 
     region: []const u8 = "aws-global",
     // https://github.com/awslabs/aws-c-auth/blob/ace1311f8ef6ea890b26dd376031bed2721648eb/include/aws/auth/signing_config.h#L38
@@ -282,8 +283,8 @@ pub fn freeSignedRequest(allocator: std.mem.Allocator, request: *base.Request, c
     allocator.free(request.headers);
 }
 
-pub const CredentialsFn = *const fn ([]const u8) ?auth.Credentials;
-pub fn verify(allocator: std.mem.Allocator, request: std.http.Server.Request, request_body_reader: anytype, credentials_fn: CredentialsFn) !bool {
+pub const credentialsFn = *const fn ([]const u8) ?Credentials;
+pub fn verify(allocator: std.mem.Allocator, request: std.http.Server.Request, request_body_reader: anytype, credentials_fn: credentialsFn) !bool {
     // Authorization: AWS4-HMAC-SHA256 Credential=ACCESS/20230908/us-west-2/s3/aws4_request, SignedHeaders=accept;content-length;content-type;host;x-amz-content-sha256;x-amz-date;x-amz-storage-class, Signature=fcc43ce73a34c9bd1ddf17e8a435f46a859812822f944f9eeb2aabcd64b03523
     const auth_header = request.headers.getFirstValue("Authorization").?;
     if (!std.mem.startsWith(u8, auth_header, "AWS4-HMAC-SHA256")) return error.UnsupportedAuthorizationType;
@@ -327,7 +328,7 @@ fn verifyParsedAuthorization(
     credential: []const u8,
     signed_headers: []const u8,
     signature: []const u8,
-    credentials_fn: CredentialsFn,
+    credentials_fn: credentialsFn,
 ) !bool {
     // AWS4-HMAC-SHA256
     // Credential=ACCESS/20230908/us-west-2/s3/aws4_request
@@ -933,7 +934,7 @@ test "canonical request" {
     };
     const access_key = try allocator.dupe(u8, "AKIDEXAMPLE");
     const secret_key = try allocator.dupe(u8, "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY");
-    const credential = auth.Credentials.init(allocator, access_key, secret_key, null);
+    const credential = Credentials.init(allocator, access_key, secret_key, null);
     defer credential.deinit();
     const request = try createCanonicalRequest(allocator, req, "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", .{
         .region = "us-west-2", // us-east-1
@@ -999,7 +1000,7 @@ test "can sign" {
 
     const access_key = try allocator.dupe(u8, "AKIDEXAMPLE");
     const secret_key = try allocator.dupe(u8, "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY");
-    const credential = auth.Credentials.init(allocator, access_key, secret_key, null);
+    const credential = Credentials.init(allocator, access_key, secret_key, null);
     defer credential.deinit();
     // we could look at sigv4 signing tests at:
     // https://github.com/awslabs/aws-c-auth/blob/ace1311f8ef6ea890b26dd376031bed2721648eb/tests/sigv4_signing_tests.c#L1478
@@ -1027,13 +1028,13 @@ test "can sign" {
     try std.testing.expectEqualStrings(expected_auth, signed_req.headers[signed_req.headers.len - 1].value);
 }
 
-var test_credential: ?auth.Credentials = null;
+var test_credential: ?Credentials = null;
 test "can verify" {
     const allocator = std.testing.allocator;
 
     const access_key = try allocator.dupe(u8, "ACCESS");
     const secret_key = try allocator.dupe(u8, "SECRET");
-    test_credential = auth.Credentials.init(allocator, access_key, secret_key, null);
+    test_credential = Credentials.init(allocator, access_key, secret_key, null);
     defer test_credential.?.deinit();
 
     var headers = std.http.Headers.init(allocator);
@@ -1064,10 +1065,10 @@ test "can verify" {
 
     // std.testing.log_level = .debug;
     try std.testing.expect(try verify(allocator, request, fis.reader(), struct {
-        cred: auth.Credentials,
+        cred: Credentials,
 
         const Self = @This();
-        fn getCreds(access: []const u8) ?auth.Credentials {
+        fn getCreds(access: []const u8) ?Credentials {
             if (std.mem.eql(u8, access, "ACCESS")) return test_credential.?;
             return null;
         }
