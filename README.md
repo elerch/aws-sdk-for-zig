@@ -91,7 +91,7 @@ Compiler wishlist/watchlist:
 
 * [comptime allocations](https://github.com/ziglang/zig/issues/1291) so we can read files, etc (or is there another way)
 
-Services with TLS 1.3 Support (115 services)
+Services with TLS 1.3 Support (116 services)
 --------------------------------------------
 ```
 acm
@@ -101,6 +101,7 @@ apigateway
 appconfig
 application-autoscaling
 applicationinsights
+appmesh
 apprunner
 appstream2
 appsync
@@ -211,7 +212,7 @@ workspaces
 xray
 ```
 
-Services without TLS 1.3 support (140 services)
+Services without TLS 1.3 support (139 services)
 -----------------------------------------------
 
 ```
@@ -223,7 +224,6 @@ appflow
 app-integrations
 application-cost-profiler
 discovery
-appmesh
 auditmanager
 autoscaling
 autoscaling-plans
