@@ -45,13 +45,21 @@ pub fn build(b: *Builder) !void {
     const smithy_module = smithy_dep.module("smithy");
     exe.addModule("smithy", smithy_module); // not sure this should be here...
 
-    const module = b.addModule("aws", .{
+    // Expose module to others
+    _ = b.addModule("aws", .{
         .source_file = .{ .path = "src/aws.zig" },
         .dependencies = &[_]std.build.ModuleDependency{
             .{ .name = "smithy", .module = smithy_module },
         },
     });
-    exe.addModule("aws", module);
+
+    // Expose module to others
+    _ = b.addModule("aws-signing", .{
+        .source_file = .{ .path = "src/aws_signing.zig" },
+        .dependencies = &[_]std.build.ModuleDependency{
+            .{ .name = "smithy", .module = smithy_module },
+        },
+    });
     // TODO: This does not work correctly due to https://github.com/ziglang/zig/issues/16354
     //
     // We are working here with kind of a weird dependency though. So we can do this
