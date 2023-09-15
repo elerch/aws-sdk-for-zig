@@ -304,8 +304,13 @@ fn getEnvironmentVariable(allocator: std.mem.Allocator, key: []const u8) !?[]con
 pub var endpoint_override: ?[]const u8 = null;
 
 fn endpointForRequest(allocator: std.mem.Allocator, service: []const u8, request: HttpRequest, options: Options) !EndPoint {
-    const environment_override = endpoint_override orelse try getEnvironmentVariable(allocator, "AWS_ENDPOINT_URL");
+    if (endpoint_override) |override| {
+        const uri = try allocator.dupe(u8, override);
+        return endPointFromUri(allocator, uri, request.path);
+    }
+    const environment_override = try getEnvironmentVariable(allocator, "AWS_ENDPOINT_URL");
     if (environment_override) |override| {
+        defer allocator.free(override);
         const uri = try allocator.dupe(u8, override);
         return endPointFromUri(allocator, uri, request.path);
     }
