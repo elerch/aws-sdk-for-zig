@@ -216,7 +216,14 @@ pub const AwsHttp = struct {
         try @import("http_client_17015_issue.zig").start(&req);
         // try req.start();
         if (request_cp.body.len > 0) {
-            try req.writeAll(request_cp.body);
+            // Workaround for https://github.com/ziglang/zig/issues/15626
+            const max_bytes: usize = 1 << 14;
+            var inx: usize = 0;
+            while (request_cp.body.len > inx) {
+                try req.writeAll(request_cp.body[inx..@min(request_cp.body.len, inx + max_bytes)]);
+                inx += max_bytes;
+            }
+
             try req.finish();
         }
         try req.wait();
