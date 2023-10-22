@@ -284,7 +284,23 @@ pub fn freeSignedRequest(allocator: std.mem.Allocator, request: *base.Request, c
 }
 
 pub const credentialsFn = *const fn ([]const u8) ?Credentials;
-pub fn verify(allocator: std.mem.Allocator, request: std.http.Server.Request, request_body_reader: anytype, credentials_fn: credentialsFn) !bool {
+
+pub fn verifyServerRequest(allocator: std.mem.Allocator, request: std.http.Server.Request, request_body_reader: anytype, credentials_fn: credentialsFn) !bool {
+    const unverified_request = UnverifiedRequest{
+        .headers = request.headers,
+        .target = request.target,
+        .method = request.method,
+    };
+    return verify(allocator, unverified_request, request_body_reader, credentials_fn);
+}
+
+pub const UnverifiedRequest = struct {
+    headers: std.http.Headers,
+    target: []const u8,
+    method: std.http.Method,
+};
+
+pub fn verify(allocator: std.mem.Allocator, request: UnverifiedRequest, request_body_reader: anytype, credentials_fn: credentialsFn) !bool {
     // Authorization: AWS4-HMAC-SHA256 Credential=ACCESS/20230908/us-west-2/s3/aws4_request, SignedHeaders=accept;content-length;content-type;host;x-amz-content-sha256;x-amz-date;x-amz-storage-class, Signature=fcc43ce73a34c9bd1ddf17e8a435f46a859812822f944f9eeb2aabcd64b03523
     const auth_header = request.headers.getFirstValue("Authorization").?;
     if (!std.mem.startsWith(u8, auth_header, "AWS4-HMAC-SHA256")) return error.UnsupportedAuthorizationType;
@@ -323,7 +339,7 @@ pub fn verify(allocator: std.mem.Allocator, request: std.http.Server.Request, re
 
 fn verifyParsedAuthorization(
     allocator: std.mem.Allocator,
-    request: std.http.Server.Request,
+    request: UnverifiedRequest,
     request_body_reader: anytype,
     credential: []const u8,
     signed_headers: []const u8,
@@ -1029,7 +1045,7 @@ test "can sign" {
 }
 
 var test_credential: ?Credentials = null;
-test "can verify" {
+test "can verify server request" {
     const allocator = std.testing.allocator;
 
     const access_key = try allocator.dupe(u8, "ACCESS");
@@ -1064,7 +1080,7 @@ test "can verify" {
     };
 
     // std.testing.log_level = .debug;
-    try std.testing.expect(try verify(allocator, request, fis.reader(), struct {
+    try std.testing.expect(try verifyServerRequest(allocator, request, fis.reader(), struct {
         cred: Credentials,
 
         const Self = @This();
