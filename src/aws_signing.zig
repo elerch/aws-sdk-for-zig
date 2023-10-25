@@ -302,7 +302,8 @@ pub const UnverifiedRequest = struct {
 
 pub fn verify(allocator: std.mem.Allocator, request: UnverifiedRequest, request_body_reader: anytype, credentials_fn: credentialsFn) !bool {
     // Authorization: AWS4-HMAC-SHA256 Credential=ACCESS/20230908/us-west-2/s3/aws4_request, SignedHeaders=accept;content-length;content-type;host;x-amz-content-sha256;x-amz-date;x-amz-storage-class, Signature=fcc43ce73a34c9bd1ddf17e8a435f46a859812822f944f9eeb2aabcd64b03523
-    const auth_header = request.headers.getFirstValue("Authorization").?;
+    const auth_header_or_null = request.headers.getFirstValue("Authorization");
+    const auth_header = if (auth_header_or_null) |a| a else return error.AuthorizationHeaderMissing;
     if (!std.mem.startsWith(u8, auth_header, "AWS4-HMAC-SHA256")) return error.UnsupportedAuthorizationType;
     var credential: ?[]const u8 = null;
     var signed_headers: ?[]const u8 = null;
