@@ -62,6 +62,8 @@ jobs:
         with:
           name: ${{ github.sha }}-with-models.tar.gz
           path: '${{ runner.temp }}/${{ github.sha }}-with-models.tar.gz'
+      - name: Publish
+        run: 'curl --user ${{ github.actor }}:${{ secrets.PACKAGE_PUSH }} --upload-file ${{ runner.temp }}/${{ github.sha }}-with-models.tar.gz https://git.lerch.org/api/packages/lobo/generic/aws-sdk-with-models/${{ github.sha }}/${{ github.sha }}-with-models.tar.gz'
       - name: Notify
         uses: https://git.lerch.org/lobo/action-notify-ntfy@v2
         if: always()
