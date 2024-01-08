@@ -4,8 +4,8 @@
 
     .dependencies = .{
         .aws = .{
-            .url = "https://git.lerch.org/lobo/aws-sdk-for-zig/actions/runs/63/artifacts/35",
-            .hash = "12203d7c04dc46f3de16c1a0cd31cdcd1c5137f0c1f6bdac86e6d8bfae09f20dc9b6",
+            .url = "https://git.lerch.org/api/packages/lobo/generic/aws-sdk-with-models/d08d0f338fb86f7d679a998ff4f65f4e2d0db595/d08d0f338fb86f7d679a998ff4f65f4e2d0db595-with-models.tar.gz",
+            .hash = "1220c8871d93592680ea2dcc88cc52fb4f0effabeed0584d2a5c54f93825741b7c66",
         },
         .smithy = .{
             .url = "https://git.lerch.org/lobo/smithy/archive/41b61745d25a65817209dd5dddbb5f9b66896a99.tar.gz",
