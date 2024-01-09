@@ -22,24 +22,28 @@ jobs:
       #
       # However, arm64/linux isn't quite fully tier 1 yet, so this is more of a
       # TODO: https://github.com/ziglang/zig/issues/2443
-      - run: wget -q https://ziglang.org/download/${ZIG_VERSION}/zig-linux-${ARCH}-${ZIG_VERSION}.tar.xz
-      - run: tar x -C /usr/local -f zig-linux-${ARCH}-${ZIG_VERSION}.tar.xz
-      - run: ln -s /usr/local/zig-linux-${ARCH}-${ZIG_VERSION}/zig /usr/local/bin/zig
-      - run: zig build test --verbose
-      - run: zig build --verbose -Dtarget=arm-linux
-      - run: zig build -Dtarget=x86_64-windows
-      - run: zig build -Dtarget=aarch64-linux
-      - run: zig build -Dtarget=riscv64-linux
-      - run: zig build -Dtarget=x86_64-macos
-      - run: zig build -Dtarget=aarch64-macos
-      - run: ( cd example && zig build ) # Make sure example builds
+      - name: Install zig
+        run: |
+          wget -q https://ziglang.org/download/${ZIG_VERSION}/zig-linux-${ARCH}-${ZIG_VERSION}.tar.xz
+          tar x -C /usr/local -f zig-linux-${ARCH}-${ZIG_VERSION}.tar.xz
+          ln -s /usr/local/zig-linux-${ARCH}-${ZIG_VERSION}/zig /usr/local/bin/zig
+      - name: Run tests
+        run: zig build test --verbose
+      - name: Build example
+        run: ( cd example && zig build ) # Make sure example builds
       # Zig package manager expects everything to be inside a directory in the archive,
       # which it then strips out on download. So we need to shove everything inside a directory
       # the way GitHub/Gitea does for repo archives
       #
       # Also, zig tar process doesn't handle gnu format for long names, nor does it seam to
-      # handle posix long name semantics cleanly either. Let's try ustar
-      - run: tar -czf ${{ runner.temp }}/${{ github.sha }}-with-models.tar.gz --format ustar --exclude 'zig-*' --transform 's,^,${{ github.sha }}/,' *
+      # handle posix long name semantics cleanly either. ustar works. This
+      # should be using git archive, but we need our generated code to be part of it
+      - name: Package source code with generated models
+        run: |
+          tar -czf ${{ runner.temp }}/${{ github.sha }}-with-models.tar.gz \
+            --format ustar \
+            --exclude 'zig-*' \
+            --transform 's,^,${{ github.sha }}/,' *
       # - name: Sign
       #   id: sign
       #   uses: https://git.lerch.org/lobo/action-hsm-sign@v1
@@ -57,13 +61,11 @@ jobs:
       # - run: |
       #     echo "Signature 1 should be ./foo.sig: ${{ steps.sign.outputs.SIG_1 }}"
       # - run: echo "URL of foo (1) is ${{ steps.sign.outputs.URL_1 }}"
-      - name: Upload
-        uses: actions/upload-artifact@v3
-        with:
-          name: ${{ github.sha }}-with-models.tar.gz
-          path: '${{ runner.temp }}/${{ github.sha }}-with-models.tar.gz'
-      - name: Publish
-        run: 'curl --user ${{ github.actor }}:${{ secrets.PACKAGE_PUSH }} --upload-file ${{ runner.temp }}/${{ github.sha }}-with-models.tar.gz https://git.lerch.org/api/packages/lobo/generic/aws-sdk-with-models/${{ github.sha }}/${{ github.sha }}-with-models.tar.gz'
+      - name: Publish source code with generated models
+        run: |
+          curl --user ${{ github.actor }}:${{ secrets.PACKAGE_PUSH }} \
+            --upload-file ${{ runner.temp }}/${{ github.sha }}-with-models.tar.gz \
+            https://git.lerch.org/api/packages/lobo/generic/aws-sdk-with-models/${{ github.sha }}/${{ github.sha }}-with-models.tar.gz
       - name: Notify
         uses: https://git.lerch.org/lobo/action-notify-ntfy@v2
         if: always()

@@ -367,7 +367,7 @@ pub fn fuzzyEqual(a: []const u8, b: []const u8, options: xml.PredicateOptions) !
 }
 
 fn normalize(val: []u8) []u8 {
-    var underscores: u64 = 0;
+    var underscores: usize = 0;
     for (val, 0..) |ch, i| {
         if (ch == '_') {
             underscores = underscores + 1;

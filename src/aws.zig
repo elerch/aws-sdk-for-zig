@@ -1433,7 +1433,7 @@ fn processRequest(options: *TestOptions, server: *std.http.Server) !void {
 
     options.requests_processed += 1;
     if (res.request.content_length) |l|
-        options.request_body = try res.reader().readAllAlloc(options.allocator, @as(usize, l))
+        options.request_body = try res.reader().readAllAlloc(options.allocator, @as(usize, @intCast(l)))
     else
         options.request_body = try options.allocator.dupe(u8, "");
     options.request_method = res.request.method;
