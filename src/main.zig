@@ -71,7 +71,7 @@ pub fn main() anyerror!void {
     defer bw.flush() catch unreachable;
     const stdout = bw.writer();
     var arg0: ?[]const u8 = null;
-    var proxy: ?std.http.Client.HttpProxy = null;
+    var proxy: ?std.http.Client.Proxy = null;
     while (args.next()) |arg| {
         if (arg0 == null) arg0 = arg;
         if (std.mem.eql(u8, "-h", arg) or std.mem.eql(u8, "--help", arg)) {
@@ -87,7 +87,7 @@ pub fn main() anyerror!void {
             return;
         }
         if (std.mem.eql(u8, "-x", arg) or std.mem.eql(u8, "--proxy", arg)) {
-            proxy = try proxyFromString(args.next().?); // parse stuff
+            proxy = try proxyFromString(allocator, args.next().?); // parse stuff
             continue;
         }
         if (std.mem.startsWith(u8, arg, "-v")) {
@@ -353,10 +353,13 @@ pub fn main() anyerror!void {
     std.log.info("===== Tests complete =====", .{});
 }
 
-fn proxyFromString(string: []const u8) !std.http.Client.HttpProxy {
-    var rc = std.http.Client.HttpProxy{
+fn proxyFromString(allocator: std.mem.Allocator, string: []const u8) !std.http.Client.Proxy {
+    var rc = std.http.Client.Proxy{
+        .headers = std.http.Headers{ .allocator = allocator },
+        .allocator = allocator,
         .protocol = undefined,
         .host = undefined,
+        .port = undefined,
     };
     var remaining: []const u8 = string;
     if (std.mem.startsWith(u8, string, "http://")) {

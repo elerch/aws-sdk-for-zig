@@ -64,11 +64,11 @@ const EndPoint = struct {
 };
 pub const AwsHttp = struct {
     allocator: std.mem.Allocator,
-    proxy: ?std.http.Client.HttpProxy,
+    proxy: ?std.http.Client.Proxy,
 
     const Self = @This();
 
-    pub fn init(allocator: std.mem.Allocator, proxy: ?std.http.Client.HttpProxy) Self {
+    pub fn init(allocator: std.mem.Allocator, proxy: ?std.http.Client.Proxy) Self {
         return Self{
             .allocator = allocator,
             .proxy = proxy,
@@ -175,7 +175,7 @@ pub const AwsHttp = struct {
         const url = try std.fmt.allocPrint(self.allocator, "{s}{s}{s}", .{ endpoint.uri, request_cp.path, request_cp.query });
         defer self.allocator.free(url);
         log.debug("Request url: {s}", .{url});
-        var cl = std.http.Client{ .allocator = self.allocator, .proxy = self.proxy };
+        var cl = std.http.Client{ .allocator = self.allocator, .http_proxy = self.proxy };
         defer cl.deinit(); // TODO: Connection pooling
         //
         // var req = try zfetch.Request.init(self.allocator, url, self.trust_chain);
@@ -209,11 +209,11 @@ pub const AwsHttp = struct {
         //
         // const unescaped_url = try std.Uri.unescapeString(self.allocator, url);
         // defer self.allocator.free(unescaped_url);
-        var req = try cl.request(method, try std.Uri.parse(url), headers, .{});
+        var req = try cl.open(method, try std.Uri.parse(url), headers, .{});
         defer req.deinit();
         if (request_cp.body.len > 0)
             req.transfer_encoding = .{ .content_length = request_cp.body.len };
-        try @import("http_client_17015_issue.zig").start(&req);
+        try @import("http_client_17015_issue.zig").send(&req);
         // try req.start();
         if (request_cp.body.len > 0) {
             // Workaround for https://github.com/ziglang/zig/issues/15626
@@ -250,12 +250,12 @@ pub const AwsHttp = struct {
                 content_length = std.fmt.parseInt(usize, h.value, 10) catch 0;
         }
 
-        var response_data: []u8 =
-            if (req.response.transfer_encoding) |_| // the only value here is "chunked"
+        const response_data: []u8 =
+            if (req.response.transfer_encoding == .none) // the only value here is "chunked"
             try req.reader().readAllAlloc(self.allocator, std.math.maxInt(usize))
         else blk: {
             // content length
-            var tmp_data = try self.allocator.alloc(u8, content_length);
+            const tmp_data = try self.allocator.alloc(u8, content_length);
             errdefer self.allocator.free(tmp_data);
             _ = try req.readAll(tmp_data);
             break :blk tmp_data;

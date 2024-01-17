@@ -126,9 +126,9 @@ fn getContainerCredentials(allocator: std.mem.Allocator) !?auth.Credentials {
     defer empty_headers.deinit();
     var cl = std.http.Client{ .allocator = allocator };
     defer cl.deinit(); // I don't belive connection pooling would help much here as it's non-ssl and local
-    var req = try cl.request(.GET, try std.Uri.parse(container_uri), empty_headers, .{});
+    var req = try cl.open(.GET, try std.Uri.parse(container_uri), empty_headers, .{});
     defer req.deinit();
-    try req.start();
+    try req.send(.{});
     try req.wait();
     if (req.response.status != .ok and req.response.status != .not_found) {
         log.warn("Bad status code received from container credentials endpoint: {}", .{@intFromEnum(req.response.status)});
@@ -140,7 +140,7 @@ fn getContainerCredentials(allocator: std.mem.Allocator) !?auth.Credentials {
     var resp_payload = try std.ArrayList(u8).initCapacity(allocator, @intCast(req.response.content_length.?));
     defer resp_payload.deinit();
     try resp_payload.resize(@intCast(req.response.content_length.?));
-    var response_data = try resp_payload.toOwnedSlice();
+    const response_data = try resp_payload.toOwnedSlice();
     defer allocator.free(response_data);
     _ = try req.readAll(response_data);
     log.debug("Read {d} bytes from container credentials endpoint", .{response_data.len});
@@ -185,9 +185,9 @@ fn getImdsv2Credentials(allocator: std.mem.Allocator) !?auth.Credentials {
         var headers = std.http.Headers.init(allocator);
         defer headers.deinit();
         try headers.append("X-aws-ec2-metadata-token-ttl-seconds", "21600");
-        var req = try cl.request(.PUT, try std.Uri.parse("http://169.254.169.254/latest/api/token"), headers, .{});
+        var req = try cl.open(.PUT, try std.Uri.parse("http://169.254.169.254/latest/api/token"), headers, .{});
         defer req.deinit();
-        try req.start();
+        try req.send(.{});
         try req.wait();
         if (req.response.status != .ok) {
             log.warn("Bad status code received from IMDS v2: {}", .{@intFromEnum(req.response.status)});
@@ -228,10 +228,10 @@ fn getImdsRoleName(allocator: std.mem.Allocator, client: *std.http.Client, imds_
     defer headers.deinit();
     try headers.append("X-aws-ec2-metadata-token", imds_token);
 
-    var req = try client.request(.GET, try std.Uri.parse("http://169.254.169.254/latest/meta-data/iam/info"), headers, .{});
+    var req = try client.open(.GET, try std.Uri.parse("http://169.254.169.254/latest/meta-data/iam/info"), headers, .{});
     defer req.deinit();
 
-    try req.start();
+    try req.send(.{});
     try req.wait();
 
     if (req.response.status != .ok and req.response.status != .not_found) {
@@ -243,7 +243,7 @@ fn getImdsRoleName(allocator: std.mem.Allocator, client: *std.http.Client, imds_
         log.warn("Unexpected empty response from IMDS endpoint post token", .{});
         return null;
     }
-    var resp = try allocator.alloc(u8, @intCast(req.response.content_length.?));
+    const resp = try allocator.alloc(u8, @intCast(req.response.content_length.?));
     defer allocator.free(resp);
     _ = try req.readAll(resp);
 
@@ -281,10 +281,10 @@ fn getImdsCredentials(allocator: std.mem.Allocator, client: *std.http.Client, ro
     const url = try std.fmt.allocPrint(allocator, "http://169.254.169.254/latest/meta-data/iam/security-credentials/{s}/", .{role_name});
     defer allocator.free(url);
 
-    var req = try client.request(.GET, try std.Uri.parse(url), headers, .{});
+    var req = try client.open(.GET, try std.Uri.parse(url), headers, .{});
     defer req.deinit();
 
-    try req.start();
+    try req.send(.{});
     try req.wait();
 
     if (req.response.status != .ok and req.response.status != .not_found) {
@@ -296,7 +296,7 @@ fn getImdsCredentials(allocator: std.mem.Allocator, client: *std.http.Client, ro
         log.warn("Unexpected empty response from IMDS role endpoint", .{});
         return null;
     }
-    var resp = try allocator.alloc(u8, @intCast(req.response.content_length.?));
+    const resp = try allocator.alloc(u8, @intCast(req.response.content_length.?));
     defer allocator.free(resp);
     _ = try req.readAll(resp);
 
@@ -455,7 +455,7 @@ const LineIterator = struct {
     pub fn next(self: *Self) ?[]const u8 {
         if (self.inx >= self.text.len) return null;
         var current = self.inx;
-        var start = self.inx;
+        const start = self.inx;
         for (self.text[self.inx..], 0..) |c, i| {
             if (c == '\n') {
                 // log.debug("got \\n: {d}", .{i});
@@ -571,7 +571,7 @@ const EvaluatedPath = struct {
     evaluated_path: []const u8,
 };
 fn getDefaultPath(allocator: std.mem.Allocator, home_dir: ?[]const u8, dir: []const u8, file: []const u8) !EvaluatedPath {
-    var home = home_dir orelse try getHomeDir(allocator);
+    const home = home_dir orelse try getHomeDir(allocator);
     log.debug("Home directory: {s}", .{home});
     const rc = try std.fs.path.join(allocator, &[_][]const u8{ home, dir, file });
     log.debug("Path evaluated as: {s}", .{rc});
@@ -581,29 +581,18 @@ fn getDefaultPath(allocator: std.mem.Allocator, home_dir: ?[]const u8, dir: []co
 fn getHomeDir(allocator: std.mem.Allocator) ![]const u8 {
     switch (builtin.os.tag) {
         .windows => {
-            var dir_path_ptr: [*:0]u16 = undefined;
             // https://docs.microsoft.com/en-us/windows/win32/shell/knownfolderid
-            const FOLDERID_Profile = std.os.windows.GUID.parse("{5E6C858F-0E22-4760-9AFE-EA3317B67173}");
-            switch (std.os.windows.shell32.SHGetKnownFolderPath(
-                &FOLDERID_Profile,
-                std.os.windows.KF_FLAG_CREATE,
-                null,
-                &dir_path_ptr,
-            )) {
-                std.os.windows.S_OK => {
-                    defer std.os.windows.ole32.CoTaskMemFree(@as(*anyopaque, @ptrCast(dir_path_ptr)));
-                    const global_dir = std.unicode.utf16leToUtf8Alloc(allocator, std.mem.sliceTo(dir_path_ptr, 0)) catch |err| switch (err) {
-                        error.UnexpectedSecondSurrogateHalf => return error.HomeDirUnavailable,
-                        error.ExpectedSecondSurrogateHalf => return error.HomeDirUnavailable,
-                        error.DanglingSurrogateHalf => return error.HomeDirUnavailable,
-                        error.OutOfMemory => return error.OutOfMemory,
-                    };
-                    return global_dir;
-                    // defer allocator.free(global_dir);
-                },
-                std.os.windows.E_OUTOFMEMORY => return error.OutOfMemory,
-                else => return error.HomeDirUnavailable,
-            }
+            //const FOLDERID_Profile = std.os.windows.GUID.parse("{5E6C858F-0E22-4760-9AFE-EA3317B67173}");
+
+            const local_app_data_dir = std.process.getEnvVarOwned(allocator, "LOCALAPPDATA") catch |err| switch (err) {
+                error.InvalidUtf8 => return error.HomeDirUnavailable,
+                error.EnvironmentVariableNotFound => return error.HomeDirUnavailable,
+                error.OutOfMemory => return error.OutOfMemory,
+            };
+
+            //defer allocator.free(local_app_data_dir);
+            //return std.fs.path.join(allocator, &[_][]const u8{ local_app_data_dir, appname });
+            return local_app_data_dir;
         },
         .macos, .linux, .freebsd, .netbsd, .dragonfly, .openbsd, .solaris => {
             const home_dir = std.os.getenv("HOME") orelse {

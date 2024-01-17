@@ -1,6 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const Builder = @import("std").build.Builder;
+const Builder = @import("std").Build;
 const Package = @import("Package.zig");
 
 const models_url = "https://github.com/aws/aws-sdk-go-v2/archive/7502ff360b1c3b79cbe117437327f6ff5fb89f65.tar.gz";
@@ -79,22 +79,18 @@ pub fn build(b: *Builder) !void {
         .optimize = optimize,
     });
     const smithy_module = smithy_dep.module("smithy");
-    exe.addModule("smithy", smithy_module); // not sure this should be here...
+    exe.root_module.addImport("smithy", smithy_module); // not sure this should be here...
 
     // Expose module to others
     _ = b.addModule("aws", .{
-        .source_file = .{ .path = "src/aws.zig" },
-        .dependencies = &[_]std.build.ModuleDependency{
-            .{ .name = "smithy", .module = smithy_module },
-        },
+        .root_source_file = .{ .path = "src/aws.zig" },
+        .imports = &.{.{ .name = "smithy", .module = smithy_module }},
     });
 
     // Expose module to others
     _ = b.addModule("aws-signing", .{
-        .source_file = .{ .path = "src/aws_signing.zig" },
-        .dependencies = &[_]std.build.ModuleDependency{
-            .{ .name = "smithy", .module = smithy_module },
-        },
+        .root_source_file = .{ .path = "src/aws_signing.zig" },
+        .imports = &.{.{ .name = "smithy", .module = smithy_module }},
     });
     // TODO: This does not work correctly due to https://github.com/ziglang/zig/issues/16354
     //
@@ -128,10 +124,10 @@ pub fn build(b: *Builder) !void {
             .name = "codegen",
             .root_source_file = .{ .path = "codegen/src/main.zig" },
             // We need this generated for the host, not the real target
-            // .target = target,
+            .target = b.host,
             .optimize = if (b.verbose) .Debug else .ReleaseSafe,
         });
-        cg_exe.addModule("smithy", smithy_dep.module("smithy"));
+        cg_exe.root_module.addImport("smithy", smithy_dep.module("smithy"));
         var cg_cmd = b.addRunArtifact(cg_exe);
         cg_cmd.addArg("--models");
         cg_cmd.addArg(try std.fs.path.join(
@@ -139,7 +135,7 @@ pub fn build(b: *Builder) !void {
             &[_][]const u8{ b.global_cache_root.path.?, models_dir },
         ));
         cg_cmd.addArg("--output");
-        cg_cmd.addDirectoryArg(std.Build.FileSource.relative("src/models"));
+        cg_cmd.addDirectoryArg(std.Build.LazyPath.relative("src/models"));
         if (b.verbose)
             cg_cmd.addArg("--verbose");
         cg_cmd.step.dependOn(&fetch_step.step);
@@ -173,10 +169,10 @@ pub fn build(b: *Builder) !void {
         // but does not run it.
         const unit_tests = b.addTest(.{
             .root_source_file = .{ .path = "src/aws.zig" },
-            .target = t,
+            .target = b.resolveTargetQuery(t),
             .optimize = optimize,
         });
-        unit_tests.addModule("smithy", smithy_dep.module("smithy"));
+        unit_tests.root_module.addImport("smithy", smithy_dep.module("smithy"));
         unit_tests.step.dependOn(gen_step);
 
         const run_unit_tests = b.addRunArtifact(unit_tests);

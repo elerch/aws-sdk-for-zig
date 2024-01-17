@@ -33,7 +33,7 @@ pub fn fetchOneAndUnpack(
     var http_client: std.http.Client = .{ .allocator = allocator };
     defer http_client.deinit();
 
-    var global_cache_directory: std.Build.Cache.Directory = .{
+    const global_cache_directory: std.Build.Cache.Directory = .{
         .handle = try std.fs.cwd().makeOpenPath(cache_directory, .{}),
         .path = cache_directory,
     };
@@ -111,12 +111,12 @@ pub fn fetchAndUnpack(
             const path = try global_cache_directory.join(gpa, &.{tmp_dir_sub_path});
             errdefer gpa.free(path);
 
-            const iterable_dir = try global_cache_directory.handle.makeOpenPathIterable(tmp_dir_sub_path, .{});
+            const iterable_dir = try global_cache_directory.handle.makeOpenPath(tmp_dir_sub_path, .{});
             errdefer iterable_dir.close();
 
             break :d .{
                 .path = path,
-                .handle = iterable_dir.dir,
+                .handle = iterable_dir,
             };
         };
         defer tmp_directory.closeAndFree(gpa);
@@ -124,10 +124,10 @@ pub fn fetchAndUnpack(
         var h = std.http.Headers{ .allocator = gpa };
         defer h.deinit();
 
-        var req = try http_client.request(.GET, uri, h, .{});
+        var req = try http_client.open(.GET, uri, h, .{});
         defer req.deinit();
 
-        try req.start();
+        try req.send(.{});
         try req.wait();
 
         if (req.response.status != .ok) {
@@ -202,7 +202,8 @@ pub fn fetchAndUnpack(
         // Of course, if the ignore rules above omit the file from the package, then everything
         // is fine and no error should be raised.
 
-        break :a try Hasher.computeDirectoryHash(thread_pool, .{ .dir = tmp_directory.handle }, &.{});
+        var options = .{};
+        break :a try Hasher.computeDirectoryHash(thread_pool, tmp_directory.handle, &options);
     };
 
     const pkg_dir_sub_path = "p" ++ s ++ Hasher.hexDigest(actual_hash);
@@ -464,7 +465,7 @@ test "fetch and unpack" {
     var http_client: std.http.Client = .{ .allocator = alloc };
     defer http_client.deinit();
 
-    var global_cache_directory: std.Build.Cache.Directory = .{
+    const global_cache_directory: std.Build.Cache.Directory = .{
         .handle = try std.fs.cwd().makeOpenPath("test-pkg", .{}),
         .path = "test-pkg",
     };

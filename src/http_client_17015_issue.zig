@@ -10,8 +10,8 @@ const Uri = std.Uri;
 /// only the two w.print lines for req.uri 16 and 18 lines down from this comment
 ///////////////////////////////////////////////////////////////////////////
 /// Send the request to the server.
-pub fn start(req: *std.http.Client.Request) std.http.Client.Request.StartError!void {
-    var buffered = std.io.bufferedWriter(req.connection.?.data.writer());
+pub fn send(req: *std.http.Client.Request) std.http.Client.Request.SendError!void {
+    var buffered = std.io.bufferedWriter(req.connection.?.writer());
     const w = buffered.writer();
 
     try w.writeAll(@tagName(req.method));
@@ -21,7 +21,7 @@ pub fn start(req: *std.http.Client.Request) std.http.Client.Request.StartError!v
         try w.writeAll(req.uri.host.?);
         try w.writeByte(':');
         try w.print("{}", .{req.uri.port.?});
-    } else if (req.connection.?.data.proxied) {
+    } else if (req.connection.?.proxied) {
         // proxied connections require the full uri
         try format(req.uri, "+/", .{}, w);
     } else {
