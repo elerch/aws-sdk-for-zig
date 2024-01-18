@@ -140,7 +140,7 @@ fn getContainerCredentials(allocator: std.mem.Allocator) !?auth.Credentials {
     var resp_payload = try std.ArrayList(u8).initCapacity(allocator, @intCast(req.response.content_length.?));
     defer resp_payload.deinit();
     try resp_payload.resize(@intCast(req.response.content_length.?));
-    var response_data = try resp_payload.toOwnedSlice();
+    const response_data = try resp_payload.toOwnedSlice();
     defer allocator.free(response_data);
     _ = try req.readAll(response_data);
     log.debug("Read {d} bytes from container credentials endpoint", .{response_data.len});
@@ -243,7 +243,7 @@ fn getImdsRoleName(allocator: std.mem.Allocator, client: *std.http.Client, imds_
         log.warn("Unexpected empty response from IMDS endpoint post token", .{});
         return null;
     }
-    var resp = try allocator.alloc(u8, @intCast(req.response.content_length.?));
+    const resp = try allocator.alloc(u8, @intCast(req.response.content_length.?));
     defer allocator.free(resp);
     _ = try req.readAll(resp);
 
@@ -296,7 +296,7 @@ fn getImdsCredentials(allocator: std.mem.Allocator, client: *std.http.Client, ro
         log.warn("Unexpected empty response from IMDS role endpoint", .{});
         return null;
     }
-    var resp = try allocator.alloc(u8, @intCast(req.response.content_length.?));
+    const resp = try allocator.alloc(u8, @intCast(req.response.content_length.?));
     defer allocator.free(resp);
     _ = try req.readAll(resp);
 
@@ -455,7 +455,7 @@ const LineIterator = struct {
     pub fn next(self: *Self) ?[]const u8 {
         if (self.inx >= self.text.len) return null;
         var current = self.inx;
-        var start = self.inx;
+        const start = self.inx;
         for (self.text[self.inx..], 0..) |c, i| {
             if (c == '\n') {
                 // log.debug("got \\n: {d}", .{i});
@@ -571,7 +571,7 @@ const EvaluatedPath = struct {
     evaluated_path: []const u8,
 };
 fn getDefaultPath(allocator: std.mem.Allocator, home_dir: ?[]const u8, dir: []const u8, file: []const u8) !EvaluatedPath {
-    var home = home_dir orelse try getHomeDir(allocator);
+    const home = home_dir orelse try getHomeDir(allocator);
     log.debug("Home directory: {s}", .{home});
     const rc = try std.fs.path.join(allocator, &[_][]const u8{ home, dir, file });
     log.debug("Path evaluated as: {s}", .{rc});

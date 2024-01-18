@@ -21,7 +21,7 @@ pub fn timestampToDateTime(timestamp: i64) DateTime {
     const DAY_NUMBER_ADJUSTED_1970_01_01 = 719468; //* Day number relates to March 1st */
 
     var dayN: u64 = DAY_NUMBER_ADJUSTED_1970_01_01 + unixtime / SECONDS_PER_DAY;
-    var seconds_since_midnight: u64 = unixtime % SECONDS_PER_DAY;
+    const seconds_since_midnight: u64 = unixtime % SECONDS_PER_DAY;
     var temp: u64 = 0;
 
     // Leap year rules for Gregorian Calendars
@@ -37,7 +37,7 @@ pub fn timestampToDateTime(timestamp: i64) DateTime {
 
     // dayN calculates the days of the year in relation to March 1
     var month = @as(u8, @intCast((5 * dayN + 2) / 153));
-    var day = @as(u8, @intCast(dayN - (@as(u64, @intCast(month)) * 153 + 2) / 5 + 1));
+    const day = @as(u8, @intCast(dayN - (@as(u64, @intCast(month)) * 153 + 2) / 5 + 1));
     //  153 = 31+30+31+30+31 Days for the 5 months from March through July
     //  153 = 31+30+31+30+31 Days for the 5 months from August through December
     //        31+28          Days for January and February (see below)
@@ -50,9 +50,9 @@ pub fn timestampToDateTime(timestamp: i64) DateTime {
         year += 1;
     }
 
-    var hours = @as(u8, @intCast(seconds_since_midnight / 3600));
-    var minutes = @as(u8, @intCast(seconds_since_midnight % 3600 / 60));
-    var seconds = @as(u8, @intCast(seconds_since_midnight % 60));
+    const hours = @as(u8, @intCast(seconds_since_midnight / 3600));
+    const minutes = @as(u8, @intCast(seconds_since_midnight % 3600 / 60));
+    const seconds = @as(u8, @intCast(seconds_since_midnight % 60));
 
     return DateTime{ .day = day, .month = month, .year = year, .hour = hours, .minute = minutes, .second = seconds };
 }
@@ -275,10 +275,10 @@ fn secondsBetween(start: DateTime, end: DateTime) DateTimeToTimestampError!i64 {
         return (try secondsBetween(new_start, end)) - seconds_into_start_year;
     }
     const leap_years_between = leapYearsBetween(start.year, end.year);
-    var add_days: u1 = 0;
+    const add_days: u1 = 0;
     const years_diff = end.year - start.year;
     // log.debug("Years from epoch: {d}, Leap years: {d}", .{ years_diff, leap_years_between });
-    var days_diff: i32 = (years_diff * DAYS_PER_YEAR) + leap_years_between + add_days;
+    const days_diff: i32 = (years_diff * DAYS_PER_YEAR) + leap_years_between + add_days;
     // log.debug("Days with leap year, without month: {d}", .{days_diff});
 
     const seconds_into_year = secondsFromBeginningOfYear(
@@ -306,7 +306,7 @@ fn secondsFromBeginningOfYear(year: u16, month: u8, day: u8, hour: u8, minute: u
     const normal_days_per_month: [12]u5 = .{ 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
     const days_per_month = if (current_year_is_leap_year) leap_year_days_per_month else normal_days_per_month;
     var current_month: usize = 1;
-    var end_month = month;
+    const end_month = month;
     var days_diff: u32 = 0;
     while (current_month != end_month) {
         days_diff += days_per_month[current_month - 1]; // months are 1-based vs array is 0-based

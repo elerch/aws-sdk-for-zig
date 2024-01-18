@@ -364,7 +364,7 @@ fn verifyParsedAuthorization(
     const service = credential_iterator.next().?;
     const aws4_request = credential_iterator.next().?;
     if (!std.mem.eql(u8, aws4_request, "aws4_request")) return error.UnexpectedCredentialValue;
-    var config = Config{
+    const config = Config{
         .service = service,
         .credentials = credentials,
         .region = region,
@@ -444,7 +444,7 @@ fn getSigningKey(allocator: std.mem.Allocator, signing_date: []const u8, config:
         \\  region: {s}
         \\  service: {s}
     , .{ signing_date, config.region, config.service });
-    var secret = try std.fmt.allocPrint(allocator, "AWS4{s}", .{config.credentials.secret_key});
+    const secret = try std.fmt.allocPrint(allocator, "AWS4{s}", .{config.credentials.secret_key});
     defer {
         // secureZero avoids compiler optimizations that may say
         // "WTF are you doing this thing? Looks like nothing to me. It's silly and we will remove it"
@@ -716,7 +716,7 @@ fn canonicalQueryString(allocator: std.mem.Allocator, path: []const u8) ![]const
     for (sort_me.items) |i| {
         if (!first) try normalized.append('&');
         first = false;
-        var first_equals = std.mem.indexOf(u8, i, "=");
+        const first_equals = std.mem.indexOf(u8, i, "=");
         if (first_equals == null) {
             // Rare. This is "foo="
             const normed_item = try encodeUri(allocator, i);
@@ -744,7 +744,7 @@ fn canonicalQueryString(allocator: std.mem.Allocator, path: []const u8) ![]const
 }
 
 fn replace(allocator: std.mem.Allocator, haystack: []const u8, needle: []const u8, replacement_value: []const u8) ![]const u8 {
-    var buffer = try allocator.alloc(u8, std.mem.replacementSize(u8, haystack, needle, replacement_value));
+    const buffer = try allocator.alloc(u8, std.mem.replacementSize(u8, haystack, needle, replacement_value));
     _ = std.mem.replace(u8, haystack, needle, replacement_value, buffer);
     return buffer;
 }
@@ -837,7 +837,7 @@ fn canonicalHeaders(allocator: std.mem.Allocator, headers: []base.Header, servic
 
 fn canonicalHeaderValue(allocator: std.mem.Allocator, value: []const u8) ![]const u8 {
     var started = false;
-    var in_quote = false;
+    const in_quote = false;
     var start: usize = 0;
     const rc = try allocator.alloc(u8, value.len);
     var rc_inx: usize = 0;
@@ -1002,7 +1002,7 @@ test "can sign" {
     try headers.append(.{ .name = "Content-Type", .value = "application/x-www-form-urlencoded; charset=utf-8" });
     try headers.append(.{ .name = "Content-Length", .value = "13" });
     try headers.append(.{ .name = "Host", .value = "example.amazonaws.com" });
-    var req = base.Request{
+    const req = base.Request{
         .path = "/",
         .query = "",
         .body = "Param1=value1",
@@ -1071,7 +1071,7 @@ test "can verify server request" {
 
     var buf = "bar".*;
     var fis = std.io.fixedBufferStream(&buf);
-    var request = std.http.Server.Request{
+    const request = std.http.Server.Request{
         .method = std.http.Method.PUT,
         .target = "/mysfitszj3t6webstack-hostingbucketa91a61fe-1ep3ezkgwpxr0/i/am/a/teapot/foo?x-id=PutObject",
         .version = .@"HTTP/1.1",

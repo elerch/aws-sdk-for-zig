@@ -2299,7 +2299,7 @@ pub const Parser = struct {
             },
             .ObjectValue => {
                 var object = &p.stack.items[p.stack.items.len - 2].Object;
-                var key = p.stack.items[p.stack.items.len - 1].String;
+                const key = p.stack.items[p.stack.items.len - 1].String;
 
                 switch (token) {
                     .ObjectBegin => {

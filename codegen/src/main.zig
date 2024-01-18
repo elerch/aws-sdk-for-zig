@@ -37,7 +37,7 @@ pub fn main() anyerror!void {
     try output_dir.writeFile("json.zig", json_zig);
 
     // TODO: We need a different way to handle this file...
-    var manifest_file_started = false;
+    const manifest_file_started = false;
     var manifest_file: std.fs.File = undefined;
     defer if (manifest_file_started) manifest_file.close();
     var manifest: std.fs.File.Writer = undefined;
@@ -201,7 +201,7 @@ fn processFile(file_name: []const u8, output_dir: std.fs.Dir, manifest: anytype)
     defer allocator.free(output_file_name);
     for (service_names) |name| {
         const seperator = if (output_file_name.len > 0) "-" else "";
-        var new_output_file_name = try std.fmt.allocPrint(
+        const new_output_file_name = try std.fmt.allocPrint(
             allocator,
             "{s}{s}{s}",
             .{ output_file_name, seperator, name },
@@ -211,7 +211,7 @@ fn processFile(file_name: []const u8, output_dir: std.fs.Dir, manifest: anytype)
     }
     {
         // append .zig on to the file name
-        var new_output_file_name = try std.fmt.allocPrint(
+        const new_output_file_name = try std.fmt.allocPrint(
             allocator,
             "{s}.zig",
             .{output_file_name},
@@ -337,7 +337,7 @@ fn generateServices(allocator: std.mem.Allocator, comptime _: []const u8, file: 
     var generated = std.StringHashMap(void).init(allocator);
     defer generated.deinit();
 
-    var state = FileGenerationState{
+    const state = FileGenerationState{
         .shape_references = shape_references,
         .additional_types_to_generate = &unresolved,
         .additional_types_generated = &generated,
@@ -345,8 +345,8 @@ fn generateServices(allocator: std.mem.Allocator, comptime _: []const u8, file: 
     };
     for (services.items) |service| {
         var sdk_id: []const u8 = undefined;
-        var version: []const u8 = service.shape.service.version;
-        var name: []const u8 = service.name;
+        const version: []const u8 = service.shape.service.version;
+        const name: []const u8 = service.name;
         var arn_namespace: []const u8 = undefined;
         var sigv4_name: []const u8 = undefined;
         var endpoint_prefix: []const u8 = undefined;

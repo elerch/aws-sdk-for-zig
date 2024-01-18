@@ -365,7 +365,7 @@ pub fn Request(comptime request_action: anytype) type {
                     .raw_parsed = .{ .raw = .{} },
                     .allocator = options.client.allocator,
                 };
-                var body_field = @field(rc.response, action.Response.http_payload);
+                const body_field = @field(rc.response, action.Response.http_payload);
                 const BodyField = @TypeOf(body_field);
                 if (BodyField == []const u8 or BodyField == ?[]const u8) {
                     expected_body_field_len = 0;
@@ -875,7 +875,7 @@ fn FullResponse(comptime action: anytype) type {
                 }
             }
             if (@hasDecl(Response, "http_payload")) {
-                var body_field = @field(self.response, Response.http_payload);
+                const body_field = @field(self.response, Response.http_payload);
                 const BodyField = @TypeOf(body_field);
                 if (BodyField == []const u8) {
                     self.allocator.free(body_field);
