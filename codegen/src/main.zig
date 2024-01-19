@@ -29,9 +29,13 @@ pub fn main() anyerror!void {
             std.process.exit(0);
         }
         if (std.mem.eql(u8, "--output", arg))
-            output_dir = try output_dir.makeOpenPath(args[i + 1], .{});
+            output_dir = try output_dir.makeOpenPath(args[i + 1], .{
+                .iterate = true,
+            });
         if (std.mem.eql(u8, "--models", arg))
-            models_dir = try std.fs.cwd().openDir(args[i + 1], .{ .iterate = true });
+            models_dir = try std.fs.cwd().openDir(args[i + 1], .{
+                .iterate = true,
+            });
     }
     // TODO: Seems like we should remove this in favor of a package
     try output_dir.writeFile("json.zig", json_zig);

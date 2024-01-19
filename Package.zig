@@ -111,7 +111,9 @@ pub fn fetchAndUnpack(
             const path = try global_cache_directory.join(gpa, &.{tmp_dir_sub_path});
             errdefer gpa.free(path);
 
-            const iterable_dir = try global_cache_directory.handle.makeOpenPath(tmp_dir_sub_path, .{});
+            const iterable_dir = try global_cache_directory.handle.makeOpenPath(tmp_dir_sub_path, .{
+                .iterate = true,
+            });
             errdefer iterable_dir.close();
 
             break :d .{
