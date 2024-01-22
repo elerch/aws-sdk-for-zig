@@ -255,7 +255,7 @@ pub const AwsHttp = struct {
             try req.reader().readAllAlloc(self.allocator, std.math.maxInt(usize))
         else blk: {
             // content length
-            var tmp_data = try self.allocator.alloc(u8, content_length);
+            const tmp_data = try self.allocator.alloc(u8, content_length);
             errdefer self.allocator.free(tmp_data);
             _ = try req.readAll(tmp_data);
             break :blk tmp_data;

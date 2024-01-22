@@ -33,7 +33,7 @@ pub fn fetchOneAndUnpack(
     var http_client: std.http.Client = .{ .allocator = allocator };
     defer http_client.deinit();
 
-    var global_cache_directory: std.Build.Cache.Directory = .{
+    const global_cache_directory: std.Build.Cache.Directory = .{
         .handle = try std.fs.cwd().makeOpenPath(cache_directory, .{}),
         .path = cache_directory,
     };
@@ -464,7 +464,7 @@ test "fetch and unpack" {
     var http_client: std.http.Client = .{ .allocator = alloc };
     defer http_client.deinit();
 
-    var global_cache_directory: std.Build.Cache.Directory = .{
+    const global_cache_directory: std.Build.Cache.Directory = .{
         .handle = try std.fs.cwd().makeOpenPath("test-pkg", .{}),
         .path = "test-pkg",
     };
