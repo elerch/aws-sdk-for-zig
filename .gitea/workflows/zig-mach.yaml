@@ -3,20 +3,19 @@ run-name: ${{ github.actor }} building AWS Zig SDK
 on:
   push:
     branches:
-      - '*'
-      - '!zig-develop*'
+      - 'zig-develop*'
 env:
   ACTIONS_RUNTIME_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   ACTIONS_RUNTIME_URL: ${{ env.GITHUB_SERVER_URL }}/api/actions_pipeline/
 jobs:
-  build-zig-0.11.0-amd64-host:
+  build-mach-latest:
     runs-on: ubuntu-latest
     # Need to use the default container with node and all that, so we can
     # use JS-based actions like actions/checkout@v3...
     # container:
     #   image: alpine:3.15.0
     env:
-      ZIG_VERSION: 0.11.0
+      ZIG_VERSION: mach-latest
       ARCH: x86_64
     steps:
       - name: Check out repository code
@@ -28,9 +27,10 @@ jobs:
       # TODO: https://github.com/ziglang/zig/issues/2443
       - name: Install zig
         run: |
-          wget -q https://ziglang.org/download/${ZIG_VERSION}/zig-linux-${ARCH}-${ZIG_VERSION}.tar.xz
-          tar x -C /usr/local -f zig-linux-${ARCH}-${ZIG_VERSION}.tar.xz
-          ln -s /usr/local/zig-linux-${ARCH}-${ZIG_VERSION}/zig /usr/local/bin/zig
+          apt-get update && apt-get install -y jq
+          file="$(curl -Osw '%{filename_effective}' "$(curl -s https://machengine.org/zig/index.json |jq -r '."'${ZIG_VERSION}'"."x86_64-linux".tarball')")"
+          tar x -C /usr/local -f "${file}"
+          ln -s /usr/local/"${file%%.tar.xz}"/zig /usr/local/bin/zig
       - name: Run tests
         run: zig build test --verbose
       - name: Build example
