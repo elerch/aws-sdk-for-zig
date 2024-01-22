@@ -14,7 +14,7 @@ jobs:
     env:
       ZIG_VERSION: master
       ARCH: x86_64
-    if: ${{ env.GITEA_ACTIONS != 'true' }}
+    if: ${{ github.env.GITEA_ACTIONS != 'true' }}
     steps:
       - name: Check out repository code
         uses: actions/checkout@v3
