@@ -1,7 +1,8 @@
 AWS SDK for Zig
 ===============
 
-[![Build Status](https://actions-status.lerch.org/lobo/aws-sdk-for-zig/build)](https://git.lerch.org/lobo/aws-sdk-for-zig/actions?workflow=build.yaml&state=closed)
+[![Build Status: Zig 0.12.0-dev.2063+804cee3b9](https://actions-status.lerch.org/lobo/aws-sdk-for-zig/zig-mach)](https://git.lerch.org/lobo/aws-sdk-for-zig/actions?workflow=zig-mach.yaml&state=closed)
+[![Build Status: Zig Nightly](https://actions-status.lerch.org/lobo/aws-sdk-for-zig/zig-nightly)](https://git.lerch.org/lobo/aws-sdk-for-zig/actions?workflow=zig-nightly.yaml&state=closed)
 
 **NOTE: TLS 1.3 support is still deploying across AWS. Some services, especially S3,
         may or may not be available without a proxy, depending on the region.
@@ -19,6 +20,16 @@ in x86_linux, and will vary based on services used. Tested targets:
 * x86_64-macos
 
 Tested targets are built, but not continuously tested, by CI.
+
+Zig-Develop Branch
+------------------
+
+This branch is intended for use with the in-development version of Zig. This
+starts with 0.12.0-dev.2150+63de8a598. I will try to keep this branch up to date
+with latest, but with a special eye towards aligning with [Mach Engine's Nominated
+Zig Versions](https://machengine.org/about/nominated-zig/). As nightly zig versions
+disappear off the downloads page (and back end server), we can use the mirroring
+that the Mach Engine participates in to pull these versions.
 
 Building
 --------
