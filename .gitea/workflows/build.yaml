@@ -1,6 +1,10 @@
 name: AWS-Zig Build
 run-name: ${{ github.actor }} building AWS Zig SDK
-on: [push]
+on:
+  push:
+    branches:
+      - '*'
+      - '!zig-develop*'
 env:
   ACTIONS_RUNTIME_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   ACTIONS_RUNTIME_URL: ${{ env.GITHUB_SERVER_URL }}/api/actions_pipeline/
