@@ -1,7 +1,12 @@
 AWS SDK for Zig
 ===============
 
+[Last Mach Nominated Zig Version](https://machengine.org/about/nominated-zig/):
+
 [![Build Status: Zig 0.12.0-dev.2063+804cee3b9](https://actions-status.lerch.org/lobo/aws-sdk-for-zig/zig-mach)](https://git.lerch.org/lobo/aws-sdk-for-zig/actions?workflow=zig-mach.yaml&state=closed)
+
+[Nightly Zig](https://ziglang.org/download/):
+
 [![Build Status: Zig Nightly](https://actions-status.lerch.org/lobo/aws-sdk-for-zig/zig-nightly)](https://git.lerch.org/lobo/aws-sdk-for-zig/actions?workflow=zig-nightly.yaml&state=closed)
 
 **NOTE: TLS 1.3 support is still deploying across AWS. Some services, especially S3,
