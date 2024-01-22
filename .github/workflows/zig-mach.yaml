@@ -29,8 +29,8 @@ jobs:
         run: |
           apt-get update && apt-get install -y jq
           file="$(curl -Osw '%{filename_effective}' "$(curl -s https://machengine.org/zig/index.json |jq -r '."'${ZIG_VERSION}'"."x86_64-linux".tarball')")"
-          tar x -C /usr/local -f "${file}"
-          ln -s /usr/local/"${file%%.tar.xz}"/zig /usr/local/bin/zig
+          sudo tar x -C /usr/local -f "${file}"
+          sudo ln -s /usr/local/"${file%%.tar.xz}"/zig /usr/local/bin/zig
           zig version
       - name: Run tests
         run: zig build test --verbose
