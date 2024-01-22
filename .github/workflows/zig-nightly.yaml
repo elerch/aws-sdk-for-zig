@@ -1,4 +1,4 @@
-name: AWS-Zig Build
+name: aws-zig nightly build
 run-name: ${{ github.actor }} building AWS Zig SDK
 on:
   push:

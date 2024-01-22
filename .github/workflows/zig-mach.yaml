@@ -1,4 +1,4 @@
-name: AWS-Zig Build
+name: aws-zig mach nominated build
 run-name: ${{ github.actor }} building AWS Zig SDK
 on:
   schedule:
