@@ -91,47 +91,39 @@ Compiler wishlist/watchlist:
 
 * [comptime allocations](https://github.com/ziglang/zig/issues/1291) so we can read files, etc (or is there another way)
 
-Services without TLS 1.3 support (37 services out of 255 total)
+Services without TLS 1.3 support (29 services out of 255 total)
 ---------------------------------------------------------------
 
 NOTE THAT EC2, S3, Lambda, DynamoDB, SNS, SQS are all part of this list!!
 
 ```
 cloudsearch
-codecommit
 codestar
-cognito-identity
 cognito-idp
-cognito-sync
 data.iot
 data.jobs.iot
 dax
-discovery
 dynamodb
 ec2
 elasticache
 elasticbeanstalk
 elasticloadbalancing
-featurestore-runtime.sagemaker
 ingest.timestream
 iotsitewise
 kinesis
 kinesisvideo
 lambda
 models.lex
-monitoring
 oidc
 opsworks
 personalize-runtime
 query.timestream
 runtime.lex
-runtime.sagemaker
 runtime-v2-lex
 s3
 sns
 sqs
 streams.dynamodb
-sts
 support
 wafv2
 ```
