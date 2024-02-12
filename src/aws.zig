@@ -31,7 +31,7 @@ pub const services = servicemodel.services;
 pub const Services = servicemodel.Services;
 
 pub const ClientOptions = struct {
-    proxy: ?std.http.Client.HttpProxy = null,
+    proxy: ?std.http.Client.Proxy = null,
 };
 pub const Client = struct {
     allocator: std.mem.Allocator,
@@ -1465,7 +1465,7 @@ fn processRequest(options: *TestOptions, server: *std.http.Server) !void {
     else
         res.transfer_encoding = .chunked;
 
-    try res.do();
+    try res.send();
     _ = try res.writer().writeAll(response_bytes);
     try res.finish();
     log.debug(

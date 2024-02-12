@@ -177,7 +177,7 @@ pub fn signRequest(allocator: std.mem.Allocator, request: base.Request, config: 
         };
     }
     errdefer freeSignedRequest(allocator, &rc, config);
-    std.mem.copy(base.Header, newheaders, oldheaders);
+    @memcpy(newheaders[0..oldheaders.len], oldheaders);
     newheaders[newheaders.len - 3] = base.Header{
         .name = "X-Amz-Date",
         .value = signing_iso8601,

@@ -77,13 +77,13 @@ pub fn hex64(x: u64) [16]u8 {
     return result;
 }
 
-pub const walkerFn = *const fn (std.fs.IterableDir.Walker.WalkerEntry) bool;
+pub const walkerFn = *const fn (std.fs.Dir.Walker.WalkerEntry) bool;
 
-fn included(entry: std.fs.IterableDir.Walker.WalkerEntry) bool {
+fn included(entry: std.fs.Dir.Walker.WalkerEntry) bool {
     _ = entry;
     return true;
 }
-fn excluded(entry: std.fs.IterableDir.Walker.WalkerEntry) bool {
+fn excluded(entry: std.fs.Dir.Walker.WalkerEntry) bool {
     _ = entry;
     return false;
 }
@@ -96,7 +96,7 @@ pub const ComputeDirectoryOptions = struct {
 
 pub fn computeDirectoryHash(
     thread_pool: *std.Thread.Pool,
-    dir: std.fs.IterableDir,
+    dir: std.fs.Dir,
     options: *ComputeDirectoryOptions,
 ) ![Hash.digest_length]u8 {
     const gpa = thread_pool.allocator;
@@ -138,7 +138,7 @@ pub fn computeDirectoryHash(
                 .failure = undefined, // to be populated by the worker
             };
             wait_group.start();
-            try thread_pool.spawn(workerHashFile, .{ dir.dir, hashed_file, &wait_group });
+            try thread_pool.spawn(workerHashFile, .{ dir, hashed_file, &wait_group });
 
             try all_files.append(hashed_file);
         }
