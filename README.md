@@ -3,7 +3,7 @@ AWS SDK for Zig
 
 [![Build Status](https://actions-status.lerch.org/lobo/aws-sdk-for-zig/build)](https://git.lerch.org/lobo/aws-sdk-for-zig/actions?workflow=build.yaml&state=closed)
 
-**NOTE: THIS SDK IS CURRENTLY UNUSABLE FOR SEVERAL IMPORTANT AWS SERVICES
+**NOTE: THIS SDK IS CURRENTLY UNUSABLE FOR S3 AND 15 OTHER SERVICES
             WITHOUT A PROXY. SEE LIMITATIONS SECTION BELOW**
 
 Current executable size for the demo is 980k after compiling with -Doptimize=ReleaseSmall
@@ -91,37 +91,28 @@ Compiler wishlist/watchlist:
 
 * [comptime allocations](https://github.com/ziglang/zig/issues/1291) so we can read files, etc (or is there another way)
 
-Services without TLS 1.3 support (25 services out of 255 total)
+Services without TLS 1.3 support (16 services out of 255 total)
 ---------------------------------------------------------------
 
-NOTE THAT S3, Lambda, DynamoDB, SNS, SQS are all part of this list!!
+NOTE THAT S3 is part of this list!!
 
 ```
 cloudsearch
 codestar
-cognito-idp
 data.iot
 data.jobs.iot
 dax
-dynamodb
 elasticache
-elasticbeanstalk
-ingest.timestream
 kinesis
 kinesisvideo
-lambda
 models.lex
 opsworks
 personalize-runtime
-query.timestream
 runtime.lex
 runtime-v2-lex
 s3
-sns
-sqs
 streams.dynamodb
 support
-wafv2
 ```
 
 Dependency tree
