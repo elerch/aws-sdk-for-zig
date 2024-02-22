@@ -91,27 +91,23 @@ Compiler wishlist/watchlist:
 
 * [comptime allocations](https://github.com/ziglang/zig/issues/1291) so we can read files, etc (or is there another way)
 
-Services without TLS 1.3 support (16 services out of 255 total)
+Services without TLS 1.3 support (11 services out of 255 total)
 ---------------------------------------------------------------
 
-NOTE THAT S3 is part of this list!!
+NOTE ON S3: For me, S3 is currently intermittently available using TLS 1.3, so
+it appears deployments are in progress.
 
 ```
 cloudsearch
-codestar
 data.iot
-data.jobs.iot
 dax
 elasticache
-kinesis
-kinesisvideo
 models.lex
 opsworks
 personalize-runtime
 runtime.lex
 runtime-v2-lex
 s3
-streams.dynamodb
 support
 ```
 
