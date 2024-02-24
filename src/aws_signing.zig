@@ -167,31 +167,45 @@ pub fn signRequest(allocator: std.mem.Allocator, request: base.Request, config: 
     var additional_header_count: u3 = 3;
     if (config.credentials.session_token != null)
         additional_header_count += 1;
+    if (config.signed_body_header == .none)
+        additional_header_count -= 1;
     const newheaders = try allocator.alloc(base.Header, rc.headers.len + additional_header_count);
     errdefer allocator.free(newheaders);
     const oldheaders = rc.headers;
     if (config.credentials.session_token) |t| {
-        newheaders[newheaders.len - 4] = base.Header{
+        newheaders[newheaders.len - additional_header_count] = base.Header{
             .name = "X-Amz-Security-Token",
             .value = try allocator.dupe(u8, t),
         };
+        additional_header_count -= 1;
     }
     errdefer freeSignedRequest(allocator, &rc, config);
     std.mem.copy(base.Header, newheaders, oldheaders);
-    newheaders[newheaders.len - 3] = base.Header{
+    newheaders[newheaders.len - additional_header_count] = base.Header{
         .name = "X-Amz-Date",
         .value = signing_iso8601,
     };
-    // From the AWS nitro enclaves SDK, it appears that there is no reason
-    // to avoid *ALWAYS* adding the x-amz-content-sha256 header
-    // https://github.com/aws/aws-nitro-enclaves-sdk-c/blob/9ecb83d07fe953636e3c0b861d6dac0a15d00f82/source/rest.c#L464
-    const payload_hash = try hash(allocator, request.body, config.signed_body_header);
-    // This will be freed in freeSignedRequest
-    // defer allocator.free(payload_hash);
-    newheaders[newheaders.len - 2] = base.Header{
-        .name = "x-amz-content-sha256",
-        .value = payload_hash,
-    };
+    additional_header_count -= 1;
+
+    // We always need the sha256 of the payload for the signature,
+    // regardless of whether we're sticking the header on the request
+    std.debug.assert(config.signed_body_header == .none or
+        config.signed_body_header == .sha256);
+    const payload_hash = try hash(allocator, request.body, .sha256);
+    if (config.signed_body_header == .sha256) {
+        // From the AWS nitro enclaves SDK, it appears that there is no reason
+        // to avoid *ALWAYS* adding the x-amz-content-sha256 header
+        // https://github.com/aws/aws-nitro-enclaves-sdk-c/blob/9ecb83d07fe953636e3c0b861d6dac0a15d00f82/source/rest.c#L464
+        // However, for signature verification, we need to accomodate clients that
+        // may not add this header
+        // This will be freed in freeSignedRequest
+        // defer allocator.free(payload_hash);
+        newheaders[newheaders.len - additional_header_count] = base.Header{
+            .name = "x-amz-content-sha256",
+            .value = payload_hash,
+        };
+        additional_header_count -= 1;
+    }
 
     rc.headers = newheaders[0 .. newheaders.len - 1];
     log.debug("Signing with access key: {s}", .{config.credentials.access_key});
@@ -301,6 +315,9 @@ pub const UnverifiedRequest = struct {
 };
 
 pub fn verify(allocator: std.mem.Allocator, request: UnverifiedRequest, request_body_reader: anytype, credentials_fn: credentialsFn) !bool {
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    var aa = arena.allocator();
     // Authorization: AWS4-HMAC-SHA256 Credential=ACCESS/20230908/us-west-2/s3/aws4_request, SignedHeaders=accept;content-length;content-type;host;x-amz-content-sha256;x-amz-date;x-amz-storage-class, Signature=fcc43ce73a34c9bd1ddf17e8a435f46a859812822f944f9eeb2aabcd64b03523
     const auth_header_or_null = request.headers.getFirstValue("Authorization");
     const auth_header = if (auth_header_or_null) |a| a else return error.AuthorizationHeaderMissing;
@@ -328,7 +345,7 @@ pub fn verify(allocator: std.mem.Allocator, request: UnverifiedRequest, request_
     if (signed_headers == null) return error.AuthorizationHeaderMissingSignedHeaders;
     if (signature == null) return error.AuthorizationHeaderMissingSignature;
     return verifyParsedAuthorization(
-        allocator,
+        aa,
         request,
         request_body_reader,
         credential.?,
@@ -364,13 +381,13 @@ fn verifyParsedAuthorization(
     const service = credential_iterator.next().?;
     const aws4_request = credential_iterator.next().?;
     if (!std.mem.eql(u8, aws4_request, "aws4_request")) return error.UnexpectedCredentialValue;
-    const config = Config{
+    var config = Config{
         .service = service,
         .credentials = credentials,
         .region = region,
         .algorithm = .v4,
         .signature_type = .headers,
-        .signed_body_header = .sha256,
+        .signed_body_header = .none,
         .expiration_in_seconds = 0,
         .signing_time = try date.dateTimeToTimestamp(try date.parseIso8601ToDateTime(normalized_iso_date)),
     };
@@ -380,6 +397,8 @@ fn verifyParsedAuthorization(
     var signed_headers_iterator = std.mem.splitSequence(u8, signed_headers, ";");
     var inx: usize = 0;
     while (signed_headers_iterator.next()) |signed_header| {
+        if (std.ascii.eqlIgnoreCase(signed_header, "x-amz-content-sha256"))
+            config.signed_body_header = .sha256;
         var is_forbidden = false;
         inline for (forbidden_headers) |forbidden| {
             if (std.ascii.eqlIgnoreCase(forbidden.name, signed_header)) {
@@ -427,6 +446,11 @@ fn verifySignedRequest(signed_request: base.Request, signature: []const u8) !boo
         }
         break :blk null;
     };
+    log.debug(
+        \\Signature Verification
+        \\Request Signature: {s}
+        \\Calculated Signat: {s}
+    , .{ signature, calculated_signature.? });
     return std.mem.eql(u8, signature, calculated_signature.?);
 }
 
@@ -463,7 +487,6 @@ fn getSigningKey(allocator: std.mem.Allocator, signing_date: []const u8, config:
 }
 fn validateConfig(config: Config) SigningError!void {
     if (config.signature_type != .headers or
-        config.signed_body_header != .sha256 or
         config.expiration_in_seconds != 0 or
         config.algorithm != .v4)
         return SigningError.NotImplemented;
@@ -519,7 +542,7 @@ fn createCanonicalRequest(allocator: std.mem.Allocator, request: base.Request, p
     });
     errdefer allocator.free(canonical_request);
     log.debug("Canonical_request (just calculated):\n{s}", .{canonical_request});
-    const hashed = try hash(allocator, canonical_request, config.signed_body_header);
+    const hashed = try hash(allocator, canonical_request, .sha256);
     return Hashed{
         .arr = canonical_request,
         .hash = hashed,
@@ -1090,4 +1113,97 @@ test "can verify server request" {
             return null;
         }
     }.getCreds));
+}
+test "can verify server request without x-amz-content-sha256" {
+    const allocator = std.testing.allocator;
+
+    const access_key = try allocator.dupe(u8, "ACCESS");
+    const secret_key = try allocator.dupe(u8, "SECRET");
+    test_credential = Credentials.init(allocator, access_key, secret_key, null);
+    defer test_credential.?.deinit();
+
+    var headers = std.http.Headers.init(allocator);
+    defer headers.deinit();
+    try headers.append("Connection", "keep-alive");
+    try headers.append("Accept-Encoding", "gzip, deflate, zstd");
+    try headers.append("TE", "gzip, deflate, trailers");
+    try headers.append("Accept", "application/json");
+    try headers.append("X-Amz-Target", "DynamoDB_20120810.CreateTable");
+    try headers.append("Host", "dynamodb.us-west-2.amazonaws.com");
+    try headers.append("User-Agent", "zig-aws 1.0");
+    try headers.append("Content-Type", "application/x-amz-json-1.0");
+    try headers.append("Content-Length", "403");
+    try headers.append("X-Amz-Date", "20240224T154944Z");
+    try headers.append("x-amz-content-sha256", "fcde2b2edba56bf408601fb721fe9b5c338d10ee429ea04fae5511b68fbf8fb9");
+    try headers.append("Authorization", "AWS4-HMAC-SHA256 Credential=ACCESS/20240224/us-west-2/dynamodb/aws4_request, SignedHeaders=content-type;host;x-amz-date;x-amz-target, Signature=8fd23dc7dbcb36c4aa54207a7118f8b9fcd680da73a0590b498e9577ff68ec33");
+    const body =
+        \\{"AttributeDefinitions": [{"AttributeName": "Artist", "AttributeType": "S"}, {"AttributeName": "SongTitle", "AttributeType": "S"}], "TableName": "MusicCollection", "KeySchema": [{"AttributeName": "Artist", "KeyType": "HASH"}, {"AttributeName": "SongTitle", "KeyType": "RANGE"}], "ProvisionedThroughput": {"ReadCapacityUnits": 5, "WriteCapacityUnits": 5}, "Tags": [{"Key": "Owner", "Value": "blueTeam"}]}
+    ;
+    {
+        var h = try std.ArrayList(base.Header).initCapacity(allocator, headers.list.items.len);
+        defer h.deinit();
+        const signed_headers = &[_][]const u8{ "content-type", "host", "x-amz-date", "x-amz-target" };
+        for (headers.list.items) |source| {
+            var match = false;
+            for (signed_headers) |s| {
+                match = std.ascii.eqlIgnoreCase(s, source.name);
+                if (match) break;
+            }
+            if (match) h.appendAssumeCapacity(.{ .name = source.name, .value = source.value });
+        }
+        const req = base.Request{
+            .path = "/",
+            .method = "POST",
+            .headers = h.items,
+        };
+        const body_hash = try hash(allocator, body, .sha256);
+        defer allocator.free(body_hash);
+        try std.testing.expectEqualStrings("ebc5118b053c75178df0aa1f10d0443f5efb527a5589df943635834016c9b3bc", body_hash);
+        const canonical_request = try createCanonicalRequest(allocator, req, body_hash, .{
+            .region = "us-west-2",
+            .service = "dynamodb", // service
+            .credentials = test_credential.?,
+            .signing_time = 1708789784, // 20240224T154944Z (https://www.unixtimestamp.com)
+        });
+        defer allocator.free(canonical_request.arr);
+        defer allocator.free(canonical_request.hash);
+        defer allocator.free(canonical_request.headers.str);
+        defer allocator.free(canonical_request.headers.signed_headers);
+        // Canonical request:
+        const expected =
+            \\POST
+            \\/
+            \\
+            \\content-type:application/x-amz-json-1.0
+            \\host:dynamodb.us-west-2.amazonaws.com
+            \\x-amz-date:20240224T154944Z
+            \\x-amz-target:DynamoDB_20120810.CreateTable
+            \\
+            \\content-type;host;x-amz-date;x-amz-target
+            \\ebc5118b053c75178df0aa1f10d0443f5efb527a5589df943635834016c9b3bc
+        ;
+        try std.testing.expectEqualStrings(expected, canonical_request.arr);
+    }
+
+    { // verification
+        var fis = std.io.fixedBufferStream(body[0..]);
+        const request = std.http.Server.Request{
+            .method = std.http.Method.POST,
+            .target = "/",
+            .version = .@"HTTP/1.1",
+            .content_length = 403,
+            .headers = headers,
+            .parser = std.http.protocol.HeadersParser.initDynamic(std.math.maxInt(usize)),
+        };
+
+        try std.testing.expect(try verifyServerRequest(allocator, request, fis.reader(), struct {
+            cred: Credentials,
+
+            const Self = @This();
+            fn getCreds(access: []const u8) ?Credentials {
+                if (std.mem.eql(u8, access, "ACCESS")) return test_credential.?;
+                return null;
+            }
+        }.getCreds));
+    }
 }
