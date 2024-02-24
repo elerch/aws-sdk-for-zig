@@ -3,7 +3,7 @@ AWS SDK for Zig
 
 [![Build Status](https://actions-status.lerch.org/lobo/aws-sdk-for-zig/build)](https://git.lerch.org/lobo/aws-sdk-for-zig/actions?workflow=build.yaml&state=closed)
 
-**NOTE: THIS SDK IS CURRENTLY UNUSABLE FOR S3 AND 15 OTHER SERVICES
+**NOTE: THIS SDK IS CURRENTLY UNUSABLE FOR S3 AND 8 OTHER SERVICES
             WITHOUT A PROXY. SEE LIMITATIONS SECTION BELOW**
 
 Current executable size for the demo is 980k after compiling with -Doptimize=ReleaseSmall
@@ -91,8 +91,13 @@ Compiler wishlist/watchlist:
 
 * [comptime allocations](https://github.com/ziglang/zig/issues/1291) so we can read files, etc (or is there another way)
 
-Services without TLS 1.3 support (11 services out of 255 total)
+Services without TLS 1.3 support (9 services out of 255 total)
 ---------------------------------------------------------------
+
+The following service list is based on limited testing against us-west-2
+region. Your mileage may vary, as there are thousands of endpoints against
+many regions, though it appears the TLS 1.3 rollout is fairly far along at
+this point, with the real remaining issue for most is in S3.
 
 NOTE ON S3: For me, S3 is currently intermittently available using TLS 1.3, so
 it appears deployments are in progress.
@@ -100,8 +105,6 @@ it appears deployments are in progress.
 ```
 cloudsearch
 data.iot
-dax
-elasticache
 models.lex
 opsworks
 personalize-runtime
