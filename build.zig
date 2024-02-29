@@ -3,8 +3,8 @@ const builtin = @import("builtin");
 const Builder = @import("std").build.Builder;
 const Package = @import("Package.zig");
 
-const models_url = "https://github.com/aws/aws-sdk-go-v2/archive/7502ff360b1c3b79cbe117437327f6ff5fb89f65.tar.gz";
-const models_hash: ?[]const u8 = "1220a414719bff14c9362fb1c695e3346fa12ec2e728bae5757a57aae7738916ffd2";
+const models_url = "https://github.com/aws/aws-sdk-go-v2/archive/58cf6509525a12d64fd826da883bfdbacbd2f00e.tar.gz";
+const models_hash: ?[]const u8 = "122017a2f3081ce83c23e0c832feb1b8b4176d507b6077f522855dc774bcf83ee315";
 const models_subdir = "codegen/sdk-codegen/aws-models/"; // note will probably not work on windows
 const models_dir = "p" ++ std.fs.path.sep_str ++ (models_hash orelse "") ++ std.fs.path.sep_str ++ models_subdir;
 
