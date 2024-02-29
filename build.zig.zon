@@ -4,8 +4,8 @@
 
     .dependencies = .{
         .smithy = .{
-            .url = "https://git.lerch.org/lobo/smithy/archive/41b61745d25a65817209dd5dddbb5f9b66896a99.tar.gz",
-            .hash = "122087deb0ae309b2258d59b40d82fe5921fdfc35b420bb59033244851f7f276fa34",
+            .url = "https://git.lerch.org/lobo/smithy/archive/d6b6331defdfd33f36258caf26b0b82ce794cd28.tar.gz",
+            .hash = "1220695f5be11b7bd714f6181c60b0e590da5da7411de111ca51cacf1ea4a8169669",
         },
     },
 }

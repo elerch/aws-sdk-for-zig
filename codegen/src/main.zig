@@ -295,6 +295,7 @@ fn countReferences(shape: smithy.ShapeInfo, shapes: std.StringHashMap(smithy.Sha
         .bigInteger,
         .bigDecimal,
         .timestamp,
+        .unit,
         => {},
         .document, .member, .resource => {}, // less sure about these?
         .list => |i| try countReferences(shapes.get(i.member_target).?, shapes, shape_references, stack),
@@ -325,6 +326,7 @@ fn countReferences(shape: smithy.ShapeInfo, shapes: std.StringHashMap(smithy.Sha
             }
             if (op.errors) |i| try countAllReferences(i, shapes, shape_references, stack);
         },
+        .@"enum" => |m| try countTypeMembersReferences(m.members, shapes, shape_references, stack),
     }
 }
 
@@ -529,20 +531,26 @@ fn generateOperation(allocator: std.mem.Allocator, operation: smithy.ShapeInfo, 
     try writer.print("action_name: []const u8 = \"{s}\",\n", .{operation.name});
     try outputIndent(state, writer);
     _ = try writer.write("Request: type = ");
-    if (operation.shape.operation.input) |member| {
+    if (operation.shape.operation.input == null or
+        (try shapeInfoForId(operation.shape.operation.input.?, state)).shape == .unit)
+    {
+        _ = try writer.write("struct {\n");
+        try generateMetadataFunction(operation_name, state, writer);
+    } else if (operation.shape.operation.input) |member| {
         if (try generateTypeFor(member, writer, state, false)) unreachable; // we expect only structs here
         _ = try writer.write("\n");
-        try generateMetadataFunction(operation_name, state, writer);
-    } else {
-        _ = try writer.write("struct {\n");
         try generateMetadataFunction(operation_name, state, writer);
     }
     _ = try writer.write(",\n");
     try outputIndent(state, writer);
     _ = try writer.write("Response: type = ");
-    if (operation.shape.operation.output) |member| {
+    if (operation.shape.operation.output == null or
+        (try shapeInfoForId(operation.shape.operation.output.?, state)).shape == .unit)
+    {
+        _ = try writer.write("struct {}"); // we want to maintain consistency with other ops
+    } else if (operation.shape.operation.output) |member| {
         if (try generateTypeFor(member, writer, state, true)) unreachable; // we expect only structs here
-    } else _ = try writer.write("struct {}"); // we want to maintain consistency with other ops
+    }
     _ = try writer.write(",\n");
 
     if (operation.shape.operation.errors) |errors| {
@@ -691,7 +699,12 @@ fn generateTypeFor(shape_id: []const u8, writer: anytype, state: GenerationState
                 _ = try writer.write("}");
             }
         },
+        // Document is unstructured data, so bag of bytes it is
+        // https://smithy.io/2.0/spec/simple-types.html#document
+        .document => |s| try generateSimpleTypeFor(s, "[]const u8", writer),
         .string => |s| try generateSimpleTypeFor(s, "[]const u8", writer),
+        .unit => |s| try generateSimpleTypeFor(s, "struct {}", writer), // Would be better as void, but doing so creates inconsistency we don't want clients to have to deal with
+        .@"enum" => |s| try generateSimpleTypeFor(s, "[]const u8", writer), // This should be closer to uniontype, but the generated code will look ugly, and Smithy 2.0 requires that enums are open (clients accept unspecified values). So string is the best analog
         .integer => |s| try generateSimpleTypeFor(s, "i64", writer),
         .list => {
             _ = try writer.write("[]");
