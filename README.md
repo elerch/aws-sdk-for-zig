@@ -3,8 +3,9 @@ AWS SDK for Zig
 
 [![Build Status](https://actions-status.lerch.org/lobo/aws-sdk-for-zig/build)](https://git.lerch.org/lobo/aws-sdk-for-zig/actions?workflow=build.yaml&state=closed)
 
-**NOTE: THIS SDK IS CURRENTLY UNUSABLE FOR S3 AND 8 OTHER SERVICES
-            WITHOUT A PROXY. SEE LIMITATIONS SECTION BELOW**
+**NOTE: TLS 1.3 support is still deploying across AWS. Some services, especially S3,
+        may or may not be available without a proxy, depending on the region.
+        See limitations section below**
 
 Current executable size for the demo is 980k after compiling with -Doptimize=ReleaseSmall
 in x86_linux, and will vary based on services used. Tested targets:
@@ -44,32 +45,15 @@ for working with services. For local testing or alternative endpoints, there's
 no real standard, so there is code to look for `AWS_ENDPOINT_URL` environment
 variable that will supersede all other configuration.
 
-Other branches
---------------
-
-The default branch is fully functional but requires TLS 1.3. Until AWS Services
-support TLS 1.3 at the end of 2023, the [0.9.0 branch](https://git.lerch.org/lobo/aws-sdk-for-zig/src/branch/0.9.0)
-may be of use. More details below in limitations. This branch overall is
-superior, as is the 0.11 compiler, but if you need a service that doesn't support
-TLS 1.3 and you need it right away, feel free to use that branch. Note I do not
-intend to update code in the 0.9.0 branch, but will accept PRs.
-
-An [old branch based on aws-crt](https://github.com/elerch/aws-sdk-for-zig/tree/aws-crt) exists
-for posterity, and supports x86_64 linux. The old branch is deprecated, so if
-there are issues you see that work correctly in the aws-crt branch, please
-file an issue. I can't think of a reason to use this branch any more. I do not
-intend to entertain PRs on this branch, but reach out if you think it is important.
-
 Limitations
 -----------
 
-The zig 0.11 HTTP client supports TLS 1.3 only. This, IMHO, is a reasonable
-restriction given its introduction 5 years ago, but is inflicting some short
-term pain on this project as AWS has not yet fully implemented the protocol. AWS has
-committed to [TLS 1.3 support across all services by the end of 2023](https://aws.amazon.com/blogs/security/faster-aws-cloud-connections-with-tls-1-3/), but many (most) services as of August 28th have not yet
-been upgraded. Proxy support has been added, so to get to the services that
+The zig 0.11 HTTP client supports TLS 1.3 only. AWS has committed to
+[TLS 1.3 support across all services by the end of 2023](https://aws.amazon.com/blogs/security/faster-aws-cloud-connections-with-tls-1-3/),
+but a few services as of February 28, 2024 have not been upgraded, and S3 is
+a bit intermittent. Proxy support has been added, so to get to the services that
 do not yet support TLS 1.3, you can use something like [mitmproxy](https://mitmproxy.org/)
-to proxy those requests. Of course, this is not a good production solution...
+to proxy those requests until roll out is complete.
 
 WebIdentityToken is not yet implemented.
 
@@ -87,30 +71,22 @@ TODO List:
 * Implement timeouts and other TODO's in the code
 * Add option to cache signature keys
 
-Compiler wishlist/watchlist:
-
-* [comptime allocations](https://github.com/ziglang/zig/issues/1291) so we can read files, etc (or is there another way)
-
-Services without TLS 1.3 support (9 services out of 255 total)
+Services without TLS 1.3 support (4 services out of 255 total)
 ---------------------------------------------------------------
 
 The following service list is based on limited testing against us-west-2
 region. Your mileage may vary, as there are thousands of endpoints against
-many regions, though it appears the TLS 1.3 rollout is fairly far along at
-this point, with the real remaining issue for most is in S3.
+many regions. It appears the TLS 1.3 rollout is fairly far along at
+this point.
 
 NOTE ON S3: For me, S3 is currently intermittently available using TLS 1.3, so
-it appears deployments are in progress.
+it appears deployments are in progress. The last couple days it has been
+available consistently, so I have removed it from the list.
 
 ```
-cloudsearch
 data.iot
 models.lex
 opsworks
-personalize-runtime
-runtime.lex
-runtime-v2-lex
-s3
 support
 ```
 
