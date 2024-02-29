@@ -371,8 +371,8 @@ fn generateServices(allocator: std.mem.Allocator, comptime _: []const u8, file: 
         var sdk_id: []const u8 = undefined;
         const version: []const u8 = service.shape.service.version;
         const name: []const u8 = service.name;
-        var arn_namespace: []const u8 = undefined;
-        var sigv4_name: []const u8 = undefined;
+        var arn_namespace: ?[]const u8 = undefined;
+        var sigv4_name: ?[]const u8 = null;
         var endpoint_prefix: []const u8 = undefined;
         var aws_protocol: smithy.AwsProtocol = undefined;
         for (service.shape.service.traits) |trait| {
@@ -388,6 +388,11 @@ fn generateServices(allocator: std.mem.Allocator, comptime _: []const u8, file: 
                 else => {},
             }
         }
+        if (sigv4_name == null) {
+            // This is true for CodeCatalyst, that operates a bit differently
+            std.log.debug("No sigv4 name found. Service '{s}' cannot be accessed via standard methods. Skipping", .{name});
+            continue;
+        }
 
         // Service struct
         // name of the field will be snake_case of whatever comes in from
@@ -397,18 +402,22 @@ fn generateServices(allocator: std.mem.Allocator, comptime _: []const u8, file: 
         try writer.print("const Self = @This();\n", .{});
         try writer.print("pub const version: []const u8 = \"{s}\";\n", .{version});
         try writer.print("pub const sdk_id: []const u8 = \"{s}\";\n", .{sdk_id});
-        try writer.print("pub const arn_namespace: []const u8 = \"{s}\";\n", .{arn_namespace});
+        if (arn_namespace) |a| {
+            try writer.print("pub const arn_namespace: ?[]const u8 = \"{s}\";\n", .{a});
+        } else try writer.print("pub const arn_namespace: ?[]const u8 = null;\n", .{});
         try writer.print("pub const endpoint_prefix: []const u8 = \"{s}\";\n", .{endpoint_prefix});
-        try writer.print("pub const sigv4_name: []const u8 = \"{s}\";\n", .{sigv4_name});
+        try writer.print("pub const sigv4_name: []const u8 = \"{s}\";\n", .{sigv4_name.?});
         try writer.print("pub const name: []const u8 = \"{s}\";\n", .{name});
         // TODO: This really should just be ".whatevs". We're fully qualifying here, which isn't typical
         try writer.print("pub const aws_protocol: smithy.AwsProtocol = {};\n\n", .{aws_protocol});
         _ = try writer.write("pub const service_metadata: struct {\n");
         try writer.print("    version: []const u8 = \"{s}\",\n", .{version});
         try writer.print("    sdk_id: []const u8 = \"{s}\",\n", .{sdk_id});
-        try writer.print("    arn_namespace: []const u8 = \"{s}\",\n", .{arn_namespace});
+        if (arn_namespace) |a| {
+            try writer.print("    arn_namespace: ?[]const u8 = \"{s}\",\n", .{a});
+        } else try writer.print("    arn_namespace: ?[]const u8 = null,\n", .{});
         try writer.print("    endpoint_prefix: []const u8 = \"{s}\",\n", .{endpoint_prefix});
-        try writer.print("    sigv4_name: []const u8 = \"{s}\",\n", .{sigv4_name});
+        try writer.print("    sigv4_name: []const u8 = \"{s}\",\n", .{sigv4_name.?});
         try writer.print("    name: []const u8 = \"{s}\",\n", .{name});
         // TODO: This really should just be ".whatevs". We're fully qualifying here, which isn't typical
         try writer.print("    aws_protocol: smithy.AwsProtocol = {},\n", .{aws_protocol});
