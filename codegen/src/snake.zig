@@ -28,10 +28,22 @@ pub fn fromPascalCase(allocator: std.mem.Allocator, name: []const u8) ![]u8 {
             //       prev_codepoint/ascii_prev_char (and target_inx)
             target_inx = setNext(lowercase(curr_char), rc, target_inx);
             target_inx = setNext('_', rc, target_inx);
-            curr_char = (try isAscii(utf8_name.nextCodepoint())).?;
+            var maybe_curr_char = (try isAscii(utf8_name.nextCodepoint()));
+            if (maybe_curr_char == null) {
+                std.log.err("Error on fromPascalCase processing name '{s}'", .{name});
+            }
+            curr_char = maybe_curr_char.?;
+            maybe_curr_char = (try isAscii(utf8_name.nextCodepoint()));
+            if (maybe_curr_char == null) {
+                // We have reached the end of the string (e.g. "Resource Explorer 2")
+                // We need to do this check before we setNext, so that we don't
+                // end up duplicating the last character
+                break;
+                // std.log.err("Error on fromPascalCase processing name '{s}', curr_char = '{}'", .{ name, curr_char });
+            }
             target_inx = setNext(lowercase(curr_char), rc, target_inx);
             prev_char = curr_char;
-            curr_char = (try isAscii(utf8_name.nextCodepoint())).?;
+            curr_char = maybe_curr_char.?;
             continue;
         }
         if (between(curr_char, 'A', 'Z')) {
@@ -60,6 +72,7 @@ pub fn fromPascalCase(allocator: std.mem.Allocator, name: []const u8) ![]u8 {
     target_inx = setNext(lowercase(curr_char), rc, target_inx);
 
     rc[target_inx] = 0;
+    _ = allocator.resize(rc, target_inx);
     return rc[0..target_inx];
 }
 
@@ -133,4 +146,12 @@ test "IoT 1Click Devices Service" {
     // NOTE: There is some debate amoung humans about what this should
     // turn into. Should it be iot_1click_... or iot_1_click...?
     try expectEqualStrings("iot_1_click_devices_service", snake_case);
+}
+test "Resource Explorer 2" {
+    const allocator = std.testing.allocator;
+    const snake_case = try fromPascalCase(allocator, "Resource Explorer 2");
+    defer allocator.free(snake_case);
+    // NOTE: There is some debate amoung humans about what this should
+    // turn into. Should it be iot_1click_... or iot_1_click...?
+    try expectEqualStrings("resource_explorer_2", snake_case);
 }
