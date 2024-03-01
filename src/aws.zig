@@ -1585,6 +1585,7 @@ test "query_no_input: sts getCallerIdentity comptime" {
     try std.testing.expectEqualStrings("8f0d54da-1230-40f7-b4ac-95015c4b84cd", call.response_metadata.request_id);
 }
 test "query_with_input: sqs listQueues runtime" {
+    if (true) return error.SkipZigTest; // sqs switched from query to json recently
     const allocator = std.testing.allocator;
     var test_harness = TestSetup.init(allocator, .{
         .allocator = allocator,
@@ -1929,7 +1930,12 @@ test "rest_xml_no_input: S3 list buckets" {
     test_harness.stop();
     // Request expectations
     try std.testing.expectEqual(std.http.Method.GET, test_harness.request_options.request_method);
-    try std.testing.expectEqualStrings("/", test_harness.request_options.request_target);
+    // This changed in rev 830202d722c904c7e3da40e8dde7b9338d08752c of the go sdk, and
+    // contrary to the documentation, a query string argument was added. My guess is that
+    // there is no functional reason, and that this is strictly for some AWS reporting function.
+    // Alternatively, it could be to support some customization mechanism, as the commit
+    // title of that commit is "Merge customizations for S3"
+    try std.testing.expectEqualStrings("/?x-id=ListBuckets", test_harness.request_options.request_target);
     try std.testing.expectEqualStrings("", test_harness.request_options.request_body);
     // Response expectations
     try std.testing.expectEqualStrings("9PEYBAZ9J7TPRX43", call.response_metadata.request_id);
