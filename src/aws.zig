@@ -457,6 +457,30 @@ pub fn Request(comptime request_action: anytype) type {
             }
         }
 
+        fn findResult(element: *xml_shaper.Element, options: xml_shaper.ParseOptions) *xml_shaper.Element {
+            _ = options;
+            // We're looking for a very specific pattern here. We want only two direct
+            // children. The first one must end with "Result", and the second should
+            // be our ResponseMetadata node
+            var children = element.elements();
+            var found_metadata = false;
+            var result_child: ?*xml_shaper.Element = null;
+            var inx: usize = 0;
+            while (children.next()) |child| : (inx += 1) {
+                if (std.mem.eql(u8, child.tag, "ResponseMetadata")) {
+                    found_metadata = true;
+                    continue;
+                }
+                if (std.mem.endsWith(u8, child.tag, "Result")) {
+                    result_child = child;
+                    continue;
+                }
+                if (inx > 1) return element;
+                return element; // It should only be those two
+            }
+            return result_child orelse element;
+        }
+
         fn xmlReturn(request: awshttp.HttpRequest, options: Options, result: awshttp.HttpResult) !FullResponseType {
             // Server shape be all like:
             //
@@ -481,7 +505,7 @@ pub fn Request(comptime request_action: anytype) type {
             // }
             //
             // Big thing is that requestid, which we'll need to fetch "manually"
-            const xml_options = xml_shaper.ParseOptions{ .allocator = options.client.allocator };
+            const xml_options = xml_shaper.ParseOptions{ .allocator = options.client.allocator, .elementToParse = findResult };
             var body: []const u8 = result.body;
             var free_body = false;
             if (result.body.len < 20) {
@@ -1584,24 +1608,31 @@ test "query_no_input: sts getCallerIdentity comptime" {
     try std.testing.expectEqualStrings("123456789012", call.response.account.?);
     try std.testing.expectEqualStrings("8f0d54da-1230-40f7-b4ac-95015c4b84cd", call.response_metadata.request_id);
 }
-test "query_with_input: sqs listQueues runtime" {
-    if (true) return error.SkipZigTest; // sqs switched from query to json recently
+test "query_with_input: sts getAccessKeyInfo runtime" {
+    // sqs switched from query to json in aws sdk for go v2 commit f5a08768ef820ff5efd62a49ba50c61c9ca5dbcb
     const allocator = std.testing.allocator;
     var test_harness = TestSetup.init(allocator, .{
         .allocator = allocator,
         .server_response =
-        \\{"ListQueuesResponse":{"ListQueuesResult":{"NextExclusiveStartQueueName":null,"NextToken":null,"queueUrls":null},"ResponseMetadata":{"RequestId":"a85e390b-b866-590e-8cae-645f2bbe59c5"}}}
+        \\<GetAccessKeyInfoResponse xmlns="https://sts.amazonaws.com/doc/2011-06-15/">
+        \\  <GetAccessKeyInfoResult>
+        \\    <Account>123456789012</Account>
+        \\  </GetAccessKeyInfoResult>
+        \\  <ResponseMetadata>
+        \\    <RequestId>ec85bf29-1ef0-459a-930e-6446dd14a286</RequestId>
+        \\  </ResponseMetadata>
+        \\</GetAccessKeyInfoResponse>
         ,
         .server_response_headers = @constCast(&[_][2][]const u8{
-            .{ "Content-Type", "application/json" },
-            .{ "x-amzn-RequestId", "a85e390b-b866-590e-8cae-645f2bbe59c5" },
+            .{ "Content-Type", "text/xml" },
+            .{ "x-amzn-RequestId", "ec85bf29-1ef0-459a-930e-6446dd14a286" },
         }),
     });
     defer test_harness.deinit();
     const options = try test_harness.start();
-    const sqs = (Services(.{.sqs}){}).sqs;
-    const call = try test_harness.client.call(sqs.list_queues.Request{
-        .queue_name_prefix = "s",
+    const sts = (Services(.{.sts}){}).sts;
+    const call = try test_harness.client.call(sts.get_access_key_info.Request{
+        .access_key_id = "ASIAYAM4POHXJNKTYFUN",
     }, options);
     defer call.deinit();
     test_harness.stop();
@@ -1609,12 +1640,12 @@ test "query_with_input: sqs listQueues runtime" {
     try std.testing.expectEqual(std.http.Method.POST, test_harness.request_options.request_method);
     try std.testing.expectEqualStrings("/", test_harness.request_options.request_target);
     try std.testing.expectEqualStrings(
-        \\Action=ListQueues&Version=2012-11-05&QueueNamePrefix=s
+        \\Action=GetAccessKeyInfo&Version=2011-06-15&AccessKeyId=ASIAYAM4POHXJNKTYFUN
     , test_harness.request_options.request_body);
     // Response expectations
-    // TODO: We can get a lot better with this under test
-    try std.testing.expect(call.response.queue_urls == null);
-    try std.testing.expectEqualStrings("a85e390b-b866-590e-8cae-645f2bbe59c5", call.response_metadata.request_id);
+    try std.testing.expect(call.response.account != null);
+    try std.testing.expectEqualStrings("123456789012", call.response.account.?);
+    try std.testing.expectEqualStrings("ec85bf29-1ef0-459a-930e-6446dd14a286", call.response_metadata.request_id);
 }
 test "json_1_0_query_with_input: dynamodb listTables runtime" {
     const allocator = std.testing.allocator;

@@ -4,6 +4,8 @@ const date = @import("date.zig");
 
 const log = std.log.scoped(.xml_shaper);
 
+pub const Element = xml.Element;
+
 pub fn Parsed(comptime T: type) type {
     return struct {
         // Forcing an arean allocator isn't my favorite choice here, but
@@ -70,6 +72,8 @@ fn deinitObject(allocator: std.mem.Allocator, obj: anytype) void {
 pub const ParseOptions = struct {
     allocator: ?std.mem.Allocator = null,
     match_predicate_ptr: ?*const fn (a: []const u8, b: []const u8, options: xml.PredicateOptions) anyerror!bool = null,
+    /// defines a function to use to locate an element other than the root of the document for parsing
+    elementToParse: ?*const fn (element: *Element, options: ParseOptions) *Element = null,
 };
 
 pub fn parse(comptime T: type, source: []const u8, options: ParseOptions) !Parsed(T) {
@@ -86,7 +90,8 @@ pub fn parse(comptime T: type, source: []const u8, options: ParseOptions) !Parse
         .match_predicate_ptr = options.match_predicate_ptr,
     };
 
-    return Parsed(T).init(arena_allocator, try parseInternal(T, parsed.root, opts), parsed);
+    const root = if (options.elementToParse) |e| e(parsed.root, opts) else parsed.root;
+    return Parsed(T).init(arena_allocator, try parseInternal(T, root, opts), parsed);
 }
 
 fn parseInternal(comptime T: type, element: *xml.Element, options: ParseOptions) !T {
@@ -244,6 +249,7 @@ fn parseInternal(comptime T: type, element: *xml.Element, options: ParseOptions)
                     // Zig compiler bug circa 0.9.0. Using "and !found_value"
                     // in the if statement above will trigger assertion failure
                     if (!found_value) {
+                        log.debug("Child element not found, but field optional. Setting {s}=null", .{field.name});
                         // @compileLog("Optional: Field name ", field.name, ", type ", field.type);
                         @field(r, field.name) = null;
                         fields_set = fields_set + 1;
@@ -625,11 +631,64 @@ test "can parse something serious" {
         \\</DescribeRegionsResponse>
     ;
     // const ServerResponse = struct { DescribeRegionsResponse: describe_regions.Response, };
-    const parsed_data = try parse(describe_regions.Response, data, .{ .allocator = allocator });
+    const parsed_data = try parse(describe_regions.Response, data, .{ .allocator = allocator, .elementToParse = findResult });
     defer parsed_data.deinit();
     try testing.expect(parsed_data.parsed_value.regions != null);
     try testing.expectEqualStrings("eu-north-1", parsed_data.parsed_value.regions.?[0].region_name.?);
     try testing.expectEqualStrings("ec2.eu-north-1.amazonaws.com", parsed_data.parsed_value.regions.?[0].endpoint.?);
+}
+const StsGetAccesskeyInfoResponse: type = struct {
+    account: ?[]const u8 = null,
+
+    pub fn fieldNameFor(_: @This(), comptime field_name: []const u8) []const u8 {
+        const mappings = .{
+            .account = "Account",
+        };
+        return @field(mappings, field_name);
+    }
+};
+fn findResult(element: *xml.Element, options: ParseOptions) *xml.Element {
+    _ = options;
+    // We're looking for a very specific pattern here. We want only two direct
+    // children. The first one must end with "Result", and the second should
+    // be our ResponseMetadata node
+    var children = element.elements();
+    var found_metadata = false;
+    var result_child: ?*xml.Element = null;
+    var inx: usize = 0;
+    while (children.next()) |child| : (inx += 1) {
+        if (std.mem.eql(u8, child.tag, "ResponseMetadata")) {
+            found_metadata = true;
+            continue;
+        }
+        if (std.mem.endsWith(u8, child.tag, "Result")) {
+            result_child = child;
+            continue;
+        }
+        if (inx > 1) return element;
+        return element; // It should only be those two
+    }
+    return result_child orelse element;
+}
+test "can parse a result within a response" {
+    log.debug("", .{});
+
+    const allocator = std.testing.allocator;
+    const data =
+        \\<GetAccessKeyInfoResponse xmlns="https://sts.amazonaws.com/doc/2011-06-15/">
+        \\  <GetAccessKeyInfoResult>
+        \\    <Account>123456789012</Account>
+        \\  </GetAccessKeyInfoResult>
+        \\  <ResponseMetadata>
+        \\    <RequestId>ec85bf29-1ef0-459a-930e-6446dd14a286</RequestId>
+        \\  </ResponseMetadata>
+        \\</GetAccessKeyInfoResponse>
+    ;
+    const parsed_data = try parse(StsGetAccesskeyInfoResponse, data, .{ .allocator = allocator, .elementToParse = findResult });
+    defer parsed_data.deinit();
+    // Response expectations
+    try std.testing.expect(parsed_data.parsed_value.account != null);
+    try std.testing.expectEqualStrings("123456789012", parsed_data.parsed_value.account.?);
 }
 
 test "compiler assertion failure 2" {
