@@ -66,7 +66,7 @@ Limitations
 
 The zig 0.11 HTTP client supports TLS 1.3 only. AWS has committed to
 [TLS 1.3 support across all services by the end of 2023](https://aws.amazon.com/blogs/security/faster-aws-cloud-connections-with-tls-1-3/),
-but a few services as of February 28, 2024 have not been upgraded, and S3 is
+but a few services as of April 1, 2024 have not been upgraded, and S3 is
 a bit intermittent. Proxy support has been added, so to get to the services that
 do not yet support TLS 1.3, you can use something like [mitmproxy](https://mitmproxy.org/)
 to proxy those requests until roll out is complete.
@@ -97,13 +97,13 @@ this point.
 
 NOTE ON S3: For me, S3 is currently intermittently available using TLS 1.3, so
 it appears deployments are in progress. The last couple days it has been
-available consistently, so I have removed it from the list.
+not been available consistently, so I have added it back to the list.
 
 ```
 data.iot
 models.lex
 opsworks
-support
+s3
 ```
 
 Dependency tree
