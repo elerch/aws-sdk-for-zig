@@ -1,12 +1,8 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const Builder = @import("std").build.Builder;
-const Package = @import("Package.zig");
+const Builder = @import("std").Build;
 
-const models_url = "https://github.com/aws/aws-sdk-go-v2/archive/58cf6509525a12d64fd826da883bfdbacbd2f00e.tar.gz";
-const models_hash: ?[]const u8 = "122017a2f3081ce83c23e0c832feb1b8b4176d507b6077f522855dc774bcf83ee315";
 const models_subdir = "codegen/sdk-codegen/aws-models/"; // note will probably not work on windows
-const models_dir = "p" ++ std.fs.path.sep_str ++ (models_hash orelse "") ++ std.fs.path.sep_str ++ models_subdir;
 
 const test_targets = [_]std.zig.CrossTarget{
     .{}, // native
@@ -79,22 +75,18 @@ pub fn build(b: *Builder) !void {
         .optimize = optimize,
     });
     const smithy_module = smithy_dep.module("smithy");
-    exe.addModule("smithy", smithy_module); // not sure this should be here...
+    exe.root_module.addImport("smithy", smithy_module); // not sure this should be here...
 
     // Expose module to others
     _ = b.addModule("aws", .{
-        .source_file = .{ .path = "src/aws.zig" },
-        .dependencies = &[_]std.build.ModuleDependency{
-            .{ .name = "smithy", .module = smithy_module },
-        },
+        .root_source_file = .{ .path = "src/aws.zig" },
+        .imports = &.{.{ .name = "smithy", .module = smithy_module }},
     });
 
     // Expose module to others
     _ = b.addModule("aws-signing", .{
-        .source_file = .{ .path = "src/aws_signing.zig" },
-        .dependencies = &[_]std.build.ModuleDependency{
-            .{ .name = "smithy", .module = smithy_module },
-        },
+        .root_source_file = .{ .path = "src/aws_signing.zig" },
+        .imports = &.{.{ .name = "smithy", .module = smithy_module }},
     });
     // TODO: This does not work correctly due to https://github.com/ziglang/zig/issues/16354
     //
@@ -118,9 +110,6 @@ pub fn build(b: *Builder) !void {
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
 
-    const fm = b.step("fetch", "Fetch model files");
-    var fetch_step = FetchStep.create(b, models_url, models_hash);
-    fm.dependOn(&fetch_step.step);
     const gen_step = blk: {
         const cg = b.step("gen", "Generate zig service code from smithy models");
 
@@ -128,21 +117,35 @@ pub fn build(b: *Builder) !void {
             .name = "codegen",
             .root_source_file = .{ .path = "codegen/src/main.zig" },
             // We need this generated for the host, not the real target
-            // .target = target,
+            .target = b.host,
             .optimize = if (b.verbose) .Debug else .ReleaseSafe,
         });
-        cg_exe.addModule("smithy", smithy_dep.module("smithy"));
+        cg_exe.root_module.addImport("smithy", smithy_dep.module("smithy"));
         var cg_cmd = b.addRunArtifact(cg_exe);
         cg_cmd.addArg("--models");
+        const hash = hash_blk: {
+            for (b.available_deps) |dep| {
+                const dep_name = dep.@"0";
+                const dep_hash = dep.@"1";
+                if (std.mem.eql(u8, dep_name, "models"))
+                    break :hash_blk dep_hash;
+            }
+            return error.DependencyNamedModelsNotFoundInBuildZigZon;
+        };
         cg_cmd.addArg(try std.fs.path.join(
             b.allocator,
-            &[_][]const u8{ b.global_cache_root.path.?, models_dir },
+            &[_][]const u8{
+                b.graph.global_cache_root.path.?,
+                "p",
+                hash,
+                models_subdir,
+            },
         ));
         cg_cmd.addArg("--output");
-        cg_cmd.addDirectoryArg(std.Build.FileSource.relative("src/models"));
+        cg_cmd.addDirectoryArg(std.Build.LazyPath.relative("src/models"));
         if (b.verbose)
             cg_cmd.addArg("--verbose");
-        cg_cmd.step.dependOn(&fetch_step.step);
+        // cg_cmd.step.dependOn(&fetch_step.step);
         // TODO: this should use zig_exe from std.Build
         // codegen should store a hash in a comment
         // this would be hash of the exe that created the file
@@ -173,10 +176,10 @@ pub fn build(b: *Builder) !void {
         // but does not run it.
         const unit_tests = b.addTest(.{
             .root_source_file = .{ .path = "src/aws.zig" },
-            .target = t,
+            .target = b.resolveTargetQuery(t),
             .optimize = optimize,
         });
-        unit_tests.addModule("smithy", smithy_dep.module("smithy"));
+        unit_tests.root_module.addImport("smithy", smithy_dep.module("smithy"));
         unit_tests.step.dependOn(gen_step);
 
         const run_unit_tests = b.addRunArtifact(unit_tests);
@@ -186,49 +189,3 @@ pub fn build(b: *Builder) !void {
     }
     b.installArtifact(exe);
 }
-const FetchStep = struct {
-    step: std.Build.Step,
-    url: []const u8,
-    hash: ?[]const u8,
-
-    pub fn create(owner: *std.Build, url: []const u8, hash: ?[]const u8) *FetchStep {
-        const fs = owner.allocator.create(FetchStep) catch @panic("OOM");
-        fs.* = .{
-            .step = std.Build.Step.init(.{
-                .id = .custom,
-                .name = "FetchStep",
-                .owner = owner,
-                .makeFn = make,
-            }),
-            .url = url,
-            .hash = hash,
-        };
-        return fs;
-    }
-
-    fn make(step: *std.Build.Step, prog_node: *std.Progress.Node) !void {
-        const b = step.owner;
-        const self = @fieldParentPtr(FetchStep, "step", step);
-
-        const alloc = b.allocator;
-        var http_client: std.http.Client = .{ .allocator = alloc };
-        defer http_client.deinit();
-
-        var thread_pool: std.Thread.Pool = undefined;
-        try thread_pool.init(.{ .allocator = alloc });
-        defer thread_pool.deinit();
-        const pkg = try Package.fetchAndUnpack(
-            &thread_pool,
-            &http_client,
-            b.global_cache_root,
-            .{
-                .url = self.url,
-                .hash = self.hash,
-            },
-            self.url,
-            prog_node,
-        );
-        defer alloc.destroy(pkg);
-        defer pkg.deinit();
-    }
-};

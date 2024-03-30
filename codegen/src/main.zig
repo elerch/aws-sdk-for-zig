@@ -17,7 +17,7 @@ pub fn main() anyerror!void {
 
     var output_dir = std.fs.cwd();
     defer if (output_dir.fd > 0) output_dir.close();
-    var models_dir: ?std.fs.IterableDir = null;
+    var models_dir: ?std.fs.Dir = null;
     defer if (models_dir) |*m| m.close();
     for (args, 0..) |arg, i| {
         if (std.mem.eql(u8, "--help", arg) or
@@ -31,7 +31,7 @@ pub fn main() anyerror!void {
         if (std.mem.eql(u8, "--output", arg))
             output_dir = try output_dir.makeOpenPath(args[i + 1], .{});
         if (std.mem.eql(u8, "--models", arg))
-            models_dir = try std.fs.cwd().openIterableDir(args[i + 1], .{});
+            models_dir = try std.fs.cwd().openDir(args[i + 1], .{ .iterate = true });
     }
     // TODO: Seems like we should remove this in favor of a package
     try output_dir.writeFile("json.zig", json_zig);
@@ -75,7 +75,7 @@ pub fn main() anyerror!void {
             defer cwd.close();
             defer cwd.setAsCwd() catch unreachable;
 
-            try m.dir.setAsCwd();
+            try m.setAsCwd();
             try processDirectories(m, output_dir);
         }
     }
@@ -87,7 +87,7 @@ const OutputManifest = struct {
     model_dir_hash_digest: [Hasher.hex_multihash_len]u8,
     output_dir_hash_digest: [Hasher.hex_multihash_len]u8,
 };
-fn processDirectories(models_dir: std.fs.IterableDir, output_dir: std.fs.Dir) !void {
+fn processDirectories(models_dir: std.fs.Dir, output_dir: std.fs.Dir) !void {
     // Let's get ready to hash!!
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
@@ -131,15 +131,15 @@ fn processDirectories(models_dir: std.fs.IterableDir, output_dir: std.fs.Dir) !v
 }
 
 var model_digest: ?[Hasher.hex_multihash_len]u8 = null;
-fn calculateDigests(models_dir: std.fs.IterableDir, output_dir: std.fs.Dir, thread_pool: *std.Thread.Pool) !OutputManifest {
+fn calculateDigests(models_dir: std.fs.Dir, output_dir: std.fs.Dir, thread_pool: *std.Thread.Pool) !OutputManifest {
     const model_hash = if (model_digest) |m| m[0..Hasher.digest_len].* else try Hasher.computeDirectoryHash(thread_pool, models_dir, @constCast(&Hasher.ComputeDirectoryOptions{
         .isIncluded = struct {
-            pub fn include(entry: std.fs.IterableDir.Walker.WalkerEntry) bool {
+            pub fn include(entry: std.fs.Dir.Walker.WalkerEntry) bool {
                 return std.mem.endsWith(u8, entry.basename, ".json");
             }
         }.include,
         .isExcluded = struct {
-            pub fn exclude(entry: std.fs.IterableDir.Walker.WalkerEntry) bool {
+            pub fn exclude(entry: std.fs.Dir.Walker.WalkerEntry) bool {
                 _ = entry;
                 return false;
             }
@@ -148,14 +148,14 @@ fn calculateDigests(models_dir: std.fs.IterableDir, output_dir: std.fs.Dir, thre
     }));
     if (verbose) std.log.info("Model directory hash: {s}", .{model_digest orelse Hasher.hexDigest(model_hash)});
 
-    const output_hash = try Hasher.computeDirectoryHash(thread_pool, try output_dir.openIterableDir(".", .{}), @constCast(&Hasher.ComputeDirectoryOptions{
+    const output_hash = try Hasher.computeDirectoryHash(thread_pool, try output_dir.openDir(".", .{ .iterate = true }), @constCast(&Hasher.ComputeDirectoryOptions{
         .isIncluded = struct {
-            pub fn include(entry: std.fs.IterableDir.Walker.WalkerEntry) bool {
+            pub fn include(entry: std.fs.Dir.Walker.WalkerEntry) bool {
                 return std.mem.endsWith(u8, entry.basename, ".zig");
             }
         }.include,
         .isExcluded = struct {
-            pub fn exclude(entry: std.fs.IterableDir.Walker.WalkerEntry) bool {
+            pub fn exclude(entry: std.fs.Dir.Walker.WalkerEntry) bool {
                 _ = entry;
                 return false;
             }
