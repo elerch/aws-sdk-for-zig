@@ -3,7 +3,7 @@ AWS SDK for Zig
 
 [Last Mach Nominated Zig Version](https://machengine.org/about/nominated-zig/):
 
-[![Build Status: Zig 0.12.0-dev.2063+804cee3b9](https://actions-status.lerch.org/lobo/aws-sdk-for-zig/zig-mach)](https://git.lerch.org/lobo/aws-sdk-for-zig/actions?workflow=zig-mach.yaml&state=closed)
+[![Build Status: Zig 0.12.0-dev.3180+83e578a18](https://actions-status.lerch.org/lobo/aws-sdk-for-zig/zig-mach)](https://git.lerch.org/lobo/aws-sdk-for-zig/actions?workflow=zig-mach.yaml&state=closed)
 
 [Nightly Zig](https://ziglang.org/download/):
 
@@ -30,7 +30,7 @@ Zig-Develop Branch
 ------------------
 
 This branch is intended for use with the in-development version of Zig. This
-starts with 0.12.0-dev.2150+63de8a598. I will try to keep this branch up to date
+starts with 0.12.0-dev.3180+83e578a18. I will try to keep this branch up to date
 with latest, but with a special eye towards aligning with [Mach Engine's Nominated
 Zig Versions](https://machengine.org/about/nominated-zig/). As nightly zig versions
 disappear off the downloads page (and back end server), we can use the mirroring
