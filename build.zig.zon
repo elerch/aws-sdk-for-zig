@@ -5,8 +5,8 @@
 
     .dependencies = .{
         .smithy = .{
-            .url = "https://git.lerch.org/lobo/smithy/archive/17f115d9c60ce598a314b18ae89828eef2955915.tar.gz",
-            .hash = "1220dbec78f1a5188d9e4b7a0df885cbb363d7625ceae39d0e05567d4adbc6fb9786",
+            .url = "https://git.lerch.org/lobo/smithy/archive/0a54b5a3de67309417cf7c7dce8f8651cb2054f2.tar.gz",
+            .hash = "1220960423173015a19837e676bdb78cfcf2e09965b6b45c6c5514989d86b0c1f8d2",
         },
         .models = .{
             .url = "https://github.com/aws/aws-sdk-go-v2/archive/58cf6509525a12d64fd826da883bfdbacbd2f00e.tar.gz",
