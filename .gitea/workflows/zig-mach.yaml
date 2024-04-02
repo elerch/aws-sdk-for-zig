@@ -35,7 +35,7 @@ jobs:
           ln -s /usr/local/"${file%%.tar.xz}"/zig /usr/local/bin/zig
           zig version
       - name: Run tests
-        run: zig build test --verbose
+        run: zig build -j1 test --verbose
       - name: Build example
         run: ( cd example && zig build ) # Make sure example builds
       # Zig package manager expects everything to be inside a directory in the archive,
