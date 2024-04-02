@@ -44,7 +44,7 @@ pub const Options = struct {
     signing_time: ?i64 = null,
 };
 
-pub const Header = base.Header;
+pub const Header = std.http.Header;
 pub const HttpRequest = base.Request;
 pub const HttpResult = base.Result;
 
@@ -64,11 +64,11 @@ const EndPoint = struct {
 };
 pub const AwsHttp = struct {
     allocator: std.mem.Allocator,
-    proxy: ?std.http.Client.HttpProxy,
+    proxy: ?std.http.Client.Proxy,
 
     const Self = @This();
 
-    pub fn init(allocator: std.mem.Allocator, proxy: ?std.http.Client.HttpProxy) Self {
+    pub fn init(allocator: std.mem.Allocator, proxy: ?std.http.Client.Proxy) Self {
         return Self{
             .allocator = allocator,
             .proxy = proxy,
@@ -149,7 +149,7 @@ pub const AwsHttp = struct {
         // We will use endpoint instead
         request_cp.path = endpoint.path;
 
-        var request_headers = std.ArrayList(base.Header).init(self.allocator);
+        var request_headers = std.ArrayList(std.http.Header).init(self.allocator);
         defer request_headers.deinit();
 
         const len = try addHeaders(self.allocator, &request_headers, endpoint.host, request_cp.body, request_cp.content_type, request_cp.headers);
@@ -163,108 +163,75 @@ pub const AwsHttp = struct {
             }
         }
 
-        var headers = std.http.Headers.init(self.allocator);
+        var headers = std.ArrayList(std.http.Header).init(self.allocator);
         defer headers.deinit();
         for (request_cp.headers) |header|
-            try headers.append(header.name, header.value);
+            try headers.append(.{ .name = header.name, .value = header.value });
         log.debug("All Request Headers:", .{});
-        for (headers.list.items) |h| {
+        for (headers.items) |h| {
             log.debug("\t{s}: {s}", .{ h.name, h.value });
         }
 
         const url = try std.fmt.allocPrint(self.allocator, "{s}{s}{s}", .{ endpoint.uri, request_cp.path, request_cp.query });
         defer self.allocator.free(url);
         log.debug("Request url: {s}", .{url});
-        var cl = std.http.Client{ .allocator = self.allocator, .proxy = self.proxy };
+        // TODO: Fix this proxy stuff. This is all a kludge just to compile, but std.http.Client has it all built in now
+        var cl = std.http.Client{ .allocator = self.allocator, .https_proxy = if (self.proxy) |*p| @constCast(p) else null };
         defer cl.deinit(); // TODO: Connection pooling
-        //
-        // var req = try zfetch.Request.init(self.allocator, url, self.trust_chain);
-        // defer req.deinit();
 
         const method = std.meta.stringToEnum(std.http.Method, request_cp.method).?;
-        // std.Uri has a format function here that is used by start() (below)
-        // to escape the string we're about to send. But we don't want that...
-        // we need the control, because the signing above relies on the url above.
-        // We can't seem to have our cake and eat it too, because we need escaped
-        // ':' characters, but if we escape them, we'll get them double encoded.
-        // If we don't escape them, they won't get encoded at all. I believe the
-        // only answer may be to copy the Request.start function from the
-        // standard library and tweak the print statements such that they don't
-        // escape (but do still handle full uri (in proxy) vs path only (normal)
+        var server_header_buffer: [16 * 1024]u8 = undefined;
+        var resp_payload = std.ArrayList(u8).init(self.allocator);
+        defer resp_payload.deinit();
+        const req = try cl.fetch(.{
+            .server_header_buffer = &server_header_buffer,
+            .method = method,
+            .payload = if (request_cp.body.len > 0) request_cp.body else null,
+            .response_storage = .{ .dynamic = &resp_payload },
+            .raw_uri = true,
+            .location = .{ .url = url },
+            .extra_headers = headers.items,
+        });
+        // TODO: Need to test for payloads > 2^14. I believe one of our tests does this, but not sure
+        // if (request_cp.body.len > 0) {
+        //     // Workaround for https://github.com/ziglang/zig/issues/15626
+        //     const max_bytes: usize = 1 << 14;
+        //     var inx: usize = 0;
+        //     while (request_cp.body.len > inx) {
+        //         try req.writeAll(request_cp.body[inx..@min(request_cp.body.len, inx + max_bytes)]);
+        //         inx += max_bytes;
+        //     }
         //
-        // Bug report filed here:
-        // https://github.com/ziglang/zig/issues/17015
-        //
-        // https://github.com/ziglang/zig/blob/0.11.0/lib/std/http/Client.zig#L538-L636
-        //
-        // Look at lines 551 and 553:
-        // https://github.com/ziglang/zig/blob/0.11.0/lib/std/http/Client.zig#L551
-        //
-        // This ends up executing the format function here:
-        // https://github.com/ziglang/zig/blob/0.11.0/lib/std/http/Client.zig#L551
-        //
-        // Which is basically the what we want, without the escaping on lines
-        // 249, 254, and 260:
-        // https://github.com/ziglang/zig/blob/0.11.0/lib/std/Uri.zig#L249
-        //
-        // const unescaped_url = try std.Uri.unescapeString(self.allocator, url);
-        // defer self.allocator.free(unescaped_url);
-        var req = try cl.request(method, try std.Uri.parse(url), headers, .{});
-        defer req.deinit();
-        if (request_cp.body.len > 0)
-            req.transfer_encoding = .{ .content_length = request_cp.body.len };
-        try @import("http_client_17015_issue.zig").start(&req);
-        // try req.start();
-        if (request_cp.body.len > 0) {
-            // Workaround for https://github.com/ziglang/zig/issues/15626
-            const max_bytes: usize = 1 << 14;
-            var inx: usize = 0;
-            while (request_cp.body.len > inx) {
-                try req.writeAll(request_cp.body[inx..@min(request_cp.body.len, inx + max_bytes)]);
-                inx += max_bytes;
-            }
-
-            try req.finish();
-        }
-        try req.wait();
+        //     try req.finish();
+        // }
+        // try req.wait();
 
         // TODO: Timeout - is this now above us?
         log.debug(
             "Request Complete. Response code {d}: {?s}",
-            .{ @intFromEnum(req.response.status), req.response.status.phrase() },
+            .{ @intFromEnum(req.status), req.status.phrase() },
         );
         log.debug("Response headers:", .{});
-        var resp_headers = try std.ArrayList(Header).initCapacity(
+        var resp_headers = std.ArrayList(Header).init(
             self.allocator,
-            req.response.headers.list.items.len,
         );
         defer resp_headers.deinit();
-        var content_length: usize = 0;
-        for (req.response.headers.list.items) |h| {
+        var it = std.http.HeaderIterator.init(server_header_buffer[0..]);
+        while (it.next()) |h| { // even though we don't expect to fill the buffer,
+            // we don't get a length, but looks via stdlib source
+            // it should be ok to call next on the undefined memory
             log.debug("    {s}: {s}", .{ h.name, h.value });
-            resp_headers.appendAssumeCapacity(.{
+            try resp_headers.append(.{
                 .name = try (self.allocator.dupe(u8, h.name)),
                 .value = try (self.allocator.dupe(u8, h.value)),
             });
-            if (content_length == 0 and std.ascii.eqlIgnoreCase("content-length", h.name))
-                content_length = std.fmt.parseInt(usize, h.value, 10) catch 0;
         }
 
-        var response_data: []u8 =
-            if (req.response.transfer_encoding) |_| // the only value here is "chunked"
-            try req.reader().readAllAlloc(self.allocator, std.math.maxInt(usize))
-        else blk: {
-            // content length
-            const tmp_data = try self.allocator.alloc(u8, content_length);
-            errdefer self.allocator.free(tmp_data);
-            _ = try req.readAll(tmp_data);
-            break :blk tmp_data;
-        };
-        log.debug("raw response body:\n{s}", .{response_data});
+        log.debug("raw response body:\n{s}", .{resp_payload.items});
 
         const rc = HttpResult{
-            .response_code = @intFromEnum(req.response.status),
-            .body = response_data,
+            .response_code = @intFromEnum(req.status),
+            .body = try resp_payload.toOwnedSlice(),
             .headers = try resp_headers.toOwnedSlice(),
             .allocator = self.allocator,
         };
@@ -277,7 +244,16 @@ fn getRegion(service: []const u8, region: []const u8) []const u8 {
     return region;
 }
 
-fn addHeaders(allocator: std.mem.Allocator, headers: *std.ArrayList(base.Header), host: []const u8, body: []const u8, content_type: []const u8, additional_headers: []Header) !?[]const u8 {
+fn addHeaders(allocator: std.mem.Allocator, headers: *std.ArrayList(std.http.Header), host: []const u8, body: []const u8, content_type: []const u8, additional_headers: []const Header) !?[]const u8 {
+    // We don't need allocator and body because they were to add a
+    // Content-Length header. But that is being added by the client send()
+    // function, so we don't want it on the request twice. But I also feel
+    // pretty strongly that send() should be providing us control, because
+    // I think if we don't add it here, it won't get signed, and we would
+    // really prefer it to be signed. So, we will wait and watch for this
+    // situation to change in stdlib
+    _ = allocator;
+    _ = body;
     var has_content_type = false;
     for (additional_headers) |h| {
         if (std.ascii.eqlIgnoreCase(h.name, "Content-Type")) {
@@ -291,11 +267,6 @@ fn addHeaders(allocator: std.mem.Allocator, headers: *std.ArrayList(base.Header)
     if (!has_content_type)
         try headers.append(.{ .name = "Content-Type", .value = content_type });
     try headers.appendSlice(additional_headers);
-    if (body.len > 0) {
-        const len = try std.fmt.allocPrint(allocator, "{d}", .{body.len});
-        try headers.append(.{ .name = "Content-Length", .value = len });
-        return len;
-    }
     return null;
 }
 

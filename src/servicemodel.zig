@@ -21,7 +21,7 @@ pub fn Services(comptime service_imports: anytype) type {
     // finally, generate the type
     return @Type(.{
         .Struct = .{
-            .layout = .Auto,
+            .layout = .Auto, // will be .auto in the future
             .fields = &fields,
             .decls = &[_]std.builtin.Type.Declaration{},
             .is_tuple = false,

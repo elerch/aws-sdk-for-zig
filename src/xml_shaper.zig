@@ -219,9 +219,9 @@ fn parseInternal(comptime T: type, element: *xml.Element, options: ParseOptions)
 
             log.debug("Processing fields in struct: {s}", .{@typeName(T)});
             inline for (struct_info.fields, 0..) |field, i| {
-                var name = field.name;
+                var name: []const u8 = field.name;
                 var found_value = false;
-                if (comptime std.meta.trait.hasFn("fieldNameFor")(T))
+                if (comptime std.meta.hasFn(T, "fieldNameFor"))
                     name = r.fieldNameFor(field.name);
                 log.debug("Field name: {s}, Element: {s}, Adjusted field name: {s}", .{ field.name, element.tag, name });
                 var iterator = element.findChildrenByTag(name);

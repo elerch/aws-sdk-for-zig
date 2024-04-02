@@ -31,7 +31,7 @@ pub const services = servicemodel.services;
 pub const Services = servicemodel.Services;
 
 pub const ClientOptions = struct {
-    proxy: ?std.http.Client.HttpProxy = null,
+    proxy: ?std.http.Client.Proxy = null,
 };
 pub const Client = struct {
     allocator: std.mem.Allocator,
@@ -226,7 +226,7 @@ pub fn Request(comptime request_action: anytype) type {
             defer buffer.deinit();
             const writer = buffer.writer();
             try url.encode(options.client.allocator, request, writer, .{
-                .field_name_transformer = &queryFieldTransformer,
+                .field_name_transformer = queryFieldTransformer,
             });
             const continuation = if (buffer.items.len > 0) "&" else "";
 
@@ -734,7 +734,7 @@ fn headersFor(allocator: std.mem.Allocator, request: anytype) ![]awshttp.Header 
     return headers.toOwnedSlice();
 }
 
-fn freeHeadersFor(allocator: std.mem.Allocator, request: anytype, headers: []awshttp.Header) void {
+fn freeHeadersFor(allocator: std.mem.Allocator, request: anytype, headers: []const awshttp.Header) void {
     if (!@hasDecl(@TypeOf(request), "http_header")) return;
     const http_header = @TypeOf(request).http_header;
     const fields = std.meta.fields(@TypeOf(http_header));
@@ -761,7 +761,7 @@ fn firstJsonKey(data: []const u8) []const u8 {
     log.debug("First json key: {s}", .{key});
     return key;
 }
-fn isJsonResponse(headers: []awshttp.Header) !bool {
+fn isJsonResponse(headers: []const awshttp.Header) !bool {
     // EC2 ignores our accept type, but technically query protocol only
     // returns XML as well. So, we'll ignore the protocol here and just
     // look at the return type
@@ -919,8 +919,7 @@ fn safeFree(allocator: std.mem.Allocator, obj: anytype) void {
         else => {},
     }
 }
-fn queryFieldTransformer(allocator: std.mem.Allocator, field_name: []const u8, options: url.EncodingOptions) anyerror![]const u8 {
-    _ = options;
+fn queryFieldTransformer(allocator: std.mem.Allocator, field_name: []const u8) anyerror![]const u8 {
     return try case.snakeToPascal(allocator, field_name);
 }
 
@@ -1363,16 +1362,17 @@ test {
 }
 const TestOptions = struct {
     allocator: std.mem.Allocator,
+    arena: ?*std.heap.ArenaAllocator = null,
     server_port: ?u16 = null,
     server_remaining_requests: usize = 1,
     server_response: []const u8 = "unset",
     server_response_status: std.http.Status = .ok,
-    server_response_headers: [][2][]const u8 = &[_][2][]const u8{},
+    server_response_headers: []const std.http.Header = &.{},
     server_response_transfer_encoding: ?std.http.TransferEncoding = null,
     request_body: []u8 = "",
     request_method: std.http.Method = undefined,
     request_target: []const u8 = undefined,
-    request_headers: *std.http.Headers = undefined,
+    request_headers: []std.http.Header = undefined,
     test_server_runtime_uri: ?[]u8 = null,
     server_ready: bool = false,
     requests_processed: usize = 0,
@@ -1380,7 +1380,7 @@ const TestOptions = struct {
     const Self = @This();
 
     fn expectHeader(self: *Self, name: []const u8, value: []const u8) !void {
-        for (self.request_headers.list.items) |h|
+        for (self.request_headers) |h|
             if (std.ascii.eqlIgnoreCase(name, h.name) and
                 std.mem.eql(u8, value, h.value)) return;
         return error.HeaderOrValueNotFound;
@@ -1391,17 +1391,6 @@ const TestOptions = struct {
         while (!self.server_ready)
             std.time.sleep(100);
     }
-
-    fn deinit(self: Self) void {
-        if (self.requests_processed > 0) {
-            self.allocator.free(self.request_body);
-            self.allocator.free(self.request_target);
-            self.request_headers.deinit();
-            self.allocator.destroy(self.request_headers);
-        }
-        if (self.test_server_runtime_uri) |_|
-            self.allocator.free(self.test_server_runtime_uri.?);
-    }
 };
 
 /// This starts a test server. We're not testing the server itself,
@@ -1409,16 +1398,19 @@ const TestOptions = struct {
 /// whole thing so we can just deallocate everything at once at the end,
 /// leaks be damned
 fn threadMain(options: *TestOptions) !void {
-    var server = std.http.Server.init(options.allocator, .{ .reuse_address = true });
-    // defer server.deinit();
+    // https://github.com/ziglang/zig/blob/d2be725e4b14c33dbd39054e33d926913eee3cd4/lib/compiler/std-docs.zig#L22-L54
+
+    options.arena = try options.allocator.create(std.heap.ArenaAllocator);
+    options.arena.?.* = std.heap.ArenaAllocator.init(options.allocator);
+    const allocator = options.arena.?.allocator();
+    options.allocator = allocator;
 
     const address = try std.net.Address.parseIp("127.0.0.1", 0);
-    try server.listen(address);
-    options.server_port = server.socket.listen_address.in.getPort();
-
+    var http_server = try address.listen(.{});
+    options.server_port = http_server.listen_address.in.getPort();
+    // TODO: remove
     options.test_server_runtime_uri = try std.fmt.allocPrint(options.allocator, "http://127.0.0.1:{d}", .{options.server_port.?});
     log.debug("server listening at {s}", .{options.test_server_runtime_uri.?});
-    defer server.deinit();
     log.info("starting server thread, tid {d}", .{std.Thread.getCurrentId()});
     // var arena = std.heap.ArenaAllocator.init(options.allocator);
     // defer arena.deinit();
@@ -1427,7 +1419,7 @@ fn threadMain(options: *TestOptions) !void {
     // when it's time to shut down
     while (options.server_remaining_requests > 0) {
         options.server_remaining_requests -= 1;
-        processRequest(options, &server) catch |e| {
+        processRequest(options, &http_server) catch |e| {
             log.err("Unexpected error processing request: {any}", .{e});
             if (@errorReturnTrace()) |trace| {
                 std.debug.dumpStackTrace(trace.*);
@@ -1436,74 +1428,61 @@ fn threadMain(options: *TestOptions) !void {
     }
 }
 
-fn processRequest(options: *TestOptions, server: *std.http.Server) !void {
+fn processRequest(options: *TestOptions, net_server: *std.net.Server) !void {
     options.server_ready = true;
     errdefer options.server_ready = false;
     log.debug(
         "tid {d} (server): server waiting to accept. requests remaining: {d}",
         .{ std.Thread.getCurrentId(), options.server_remaining_requests + 1 },
     );
-    var res = try server.accept(.{ .allocator = options.allocator });
-    options.server_ready = false;
-    defer res.deinit();
-    defer if (res.headers.owned and res.headers.list.items.len > 0) res.headers.deinit();
-    defer _ = res.reset();
-    try res.wait(); // wait for client to send a complete request head
+    var connection = try net_server.accept();
+    defer connection.stream.close();
+    var read_buffer: [1024 * 16]u8 = undefined;
+    var http_server = std.http.Server.init(connection, &read_buffer);
+    while (http_server.state == .ready) {
+        var request = http_server.receiveHead() catch |err| switch (err) {
+            error.HttpConnectionClosing => return,
+            else => {
+                std.log.err("closing http connection: {s}", .{@errorName(err)});
+                std.log.debug("Error occurred from this request: \n{s}", .{read_buffer[0..http_server.read_buffer_len]});
+                return;
+            },
+        };
+        try serveRequest(options, &request);
+    }
+}
 
-    const errstr = "Internal Server Error\n";
-    var errbuf: [errstr.len]u8 = undefined;
-    @memcpy(&errbuf, errstr);
-    var response_bytes: []const u8 = errbuf[0..];
+fn serveRequest(options: *TestOptions, request: *std.http.Server.Request) !void {
+    options.server_ready = false;
 
     options.requests_processed += 1;
-    if (res.request.content_length) |l|
-        options.request_body = try res.reader().readAllAlloc(options.allocator, @as(usize, @intCast(l)))
-    else
-        options.request_body = try options.allocator.dupe(u8, "");
-    options.request_method = res.request.method;
-    options.request_target = try options.allocator.dupe(u8, res.request.target);
-    options.request_headers = try options.allocator.create(std.http.Headers);
-    options.request_headers.allocator = options.allocator;
-    options.request_headers.list = .{};
-    options.request_headers.index = .{};
-    options.request_headers.owned = true;
-    for (res.request.headers.list.items) |f|
-        try options.request_headers.append(f.name, f.value);
+    options.request_body = try (try request.reader()).readAllAlloc(options.allocator, std.math.maxInt(usize));
+    options.request_method = request.head.method;
+    options.request_target = try options.allocator.dupe(u8, request.head.target);
+    var req_headers = std.ArrayList(std.http.Header).init(options.allocator);
+    defer req_headers.deinit();
+    var it = request.iterateHeaders();
+    while (it.next()) |f| {
+        const h = try options.allocator.create(std.http.Header);
+        h.* = .{ .name = try options.allocator.dupe(u8, f.name), .value = try options.allocator.dupe(u8, f.value) };
+        try req_headers.append(h.*);
+    }
+    options.request_headers = try req_headers.toOwnedSlice();
     log.debug(
         "tid {d} (server): {d} bytes read from request",
         .{ std.Thread.getCurrentId(), options.request_body.len },
     );
 
     // try response.headers.append("content-type", "text/plain");
-    response_bytes = serve(options, &res) catch |e| brk: {
-        res.status = .internal_server_error;
-        // TODO: more about this particular request
-        log.err("Unexpected error from executor processing request: {any}", .{e});
-        if (@errorReturnTrace()) |trace| {
-            std.debug.dumpStackTrace(trace.*);
-        }
-        break :brk "Unexpected error generating request to lambda";
-    };
-    if (options.server_response_transfer_encoding == null)
-        res.transfer_encoding = .{ .content_length = response_bytes.len }
-    else
-        res.transfer_encoding = .chunked;
+    try request.respond(options.server_response, .{
+        .status = options.server_response_status,
+        .extra_headers = options.server_response_headers,
+    });
 
-    try res.do();
-    _ = try res.writer().writeAll(response_bytes);
-    try res.finish();
     log.debug(
         "tid {d} (server): sent response",
         .{std.Thread.getCurrentId()},
     );
-}
-
-fn serve(options: *TestOptions, res: *std.http.Server.Response) ![]const u8 {
-    res.status = options.server_response_status;
-    for (options.server_response_headers) |h|
-        try res.headers.append(h[0], h[1]);
-    // try res.headers.append("content-length", try std.fmt.allocPrint(allocator, "{d}", .{server_response.len}));
-    return options.server_response;
 }
 
 ////////////////////////////////////////////////////////////////////////
@@ -1527,10 +1506,10 @@ const TestSetup = struct {
     const signing_time =
         date.dateTimeToTimestamp(date.parseIso8601ToDateTime("20230908T170252Z") catch @compileError("Cannot parse date")) catch @compileError("Cannot parse date");
 
-    fn init(allocator: std.mem.Allocator, options: TestOptions) Self {
+    fn init(options: TestOptions) Self {
         return .{
-            .allocator = allocator,
             .request_options = options,
+            .allocator = options.allocator,
         };
     }
 
@@ -1542,7 +1521,10 @@ const TestSetup = struct {
         );
         self.started = true;
         try self.request_options.waitForReady();
+        // Not sure why we're getting sprayed here, but we have an arena allocator, and this
+        // is testing, so yolo
         awshttp.endpoint_override = self.request_options.test_server_runtime_uri;
+        log.debug("endpoint override set to {?s}", .{awshttp.endpoint_override});
         self.creds = aws_auth.Credentials.init(
             self.allocator,
             try self.allocator.dupe(u8, "ACCESS"),
@@ -1563,9 +1545,11 @@ const TestSetup = struct {
         self.server_thread.join();
     }
 
-    fn deinit(self: Self) void {
-        self.request_options.deinit();
-
+    fn deinit(self: *Self) void {
+        if (self.request_options.arena) |a| {
+            a.deinit();
+            self.allocator.destroy(a);
+        }
         if (!self.started) return;
         awshttp.endpoint_override = null;
         // creds.deinit(); Creds will get deinited in the course of the call. We don't want to do it twice
@@ -1576,15 +1560,15 @@ const TestSetup = struct {
 
 test "query_no_input: sts getCallerIdentity comptime" {
     const allocator = std.testing.allocator;
-    var test_harness = TestSetup.init(allocator, .{
+    var test_harness = TestSetup.init(.{
         .allocator = allocator,
         .server_response =
         \\{"GetCallerIdentityResponse":{"GetCallerIdentityResult":{"Account":"123456789012","Arn":"arn:aws:iam::123456789012:user/admin","UserId":"AIDAYAM4POHXHRVANDQBQ"},"ResponseMetadata":{"RequestId":"8f0d54da-1230-40f7-b4ac-95015c4b84cd"}}}
         ,
-        .server_response_headers = @constCast(&[_][2][]const u8{
-            .{ "Content-Type", "application/json" },
-            .{ "x-amzn-RequestId", "8f0d54da-1230-40f7-b4ac-95015c4b84cd" },
-        }),
+        .server_response_headers = &.{
+            .{ .name = "Content-Type", .value = "application/json" },
+            .{ .name = "x-amzn-RequestId", .value = "8f0d54da-1230-40f7-b4ac-95015c4b84cd" },
+        },
     });
     defer test_harness.deinit();
     const options = try test_harness.start();
@@ -1611,7 +1595,7 @@ test "query_no_input: sts getCallerIdentity comptime" {
 test "query_with_input: sts getAccessKeyInfo runtime" {
     // sqs switched from query to json in aws sdk for go v2 commit f5a08768ef820ff5efd62a49ba50c61c9ca5dbcb
     const allocator = std.testing.allocator;
-    var test_harness = TestSetup.init(allocator, .{
+    var test_harness = TestSetup.init(.{
         .allocator = allocator,
         .server_response =
         \\<GetAccessKeyInfoResponse xmlns="https://sts.amazonaws.com/doc/2011-06-15/">
@@ -1623,10 +1607,10 @@ test "query_with_input: sts getAccessKeyInfo runtime" {
         \\  </ResponseMetadata>
         \\</GetAccessKeyInfoResponse>
         ,
-        .server_response_headers = @constCast(&[_][2][]const u8{
-            .{ "Content-Type", "text/xml" },
-            .{ "x-amzn-RequestId", "ec85bf29-1ef0-459a-930e-6446dd14a286" },
-        }),
+        .server_response_headers = &.{
+            .{ .name = "Content-Type", .value = "text/xml" },
+            .{ .name = "x-amzn-RequestId", .value = "ec85bf29-1ef0-459a-930e-6446dd14a286" },
+        },
     });
     defer test_harness.deinit();
     const options = try test_harness.start();
@@ -1649,15 +1633,15 @@ test "query_with_input: sts getAccessKeyInfo runtime" {
 }
 test "json_1_0_query_with_input: dynamodb listTables runtime" {
     const allocator = std.testing.allocator;
-    var test_harness = TestSetup.init(allocator, .{
+    var test_harness = TestSetup.init(.{
         .allocator = allocator,
         .server_response =
         \\{"LastEvaluatedTableName":"Customer","TableNames":["Customer"]}
         ,
-        .server_response_headers = @constCast(&[_][2][]const u8{
-            .{ "Content-Type", "application/json" },
-            .{ "x-amzn-RequestId", "QBI72OUIN8U9M9AG6PCSADJL4JVV4KQNSO5AEMVJF66Q9ASUAAJG" },
-        }),
+        .server_response_headers = &.{
+            .{ .name = "Content-Type", .value = "application/json" },
+            .{ .name = "x-amzn-RequestId", .value = "QBI72OUIN8U9M9AG6PCSADJL4JVV4KQNSO5AEMVJF66Q9ASUAAJG" },
+        },
     });
     defer test_harness.deinit();
     const options = try test_harness.start();
@@ -1685,15 +1669,15 @@ test "json_1_0_query_with_input: dynamodb listTables runtime" {
 
 test "json_1_0_query_no_input: dynamodb listTables runtime" {
     const allocator = std.testing.allocator;
-    var test_harness = TestSetup.init(allocator, .{
+    var test_harness = TestSetup.init(.{
         .allocator = allocator,
         .server_response =
         \\{"AccountMaxReadCapacityUnits":80000,"AccountMaxWriteCapacityUnits":80000,"TableMaxReadCapacityUnits":40000,"TableMaxWriteCapacityUnits":40000}
         ,
-        .server_response_headers = @constCast(&[_][2][]const u8{
-            .{ "Content-Type", "application/json" },
-            .{ "x-amzn-RequestId", "QBI72OUIN8U9M9AG6PCSADJL4JVV4KQNSO5AEMVJF66Q9ASUAAJG" },
-        }),
+        .server_response_headers = &.{
+            .{ .name = "Content-Type", .value = "application/json" },
+            .{ .name = "x-amzn-RequestId", .value = "QBI72OUIN8U9M9AG6PCSADJL4JVV4KQNSO5AEMVJF66Q9ASUAAJG" },
+        },
     });
     defer test_harness.deinit();
     const options = try test_harness.start();
@@ -1714,15 +1698,15 @@ test "json_1_0_query_no_input: dynamodb listTables runtime" {
 }
 test "json_1_1_query_with_input: ecs listClusters runtime" {
     const allocator = std.testing.allocator;
-    var test_harness = TestSetup.init(allocator, .{
+    var test_harness = TestSetup.init(.{
         .allocator = allocator,
         .server_response =
         \\{"clusterArns":["arn:aws:ecs:us-west-2:550620852718:cluster/web-applicationehjaf-cluster"],"nextToken":"czE0Og=="}
         ,
-        .server_response_headers = @constCast(&[_][2][]const u8{
-            .{ "Content-Type", "application/json" },
-            .{ "x-amzn-RequestId", "b2420066-ff67-4237-b782-721c4df60744" },
-        }),
+        .server_response_headers = &.{
+            .{ .name = "Content-Type", .value = "application/json" },
+            .{ .name = "x-amzn-RequestId", .value = "b2420066-ff67-4237-b782-721c4df60744" },
+        },
     });
     defer test_harness.deinit();
     const options = try test_harness.start();
@@ -1748,16 +1732,19 @@ test "json_1_1_query_with_input: ecs listClusters runtime" {
     try std.testing.expectEqualStrings("arn:aws:ecs:us-west-2:550620852718:cluster/web-applicationehjaf-cluster", call.response.cluster_arns.?[0]);
 }
 test "json_1_1_query_no_input: ecs listClusters runtime" {
+    // const old = std.testing.log_level;
+    // defer std.testing.log_level = old;
+    // std.testing.log_level = .debug;
     const allocator = std.testing.allocator;
-    var test_harness = TestSetup.init(allocator, .{
+    var test_harness = TestSetup.init(.{
         .allocator = allocator,
         .server_response =
         \\{"clusterArns":["arn:aws:ecs:us-west-2:550620852718:cluster/web-applicationehjaf-cluster"],"nextToken":"czE0Og=="}
         ,
-        .server_response_headers = @constCast(&[_][2][]const u8{
-            .{ "Content-Type", "application/json" },
-            .{ "x-amzn-RequestId", "e65322b2-0065-45f2-ba37-f822bb5ce395" },
-        }),
+        .server_response_headers = &.{
+            .{ .name = "Content-Type", .value = "application/json" },
+            .{ .name = "x-amzn-RequestId", .value = "e65322b2-0065-45f2-ba37-f822bb5ce395" },
+        },
     });
     defer test_harness.deinit();
     const options = try test_harness.start();
@@ -1782,15 +1769,15 @@ test "json_1_1_query_no_input: ecs listClusters runtime" {
 }
 test "rest_json_1_query_with_input: lambda listFunctions runtime" {
     const allocator = std.testing.allocator;
-    var test_harness = TestSetup.init(allocator, .{
+    var test_harness = TestSetup.init(.{
         .allocator = allocator,
         .server_response =
         \\{"Functions":[{"Description":"AWS CDK resource provider framework - onEvent (DevelopmentFrontendStack-g650u/com.amazonaws.cdk.custom-resources.amplify-asset-deployment-provider/amplify-asset-deployment-handler-provider)","TracingConfig":{"Mode":"PassThrough"},"VpcConfig":null,"SigningJobArn":null,"SnapStart":{"OptimizationStatus":"Off","ApplyOn":"None"},"RevisionId":"0c62fc74-a692-403d-9206-5fcbad406424","LastModified":"2023-03-01T18:13:15.704+0000","FileSystemConfigs":null,"FunctionName":"DevelopmentFrontendStack--amplifyassetdeploymentha-aZqB9IbZLIKU","Runtime":"nodejs14.x","Version":"$LATEST","PackageType":"Zip","LastUpdateStatus":null,"Layers":null,"FunctionArn":"arn:aws:lambda:us-west-2:550620852718:function:DevelopmentFrontendStack--amplifyassetdeploymentha-aZqB9IbZLIKU","KMSKeyArn":null,"MemorySize":128,"ImageConfigResponse":null,"LastUpdateStatusReason":null,"DeadLetterConfig":null,"Timeout":900,"Handler":"framework.onEvent","CodeSha256":"m4tt+M0l3p8bZvxIDj83dwGrwRW6atCfS/q8AiXCD3o=","Role":"arn:aws:iam::550620852718:role/DevelopmentFrontendStack-amplifyassetdeploymentha-1782JF7WAPXZ3","SigningProfileVersionArn":null,"MasterArn":null,"RuntimeVersionConfig":null,"CodeSize":4307,"State":null,"StateReason":null,"Environment":{"Variables":{"USER_ON_EVENT_FUNCTION_ARN":"arn:aws:lambda:us-west-2:550620852718:function:DevelopmentFrontendStack--amplifyassetdeploymenton-X9iZJSCSPYDH","WAITER_STATE_MACHINE_ARN":"arn:aws:states:us-west-2:550620852718:stateMachine:amplifyassetdeploymenthandlerproviderwaiterstatemachineB3C2FCBE-Ltggp5wBcHWO","USER_IS_COMPLETE_FUNCTION_ARN":"arn:aws:lambda:us-west-2:550620852718:function:DevelopmentFrontendStack--amplifyassetdeploymentis-jaHopLrSSARV"},"Error":null},"EphemeralStorage":{"Size":512},"StateReasonCode":null,"LastUpdateStatusReasonCode":null,"Architectures":["x86_64"]}],"NextMarker":"lslTXFcbLQKkb0vP9Kgh5hUL7C3VghELNGbWgZfxrRCk3eiDRMkct7D8EmptWfHSXssPdS7Bo66iQPTMpVOHZgANewpgGgFGGr4pVjd6VgLUO6qPe2EMAuNDBjUTxm8z6N28yhlUwEmKbrAV/m0k5qVzizwoxFwvyruMbuMx9kADFACSslcabxXl3/jDI4rfFnIsUVdzTLBgPF1hzwrE1f3lcdkBvUp+QgY+Pn3w5QuJmwsp/di8COzFemY89GgOHbLNqsrBsgR/ee2eXoJp0ZkKM4EcBK3HokqBzefLfgR02PnfNOdXwqTlhkSPW0TKiKGIYu3Bw7lSNrLd+q3+wEr7ZakqOQf0BVo3FMRhMHlVYgwUJzwi3ActyH2q6fuqGG1sS0B8Oa/prUpe5fmp3VaA3WpazioeHtrKF78JwCi6/nfQsrj/8ZtXGQOxlwEgvT1CIUaF+CdHY3biezrK0tRZNpkCtHnkPtF9lq2U7+UiKXSW9yzxT8P2b0M/Qh4IVdnw4rncQK/doYriAeOdrs1wjMEJnHWq9lAaEyipoxYcVr/z5+yaC6Gwxdg45p9X1vIAaYMf6IZxyFuua43SYi0Ls+IBk4VvpR2io7T0dCxHAr3WAo3D2dm0y8OsbM59"}
         ,
-        .server_response_headers = @constCast(&[_][2][]const u8{
-            .{ "Content-Type", "application/json" },
-            .{ "x-amzn-RequestId", "c4025199-226f-4a16-bb1f-48618e9d2ea6" },
-        }),
+        .server_response_headers = &.{
+            .{ .name = "Content-Type", .value = "application/json" },
+            .{ .name = "x-amzn-RequestId", .value = "c4025199-226f-4a16-bb1f-48618e9d2ea6" },
+        },
     });
     defer test_harness.deinit();
     const options = try test_harness.start();
@@ -1816,13 +1803,13 @@ test "rest_json_1_query_with_input: lambda listFunctions runtime" {
 }
 test "rest_json_1_query_no_input: lambda listFunctions runtime" {
     const allocator = std.testing.allocator;
-    var test_harness = TestSetup.init(allocator, .{
+    var test_harness = TestSetup.init(.{
         .allocator = allocator,
         .server_response = @embedFile("test_rest_json_1_query_no_input.response"),
-        .server_response_headers = @constCast(&[_][2][]const u8{
-            .{ "Content-Type", "application/json" },
-            .{ "x-amzn-RequestId", "b2aad11f-36fc-4d0d-ae92-fe0167fb0f40" },
-        }),
+        .server_response_headers = &.{
+            .{ .name = "Content-Type", .value = "application/json" },
+            .{ .name = "x-amzn-RequestId", .value = "b2aad11f-36fc-4d0d-ae92-fe0167fb0f40" },
+        },
     });
     defer test_harness.deinit();
     const options = try test_harness.start();
@@ -1850,14 +1837,14 @@ test "rest_json_1_query_no_input: lambda listFunctions runtime" {
 }
 test "rest_json_1_work_with_lambda: lambda tagResource (only), to excercise zig issue 17015" {
     const allocator = std.testing.allocator;
-    var test_harness = TestSetup.init(allocator, .{
+    var test_harness = TestSetup.init(.{
         .allocator = allocator,
         .server_response = "",
         .server_response_status = .no_content,
-        .server_response_headers = @constCast(&[_][2][]const u8{
-            .{ "Content-Type", "application/json" },
-            .{ "x-amzn-RequestId", "a521e152-6e32-4e67-9fb3-abc94e34551b" },
-        }),
+        .server_response_headers = &.{
+            .{ .name = "Content-Type", .value = "application/json" },
+            .{ .name = "x-amzn-RequestId", .value = "a521e152-6e32-4e67-9fb3-abc94e34551b" },
+        },
     });
     defer test_harness.deinit();
     const options = try test_harness.start();
@@ -1886,13 +1873,13 @@ test "rest_json_1_work_with_lambda: lambda tagResource (only), to excercise zig 
 }
 test "ec2_query_no_input: EC2 describe regions" {
     const allocator = std.testing.allocator;
-    var test_harness = TestSetup.init(allocator, .{
+    var test_harness = TestSetup.init(.{
         .allocator = allocator,
         .server_response = @embedFile("test_ec2_query_no_input.response"),
-        .server_response_headers = @constCast(&[_][2][]const u8{
-            .{ "Content-Type", "text/xml;charset=UTF-8" },
-            .{ "x-amzn-RequestId", "4cdbdd69-800c-49b5-8474-ae4c17709782" },
-        }),
+        .server_response_headers = &.{
+            .{ .name = "Content-Type", .value = "text/xml;charset=UTF-8" },
+            .{ .name = "x-amzn-RequestId", .value = "4cdbdd69-800c-49b5-8474-ae4c17709782" },
+        },
         .server_response_transfer_encoding = .chunked,
     });
     defer test_harness.deinit();
@@ -1913,13 +1900,13 @@ test "ec2_query_no_input: EC2 describe regions" {
 }
 test "ec2_query_with_input: EC2 describe instances" {
     const allocator = std.testing.allocator;
-    var test_harness = TestSetup.init(allocator, .{
+    var test_harness = TestSetup.init(.{
         .allocator = allocator,
         .server_response = @embedFile("test_ec2_query_with_input.response"),
-        .server_response_headers = @constCast(&[_][2][]const u8{
-            .{ "Content-Type", "text/xml;charset=UTF-8" },
-            .{ "x-amzn-RequestId", "150a14cc-785d-476f-a4c9-2aa4d03b14e2" },
-        }),
+        .server_response_headers = &.{
+            .{ .name = "Content-Type", .value = "text/xml;charset=UTF-8" },
+            .{ .name = "x-amzn-RequestId", .value = "150a14cc-785d-476f-a4c9-2aa4d03b14e2" },
+        },
     });
     defer test_harness.deinit();
     const options = try test_harness.start();
@@ -1943,15 +1930,15 @@ test "ec2_query_with_input: EC2 describe instances" {
 }
 test "rest_xml_no_input: S3 list buckets" {
     const allocator = std.testing.allocator;
-    var test_harness = TestSetup.init(allocator, .{
+    var test_harness = TestSetup.init(.{
         .allocator = allocator,
         .server_response =
         \\<ListAllMyBucketsResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Owner><ID>3367189aa775bd98da38e55093705f2051443c1e775fc0971d6d77387a47c8d0</ID><DisplayName>emilerch+sub1</DisplayName></Owner><Buckets><Bucket><Name>550620852718-backup</Name><CreationDate>2020-06-17T16:26:51.000Z</CreationDate></Bucket><Bucket><Name>amplify-letmework-staging-185741-deployment</Name><CreationDate>2023-03-10T18:57:49.000Z</CreationDate></Bucket><Bucket><Name>aws-cloudtrail-logs-550620852718-224022a7</Name><CreationDate>2021-06-21T18:32:44.000Z</CreationDate></Bucket><Bucket><Name>aws-sam-cli-managed-default-samclisourcebucket-1gy0z00mj47xe</Name><CreationDate>2021-10-05T16:38:07.000Z</CreationDate></Bucket><Bucket><Name>awsomeprojectstack-pipelineartifactsbucketaea9a05-1uzwo6c86ecr</Name><CreationDate>2021-10-05T22:55:09.000Z</CreationDate></Bucket><Bucket><Name>cdk-hnb659fds-assets-550620852718-us-west-2</Name><CreationDate>2023-02-28T21:49:36.000Z</CreationDate></Bucket><Bucket><Name>cf-templates-12iy6putgdxtk-us-west-2</Name><CreationDate>2020-06-26T02:31:59.000Z</CreationDate></Bucket><Bucket><Name>codepipeline-us-west-2-46714083637</Name><CreationDate>2021-09-14T18:43:07.000Z</CreationDate></Bucket><Bucket><Name>elasticbeanstalk-us-west-2-550620852718</Name><CreationDate>2022-04-15T16:22:42.000Z</CreationDate></Bucket><Bucket><Name>lobo-west</Name><CreationDate>2021-06-21T17:17:22.000Z</CreationDate></Bucket><Bucket><Name>lobo-west-2</Name><CreationDate>2021-11-19T20:12:31.000Z</CreationDate></Bucket><Bucket><Name>logging-backup-550620852718-us-east-2</Name><CreationDate>2022-05-29T21:55:16.000Z</CreationDate></Bucket><Bucket><Name>mysfitszj3t6webstack-hostingbucketa91a61fe-1ep3ezkgwpxr0</Name><CreationDate>2023-03-01T04:53:55.000Z</CreationDate></Bucket></Buckets></ListAllMyBucketsResult>
         ,
-        .server_response_headers = @constCast(&[_][2][]const u8{
-            .{ "Content-Type", "application/xml" },
-            .{ "x-amzn-RequestId", "9PEYBAZ9J7TPRX43" },
-        }),
+        .server_response_headers = &.{
+            .{ .name = "Content-Type", .value = "application/xml" },
+            .{ .name = "x-amzn-RequestId", .value = "9PEYBAZ9J7TPRX43" },
+        },
     });
     defer test_harness.deinit();
     const options = try test_harness.start();
@@ -1974,15 +1961,15 @@ test "rest_xml_no_input: S3 list buckets" {
 }
 test "rest_xml_anything_but_s3: CloudFront list key groups" {
     const allocator = std.testing.allocator;
-    var test_harness = TestSetup.init(allocator, .{
+    var test_harness = TestSetup.init(.{
         .allocator = allocator,
         .server_response =
         \\{"Items":null,"MaxItems":100,"NextMarker":null,"Quantity":0}
         ,
-        .server_response_headers = @constCast(&[_][2][]const u8{
-            .{ "Content-Type", "application/json" },
-            .{ "x-amzn-RequestId", "d3382082-5291-47a9-876b-8df3accbb7ea" },
-        }),
+        .server_response_headers = &.{
+            .{ .name = "Content-Type", .value = "application/json" },
+            .{ .name = "x-amzn-RequestId", .value = "d3382082-5291-47a9-876b-8df3accbb7ea" },
+        },
     });
     defer test_harness.deinit();
     const options = try test_harness.start();
@@ -2000,16 +1987,16 @@ test "rest_xml_anything_but_s3: CloudFront list key groups" {
 }
 test "rest_xml_with_input: S3 put object" {
     const allocator = std.testing.allocator;
-    var test_harness = TestSetup.init(allocator, .{
+    var test_harness = TestSetup.init(.{
         .allocator = allocator,
         .server_response = "",
-        .server_response_headers = @constCast(&[_][2][]const u8{
+        .server_response_headers = &.{
             // .{ "Content-Type", "application/xml" },
-            .{ "x-amzn-RequestId", "9PEYBAZ9J7TPRX43" },
-            .{ "x-amz-id-2", "jdRDo30t7Ge9lf6F+4WYpg+YKui8z0mz2+rwinL38xDZzvloJqrmpCAiKG375OSvHA9OBykJS44=" },
-            .{ "x-amz-server-side-encryption", "AES256" },
-            .{ "ETag", "37b51d194a7513e45b56f6524f2d51f2" },
-        }),
+            .{ .name = "x-amzn-RequestId", .value = "9PEYBAZ9J7TPRX43" },
+            .{ .name = "x-amz-id-2", .value = "jdRDo30t7Ge9lf6F+4WYpg+YKui8z0mz2+rwinL38xDZzvloJqrmpCAiKG375OSvHA9OBykJS44=" },
+            .{ .name = "x-amz-server-side-encryption", .value = "AES256" },
+            .{ .name = "ETag", .value = "37b51d194a7513e45b56f6524f2d51f2" },
+        },
     });
     defer test_harness.deinit();
     const options = try test_harness.start();
@@ -2018,7 +2005,6 @@ test "rest_xml_with_input: S3 put object" {
         .client = options.client,
         .signing_time = TestSetup.signing_time,
     };
-    // std.testing.log_level = .debug;
     const result = try Request(services.s3.put_object).call(.{
         .bucket = "mysfitszj3t6webstack-hostingbucketa91a61fe-1ep3ezkgwpxr0",
         .key = "i/am/a/teapot/foo",
@@ -2026,7 +2012,7 @@ test "rest_xml_with_input: S3 put object" {
         .body = "bar",
         .storage_class = "STANDARD",
     }, s3opts);
-    for (test_harness.request_options.request_headers.list.items) |header| {
+    for (test_harness.request_options.request_headers) |header| {
         std.log.info("Request header: {s}: {s}", .{ header.name, header.value });
     }
     std.log.info("PutObject Request id: {s}", .{result.response_metadata.request_id});

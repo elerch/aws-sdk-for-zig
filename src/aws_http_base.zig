@@ -7,12 +7,12 @@ pub const Request = struct {
     body: []const u8 = "",
     method: []const u8 = "POST",
     content_type: []const u8 = "application/json", // Can we get away with this?
-    headers: []Header = &[_]Header{},
+    headers: []const std.http.Header = &.{},
 };
 pub const Result = struct {
     response_code: u16, // actually 3 digits can fit in u10
     body: []const u8,
-    headers: []Header,
+    headers: []const std.http.Header,
     allocator: std.mem.Allocator,
 
     pub fn deinit(self: Result) void {
@@ -25,9 +25,4 @@ pub const Result = struct {
         log.debug("http result deinit complete", .{});
         return;
     }
-};
-
-pub const Header = struct {
-    name: []const u8,
-    value: []const u8,
 };

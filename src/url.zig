@@ -1,15 +1,14 @@
 const std = @import("std");
 
-fn defaultTransformer(allocator: std.mem.Allocator, field_name: []const u8, options: EncodingOptions) anyerror![]const u8 {
-    _ = options;
+fn defaultTransformer(allocator: std.mem.Allocator, field_name: []const u8) anyerror![]const u8 {
     _ = allocator;
     return field_name;
 }
 
-pub const fieldNameTransformerFn = *const fn (std.mem.Allocator, []const u8, EncodingOptions) anyerror![]const u8;
+pub const fieldNameTransformerFn = *const fn (std.mem.Allocator, []const u8) anyerror![]const u8;
 
 pub const EncodingOptions = struct {
-    field_name_transformer: fieldNameTransformerFn = &defaultTransformer,
+    field_name_transformer: fieldNameTransformerFn = defaultTransformer,
 };
 
 pub fn encode(allocator: std.mem.Allocator, obj: anytype, writer: anytype, comptime options: EncodingOptions) !void {
@@ -26,7 +25,7 @@ fn encodeStruct(
 ) !bool {
     var rc = first;
     inline for (@typeInfo(@TypeOf(obj)).Struct.fields) |field| {
-        const field_name = try options.field_name_transformer(allocator, field.name, options);
+        const field_name = try options.field_name_transformer(allocator, field.name);
         defer if (options.field_name_transformer.* != defaultTransformer)
             allocator.free(field_name);
         // @compileLog(@typeInfo(field.field_type).Pointer);

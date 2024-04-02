@@ -1762,7 +1762,7 @@ fn parseInternal(comptime T: type, token: Token, tokens: *TokenStream, options: 
                     var r: T = undefined;
                     const source_slice = stringToken.slice(tokens.slice, tokens.i - 1);
                     switch (stringToken.escapes) {
-                        .None => mem.copy(u8, &r, source_slice),
+                        .None => @memcpy(&r, source_slice),
                         .Some => try unescapeValidString(&r, source_slice),
                     }
                     return r;
@@ -2019,7 +2019,7 @@ test "parse into tagged union" {
     }
 
     { // failing allocations should be bubbled up instantly without trying next member
-        var fail_alloc = testing.FailingAllocator.init(testing.allocator, 0);
+        var fail_alloc = testing.FailingAllocator.init(testing.allocator, .{ .fail_index = 0 });
         const options = ParseOptions{ .allocator = fail_alloc.allocator() };
         const T = union(enum) {
             // both fields here match the input
@@ -2067,7 +2067,7 @@ test "parse union bubbles up AllocatorRequired" {
 }
 
 test "parseFree descends into tagged union" {
-    var fail_alloc = testing.FailingAllocator.init(testing.allocator, 1);
+    var fail_alloc = testing.FailingAllocator.init(testing.allocator, .{ .fail_index = 1 });
     const options = ParseOptions{ .allocator = fail_alloc.allocator() };
     const T = union(enum) {
         int: i32,
@@ -2827,14 +2827,14 @@ pub fn stringify(
             }
         },
         .Enum => {
-            if (comptime std.meta.trait.hasFn("jsonStringify")(T)) {
+            if (comptime std.meta.hasFn(T, "jsonStringify")) {
                 return value.jsonStringify(options, out_stream);
             }
 
             @compileError("Unable to stringify enum '" ++ @typeName(T) ++ "'");
         },
         .Union => {
-            if (comptime std.meta.trait.hasFn("jsonStringify")(T)) {
+            if (comptime std.meta.hasFn(T, "jsonStringify")) {
                 return value.jsonStringify(options, out_stream);
             }
 
@@ -2850,7 +2850,7 @@ pub fn stringify(
             }
         },
         .Struct => |S| {
-            if (comptime std.meta.trait.hasFn("jsonStringify")(T)) {
+            if (comptime std.meta.hasFn(T, "jsonStringify")) {
                 return value.jsonStringify(options, out_stream);
             }
 
@@ -2874,11 +2874,11 @@ pub fn stringify(
                     try child_whitespace.outputIndent(out_stream);
                 }
                 var field_written = false;
-                if (comptime std.meta.trait.hasFn("jsonStringifyField")(T))
+                if (comptime std.meta.hasFn(T, "jsonStringifyField"))
                     field_written = try value.jsonStringifyField(Field.name, child_options, out_stream);
 
                 if (!field_written) {
-                    if (comptime std.meta.trait.hasFn("fieldNameFor")(T)) {
+                    if (comptime std.meta.hasFn(T, "fieldNameFor")) {
                         const name = value.fieldNameFor(Field.name);
                         try stringify(name, options, out_stream);
                     } else {

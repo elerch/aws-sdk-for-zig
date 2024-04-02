@@ -38,8 +38,8 @@ pub fn log(
     nosuspend stderr.print(prefix ++ format ++ "\n", args) catch return;
 }
 
-pub const std_options = struct {
-    pub const logFn = log;
+pub const std_options = std.Options{
+    .logFn = log,
 };
 const Tests = enum {
     query_no_input,
@@ -71,7 +71,7 @@ pub fn main() anyerror!void {
     defer bw.flush() catch unreachable;
     const stdout = bw.writer();
     var arg0: ?[]const u8 = null;
-    var proxy: ?std.http.Client.HttpProxy = null;
+    var proxy: ?std.http.Client.Proxy = null;
     while (args.next()) |arg| {
         if (arg0 == null) arg0 = arg;
         if (std.mem.eql(u8, "-h", arg) or std.mem.eql(u8, "--help", arg)) {
@@ -353,17 +353,22 @@ pub fn main() anyerror!void {
     std.log.info("===== Tests complete =====", .{});
 }
 
-fn proxyFromString(string: []const u8) !std.http.Client.HttpProxy {
-    var rc = std.http.Client.HttpProxy{
+fn proxyFromString(string: []const u8) !std.http.Client.Proxy {
+    var rc = std.http.Client.Proxy{
         .protocol = undefined,
         .host = undefined,
+        .authorization = null,
+        .port = undefined,
+        .supports_connect = true, // TODO: Is this a good default?
     };
     var remaining: []const u8 = string;
     if (std.mem.startsWith(u8, string, "http://")) {
         remaining = remaining["http://".len..];
         rc.protocol = .plain;
+        rc.port = 80;
     } else if (std.mem.startsWith(u8, string, "https://")) {
         remaining = remaining["https://".len..];
+        rc.port = 443;
         rc.protocol = .tls;
     } else return error.InvalidScheme;
     var split_iterator = std.mem.split(u8, remaining, ":");
