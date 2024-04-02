@@ -568,29 +568,10 @@ fn getDefaultPath(allocator: std.mem.Allocator, home_dir: ?[]const u8, dir: []co
 fn getHomeDir(allocator: std.mem.Allocator) ![]const u8 {
     switch (builtin.os.tag) {
         .windows => {
-            var dir_path_ptr: [*:0]u16 = undefined;
-            // https://docs.microsoft.com/en-us/windows/win32/shell/knownfolderid
-            const FOLDERID_Profile = std.os.windows.GUID.parse("{5E6C858F-0E22-4760-9AFE-EA3317B67173}");
-            switch (std.os.windows.shell32.SHGetKnownFolderPath(
-                &FOLDERID_Profile,
-                std.os.windows.KF_FLAG_CREATE,
-                null,
-                &dir_path_ptr,
-            )) {
-                std.os.windows.S_OK => {
-                    defer std.os.windows.ole32.CoTaskMemFree(@as(*anyopaque, @ptrCast(dir_path_ptr)));
-                    const global_dir = std.unicode.utf16leToUtf8Alloc(allocator, std.mem.sliceTo(dir_path_ptr, 0)) catch |err| switch (err) {
-                        error.UnexpectedSecondSurrogateHalf => return error.HomeDirUnavailable,
-                        error.ExpectedSecondSurrogateHalf => return error.HomeDirUnavailable,
-                        error.DanglingSurrogateHalf => return error.HomeDirUnavailable,
-                        error.OutOfMemory => return error.OutOfMemory,
-                    };
-                    return global_dir;
-                    // defer allocator.free(global_dir);
-                },
-                std.os.windows.E_OUTOFMEMORY => return error.OutOfMemory,
+            return std.process.getEnvVarOwned(allocator, "USERPROFILE") catch |err| switch (err) {
+                error.OutOfMemory => |e| return e,
                 else => return error.HomeDirUnavailable,
-            }
+            };
         },
         .macos, .linux, .freebsd, .netbsd, .dragonfly, .openbsd, .solaris => {
             const home_dir = std.os.getenv("HOME") orelse {
