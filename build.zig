@@ -171,6 +171,20 @@ pub fn build(b: *Builder) !void {
     // running the unit tests.
     const test_step = b.step("test", "Run unit tests");
 
+    // // Creates a step for unit testing. This only builds the test executable
+    // // but does not run it.
+    // const unit_tests = b.addTest(.{
+    //     .root_source_file = .{ .path = "src/aws.zig" },
+    //     .target = target,
+    //     .optimize = optimize,
+    // });
+    // unit_tests.root_module.addImport("smithy", smithy_dep.module("smithy"));
+    // unit_tests.step.dependOn(gen_step);
+    //
+    // const run_unit_tests = b.addRunArtifact(unit_tests);
+    // run_unit_tests.skip_foreign_checks = true;
+
+    // test_step.dependOn(&run_unit_tests.step);
     for (test_targets) |t| {
         // Creates a step for unit testing. This only builds the test executable
         // but does not run it.
