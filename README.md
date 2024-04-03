@@ -17,14 +17,18 @@ Current executable size for the demo is 980k after compiling with -Doptimize=Rel
 in x86_linux, and will vary based on services used. Tested targets:
 
 * x86_64-linux
-* riscv64-linux
+* riscv64-linux\*
 * aarch64-linux
-* x86_64-windows
+* x86_64-windows\*\*
 * arm-linux
 * aarch64-macos
 * x86_64-macos
 
 Tested targets are built, but not continuously tested, by CI.
+
+\* On Zig 0.12, riscv64-linux tests get stuck forever in "LLVM Emit object"
+\*\* On Zig 0.12, x86_64-windows tests have one test skipped as LLVM consumes all available RAM on the system
+
 
 Zig-Develop Branch
 ------------------

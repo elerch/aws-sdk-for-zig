@@ -1,3 +1,4 @@
+const builtin = @import("builtin");
 const std = @import("std");
 
 const awshttp = @import("aws_http.zig");
@@ -1898,7 +1899,13 @@ test "ec2_query_no_input: EC2 describe regions" {
     try std.testing.expectEqualStrings("4cdbdd69-800c-49b5-8474-ae4c17709782", call.response_metadata.request_id);
     try std.testing.expectEqual(@as(usize, 17), call.response.regions.?.len);
 }
+// LLVM hates this test. Depending on the platform, it will consume all memory
+// on the compilation host. Windows x86_64 and Linux riscv64 seem to be a problem so far
+// riscv64-linux also seems to have another problem with LLVM basically infinitely
+// doing something. My guess is the @embedFile is freaking out LLVM
 test "ec2_query_with_input: EC2 describe instances" {
+    if (builtin.cpu.arch == .x86_64 and builtin.os.tag == .windows) return error.SkipZigTest;
+    if (builtin.cpu.arch == .riscv64 and builtin.os.tag == .linux) return error.SkipZigTest;
     const allocator = std.testing.allocator;
     var test_harness = TestSetup.init(.{
         .allocator = allocator,

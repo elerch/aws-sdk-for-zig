@@ -14,10 +14,12 @@ const test_targets = [_]std.zig.CrossTarget{
         .cpu_arch = .aarch64,
         .os_tag = .linux,
     },
-    .{
-        .cpu_arch = .riscv64,
-        .os_tag = .linux,
-    },
+    // // The test executable just spins forever in LLVM using nominated zig 0.12 March 2024
+    // // This is likely a LLVM problem unlikely to be fixed in zig 0.12
+    // .{
+    //     .cpu_arch = .riscv64,
+    //     .os_tag = .linux,
+    // },
     .{
         .cpu_arch = .arm,
         .os_tag = .linux,
