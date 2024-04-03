@@ -27,6 +27,7 @@ in x86_linux, and will vary based on services used. Tested targets:
 Tested targets are built, but not continuously tested, by CI.
 
 \* On Zig 0.12, riscv64-linux tests get stuck forever in "LLVM Emit object"
+
 \*\* On Zig 0.12, x86_64-windows tests have one test skipped as LLVM consumes all available RAM on the system
 
 
