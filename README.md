@@ -26,7 +26,7 @@ in x86_linux, and will vary based on services used. Tested targets:
 
 Tested targets are built, but not continuously tested, by CI.
 
-\* On Zig 0.12, riscv64-linux tests get stuck forever in "LLVM Emit object"
+\* On Zig 0.12, riscv64-linux tests take a significant time to compile (each aws.zig test takes approximately 1min, 45 seconds to compile on Intel i9 10th gen)
 
 \*\* On Zig 0.12, x86_64-windows tests have one test skipped as LLVM consumes all available RAM on the system
 
