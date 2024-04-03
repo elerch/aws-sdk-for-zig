@@ -30,12 +30,13 @@ pub fn build(b: *std.Build) void {
     //     .optimize = optimize,
     // });
     // exe.addModule("smithy", smithy_dep.module("smithy"));
-    const aws_dep = b.dependency("aws", .{
+    const aws_dep = b.dependency("aws-zig", .{
         // These are the two arguments to the dependency. It expects a target and optimization level.
         .target = target,
         .optimize = optimize,
     });
-    exe.addModule("aws", aws_dep.module("aws"));
+    const aws_module = aws_dep.module("aws");
+    exe.root_module.addImport("aws", aws_module);
     // This declares intent for the executable to be installed into the
     // standard location when the user invokes the "install" step (the default
     // step when running `zig build`).

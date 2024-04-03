@@ -1,14 +1,14 @@
 const std = @import("std");
 const aws = @import("aws");
 
-pub const std_options = struct {
-    pub const log_level: std.log.Level = .info;
+pub const std_options: std.Options = .{
+    .log_level = .info,
 
     // usually log_level is enough, but log_scope_levels can be used
     // for finer grained control
-    pub const log_scope_levels = &[_]std.log.ScopeLevel{
+    .log_scope_levels = &[_]std.log.ScopeLevel{
         .{ .scope = .awshttp, .level = .warn },
-    };
+    },
 };
 
 pub fn main() anyerror!void {
