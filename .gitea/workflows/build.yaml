@@ -33,8 +33,6 @@ jobs:
           ln -s /usr/local/zig-linux-${ARCH}-${ZIG_VERSION}/zig /usr/local/bin/zig
       - name: Run tests
         run: zig build test --verbose
-      - name: Build example
-        run: ( cd example && zig build ) # Make sure example builds
       # Zig package manager expects everything to be inside a directory in the archive,
       # which it then strips out on download. So we need to shove everything inside a directory
       # the way GitHub/Gitea does for repo archives
@@ -70,6 +68,8 @@ jobs:
           curl --user ${{ github.actor }}:${{ secrets.PACKAGE_PUSH }} \
             --upload-file ${{ runner.temp }}/${{ github.sha }}-with-models.tar.gz \
             https://git.lerch.org/api/packages/lobo/generic/aws-sdk-with-models/${{ github.sha }}/${{ github.sha }}-with-models.tar.gz
+      - name: Build example
+        run: ( cd example && zig build ) # Make sure example builds
       - name: Notify
         uses: https://git.lerch.org/lobo/action-notify-ntfy@v2
         if: always()
