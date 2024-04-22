@@ -77,13 +77,13 @@ pub fn hex64(x: u64) [16]u8 {
     return result;
 }
 
-pub const walkerFn = *const fn (std.fs.Dir.Walker.WalkerEntry) bool;
+pub const walkerFn = *const fn (std.fs.Dir.Walker.Entry) bool;
 
-fn included(entry: std.fs.Dir.Walker.WalkerEntry) bool {
+fn included(entry: std.fs.Dir.Walker.Entry) bool {
     _ = entry;
     return true;
 }
-fn excluded(entry: std.fs.Dir.Walker.WalkerEntry) bool {
+fn excluded(entry: std.fs.Dir.Walker.Entry) bool {
     _ = entry;
     return false;
 }
@@ -206,6 +206,6 @@ fn isExecutable(file: std.fs.File) !bool {
         return false;
     } else {
         const stat = try file.stat();
-        return (stat.mode & std.os.S.IXUSR) != 0;
+        return (stat.mode & std.posix.S.IXUSR) != 0;
     }
 }

@@ -134,12 +134,12 @@ var model_digest: ?[Hasher.hex_multihash_len]u8 = null;
 fn calculateDigests(models_dir: std.fs.Dir, output_dir: std.fs.Dir, thread_pool: *std.Thread.Pool) !OutputManifest {
     const model_hash = if (model_digest) |m| m[0..Hasher.digest_len].* else try Hasher.computeDirectoryHash(thread_pool, models_dir, @constCast(&Hasher.ComputeDirectoryOptions{
         .isIncluded = struct {
-            pub fn include(entry: std.fs.Dir.Walker.WalkerEntry) bool {
+            pub fn include(entry: std.fs.Dir.Walker.Entry) bool {
                 return std.mem.endsWith(u8, entry.basename, ".json");
             }
         }.include,
         .isExcluded = struct {
-            pub fn exclude(entry: std.fs.Dir.Walker.WalkerEntry) bool {
+            pub fn exclude(entry: std.fs.Dir.Walker.Entry) bool {
                 _ = entry;
                 return false;
             }
@@ -150,12 +150,12 @@ fn calculateDigests(models_dir: std.fs.Dir, output_dir: std.fs.Dir, thread_pool:
 
     const output_hash = try Hasher.computeDirectoryHash(thread_pool, try output_dir.openDir(".", .{ .iterate = true }), @constCast(&Hasher.ComputeDirectoryOptions{
         .isIncluded = struct {
-            pub fn include(entry: std.fs.Dir.Walker.WalkerEntry) bool {
+            pub fn include(entry: std.fs.Dir.Walker.Entry) bool {
                 return std.mem.endsWith(u8, entry.basename, ".zig");
             }
         }.include,
         .isExcluded = struct {
-            pub fn exclude(entry: std.fs.Dir.Walker.WalkerEntry) bool {
+            pub fn exclude(entry: std.fs.Dir.Walker.Entry) bool {
                 _ = entry;
                 return false;
             }

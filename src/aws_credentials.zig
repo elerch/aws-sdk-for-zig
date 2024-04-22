@@ -574,7 +574,7 @@ fn getHomeDir(allocator: std.mem.Allocator) ![]const u8 {
             };
         },
         .macos, .linux, .freebsd, .netbsd, .dragonfly, .openbsd, .solaris => {
-            const home_dir = std.os.getenv("HOME") orelse {
+            const home_dir = std.posix.getenv("HOME") orelse {
                 // TODO look in /etc/passwd
                 return error.HomeDirUnavailable;
             };

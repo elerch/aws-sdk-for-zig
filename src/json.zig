@@ -1361,7 +1361,7 @@ test "Value.jsonStringify" {
         var buffer: [10]u8 = undefined;
         var fbs = std.io.fixedBufferStream(&buffer);
         try (Value{ .Float = 42 }).jsonStringify(.{}, fbs.writer());
-        try testing.expectEqualSlices(u8, fbs.getWritten(), "4.2e+01");
+        try testing.expectEqualSlices(u8, fbs.getWritten(), "4.2e1");
     }
     {
         var buffer: [10]u8 = undefined;
@@ -2808,7 +2808,7 @@ pub fn stringify(
     const T = @TypeOf(value);
     switch (@typeInfo(T)) {
         .Float, .ComptimeFloat => {
-            return std.fmt.formatFloatScientific(value, std.fmt.FormatOptions{}, out_stream);
+            return std.fmt.format(out_stream, "{e}", .{value});
         },
         .Int, .ComptimeInt => {
             return std.fmt.formatIntValue(value, "", std.fmt.FormatOptions{}, out_stream);
@@ -3057,11 +3057,11 @@ test "stringify basic types" {
     try teststringify("null", @as(?u8, null), StringifyOptions{});
     try teststringify("null", @as(?*u32, null), StringifyOptions{});
     try teststringify("42", 42, StringifyOptions{});
-    try teststringify("4.2e+01", 42.0, StringifyOptions{});
+    try teststringify("4.2e1", 42.0, StringifyOptions{});
     try teststringify("42", @as(u8, 42), StringifyOptions{});
     try teststringify("42", @as(u128, 42), StringifyOptions{});
-    try teststringify("4.2e+01", @as(f32, 42), StringifyOptions{});
-    try teststringify("4.2e+01", @as(f64, 42), StringifyOptions{});
+    try teststringify("4.2e1", @as(f32, 42), StringifyOptions{});
+    try teststringify("4.2e1", @as(f64, 42), StringifyOptions{});
     try teststringify("\"ItBroke\"", @as(anyerror, error.ItBroke), StringifyOptions{});
 }
 

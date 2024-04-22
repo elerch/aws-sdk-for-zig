@@ -144,7 +144,7 @@ pub fn build(b: *Builder) !void {
             },
         ));
         cg_cmd.addArg("--output");
-        cg_cmd.addDirectoryArg(std.Build.LazyPath.relative("src/models"));
+        cg_cmd.addDirectoryArg(b.path("src/models"));
         if (b.verbose)
             cg_cmd.addArg("--verbose");
         // cg_cmd.step.dependOn(&fetch_step.step);

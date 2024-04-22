@@ -827,7 +827,7 @@ fn ServerResponse(comptime action: anytype) type {
     };
     const Result = @Type(.{
         .Struct = .{
-            .layout = .Auto,
+            .layout = .auto,
             .fields = &[_]std.builtin.Type.StructField{
                 .{
                     .name = action.action_name ++ "Result",
@@ -850,7 +850,7 @@ fn ServerResponse(comptime action: anytype) type {
     });
     return @Type(.{
         .Struct = .{
-            .layout = .Auto,
+            .layout = .auto,
             .fields = &[_]std.builtin.Type.StructField{
                 .{
                     .name = action.action_name ++ "Response",
