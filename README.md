@@ -1,5 +1,5 @@
-AWS SDK for Zig
-===============
+AWS SDK for Zig (0.11.0 only - will not receive further updates)
+================================================================
 
 [![Build Status](https://actions-status.lerch.org/lobo/aws-sdk-for-zig/build)](https://git.lerch.org/lobo/aws-sdk-for-zig/actions?workflow=build.yaml&state=closed)
 
