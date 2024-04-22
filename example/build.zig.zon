@@ -9,8 +9,8 @@
             .hash = "1220af63ae0498010004af79936cedf3fe6702f516daab77ebbd97a274eba1b42aad",
         },
         .@"aws-zig" = .{
-            .url = "https://git.lerch.org/api/packages/lobo/generic/aws-sdk-with-models/b1b2a6cc7a6104f5e1f6ee4cae33e6ef3ed2ec1c/b1b2a6cc7a6104f5e1f6ee4cae33e6ef3ed2ec1c-with-models.tar.gz",
-            .hash = "12203d7c7aea80fd5e1f892b4928b89b2c70d5688cf1843e0d03e5af79632c5a9146",
+            .url = "https://git.lerch.org/api/packages/lobo/generic/aws-sdk-with-models/a0773971f2f52182c8a5235582500d36afda2e81/a0773971f2f52182c8a5235582500d36afda2e81-with-models.tar.gz",
+            .hash = "1220198f7b734c1cc6a683ad13246439a59be934156a2df3a734bcaf15433b33eead",
         },
     },
 }
