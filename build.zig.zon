@@ -1,7 +1,11 @@
 .{
     .name = "aws-zig",
     .version = "0.0.1",
-    .paths = .{""},
+    .paths = .{
+      "build.zig",
+      "build.zig.zon",
+      "src",
+    },
 
     .dependencies = .{
         .smithy = .{
