@@ -45,7 +45,12 @@ jobs:
           tar -czf ${{ runner.temp }}/${{ github.sha }}-with-models.tar.gz \
             --format ustar \
             --exclude 'zig-*' \
-            --transform 's,^,${{ github.sha }}/,' *
+            *
+      # Something in this PR broke this transform. I don't mind removing it, but
+      # the PR attempts to handle situations with or without a prefix, but it
+      # doesn't. I have not yet determined what the problem is, though
+      # https://github.com/ziglang/zig/pull/19111/files
+      # --transform 's,^,${{ github.sha }}/,' *
       # - name: Sign
       #   id: sign
       #   uses: https://git.lerch.org/lobo/action-hsm-sign@v1
