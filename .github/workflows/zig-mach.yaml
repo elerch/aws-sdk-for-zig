@@ -33,6 +33,6 @@ jobs:
           sudo ln -s /usr/local/"${file%%.tar.xz}"/zig /usr/local/bin/zig
           zig version
       - name: Run tests
-        run: zig build test --verbose
+        run: zig build test -Dbroken-windows --verbose
       - name: Build example
         run: ( cd example && zig build ) # Make sure example builds

@@ -26,6 +26,6 @@ jobs:
           sudo tar x -C /usr/local -f zig-linux-${ARCH}-${ZIG_VERSION}.tar.xz
           sudo ln -s /usr/local/zig-linux-${ARCH}-${ZIG_VERSION}/zig /usr/local/bin/zig
       - name: Run tests
-        run: zig build test --verbose
+        run: zig build test -Dbroken-windows --verbose # Github runners try to run the windows tests despite disabling foreign checks
       - name: Build example
         run: ( cd example && zig build ) # Make sure example builds

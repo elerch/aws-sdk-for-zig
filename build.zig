@@ -53,6 +53,11 @@ pub fn build(b: *Builder) !void {
     // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall.
     const optimize = b.standardOptimizeOption(.{});
 
+    const broken_windows = b.option(
+        bool,
+        "broken-windows",
+        "Windows is broken in this environment (do not run Windows tests)",
+    ) orelse false;
     // TODO: Embed the current git version in the code. We can do this
     // by looking for .git/HEAD (if it exists, follow the ref to /ref/heads/whatevs,
     // grab that commit, and use b.addOptions/exe.addOptions to generate the
@@ -188,6 +193,7 @@ pub fn build(b: *Builder) !void {
 
     // test_step.dependOn(&run_unit_tests.step);
     for (test_targets) |t| {
+        if (broken_windows and t.os_tag == .windows) continue;
         // Creates a step for unit testing. This only builds the test executable
         // but does not run it.
         const unit_tests = b.addTest(.{
