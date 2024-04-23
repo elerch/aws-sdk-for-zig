@@ -20,6 +20,8 @@ jobs:
     steps:
       - name: Check out repository code
         uses: actions/checkout@v3
+        with:
+          ref: zig-develop
       # ARCH is fine, but we can't substitute directly because zig
       # uses x86_64 instead of amd64. They also use aarch64 instead of arm64.
       #
