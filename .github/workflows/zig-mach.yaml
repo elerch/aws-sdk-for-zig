@@ -19,7 +19,7 @@ jobs:
     if: ${{ github.env.GITEA_ACTIONS != 'true' }}
     steps:
       - name: Check out repository code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       # ARCH is fine, but we can't substitute directly because zig
       # uses x86_64 instead of amd64. They also use aarch64 instead of arm64.
       #

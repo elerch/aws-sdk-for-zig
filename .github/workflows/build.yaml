@@ -6,15 +6,15 @@ on:
       - '*'
       - '!zig-develop*'
 jobs:
-  build-zig-0.11.0-amd64-host:
+  build-zig-0-12-0-amd64:
     runs-on: ubuntu-latest
     env:
-      ZIG_VERSION: 0.11.0
+      ZIG_VERSION: 0.12.0
       ARCH: x86_64
     if: ${{ github.env.GITEA_ACTIONS != 'true' }}
     steps:
       - name: Check out repository code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       # ARCH is fine, but we can't substitute directly because zig
       # uses x86_64 instead of amd64. They also use aarch64 instead of arm64.
       #
