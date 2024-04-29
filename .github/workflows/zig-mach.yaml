@@ -1,13 +1,11 @@
 name: aws-zig mach nominated build
 run-name: ${{ github.actor }} building AWS Zig SDK
 on:
-  schedule:
-    - cron: '0 12 * * *' # noon UTC, 4AM Pacific
   push:
     branches:
       - 'zig-develop*'
 jobs:
-  build-zig-nightly:
+  build-zig-mach-latest:
     runs-on: ubuntu-latest
     # Need to use the default container with node and all that, so we can
     # use JS-based actions like actions/checkout@v3...
