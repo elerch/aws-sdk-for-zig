@@ -9,28 +9,19 @@ env:
   ACTIONS_RUNTIME_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   ACTIONS_RUNTIME_URL: ${{ env.GITHUB_SERVER_URL }}/api/actions_pipeline/
 jobs:
-  build-zig-0.11.0-amd64-host:
+  build-zig-amd64-host:
     runs-on: ubuntu-latest
     # Need to use the default container with node and all that, so we can
     # use JS-based actions like actions/checkout@v3...
     # container:
     #   image: alpine:3.15.0
-    env:
-      ZIG_VERSION: 0.12.0
-      ARCH: x86_64
     steps:
       - name: Check out repository code
         uses: actions/checkout@v3
-      # ARCH is fine, but we can't substitute directly because zig
-      # uses x86_64 instead of amd64. They also use aarch64 instead of arm64.
-      #
-      # However, arm64/linux isn't quite fully tier 1 yet, so this is more of a
-      # TODO: https://github.com/ziglang/zig/issues/2443
-      - name: Install zig
-        run: |
-          wget -q https://ziglang.org/download/${ZIG_VERSION}/zig-linux-${ARCH}-${ZIG_VERSION}.tar.xz
-          tar x -C /usr/local -f zig-linux-${ARCH}-${ZIG_VERSION}.tar.xz
-          ln -s /usr/local/zig-linux-${ARCH}-${ZIG_VERSION}/zig /usr/local/bin/zig
+      - name: Setup Zig
+        uses: https://git.lerch.org/lobo/setup-zig@v3
+        with:
+          version: 0.12.0
       - name: Run tests
         run: zig build test --verbose
       # Zig package manager expects everything to be inside a directory in the archive,
