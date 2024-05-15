@@ -306,7 +306,7 @@ pub fn verifyServerRequest(allocator: std.mem.Allocator, request: *std.http.Serv
 }
 
 pub const UnverifiedRequest = struct {
-    headers: []std.http.Header,
+    headers: []const std.http.Header,
     target: []const u8,
     method: std.http.Method,
     allocator: std.mem.Allocator,
