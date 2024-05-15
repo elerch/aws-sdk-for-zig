@@ -1,5 +1,5 @@
 .{
-    .name = "aws-zig",
+    .name = "aws",
     .version = "0.0.1",
     .paths = .{
       "build.zig",
