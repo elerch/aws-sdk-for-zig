@@ -3,15 +3,15 @@ AWS SDK for Zig
 
 [Zig 0.12](https://ziglang.org/download/#release-0.12.0):
 
-[![Build Status: Zig 0.12.0](https://actions-status.lerch.org/lobo/aws-sdk-for-zig/build)](https://git.lerch.org/lobo/aws-sdk-for-zig/actions?workflow=build.yaml&state=closed)
+[![Build Status: Zig 0.12.0](https://git.lerch.org/lobo/aws-sdk-for-zig/actions/workflows/build.yaml/badge.svg)](https://git.lerch.org/lobo/aws-sdk-for-zig/actions?workflow=build.yaml&state=closed)
 
 [Last Mach Nominated Zig Version](https://machengine.org/about/nominated-zig/):
 
-[![Build Status: Zig 0.12.0-dev.3180+83e578a18](https://actions-status.lerch.org/lobo/aws-sdk-for-zig/zig-mach)](https://git.lerch.org/lobo/aws-sdk-for-zig/actions?workflow=zig-mach.yaml&state=closed)
+[![Build Status: Zig 0.12.0-dev.3180+83e578a18](https://git.lerch.org/lobo/aws-sdk-for-zig/actions/workflows/zig-mach.yaml/badge.svg?branch=zig-develop)](https://git.lerch.org/lobo/aws-sdk-for-zig/actions?workflow=zig-mach.yaml&state=closed)
 
 [Nightly Zig](https://ziglang.org/download/):
 
-[![Build Status: Zig Nightly](https://actions-status.lerch.org/lobo/aws-sdk-for-zig/zig-nightly)](https://git.lerch.org/lobo/aws-sdk-for-zig/actions?workflow=zig-nightly.yaml&state=closed)
+[![Build Status: Zig Nightly](https://git.lerch.org/lobo/aws-sdk-for-zig/actions/workflows/zig-nightly.yaml/badge.svg?branch=zig-develop)](https://git.lerch.org/lobo/aws-sdk-for-zig/actions?workflow=zig-nightly.yaml&state=closed)
 
 **NOTE: TLS 1.3 support is still deploying across AWS. Some services, especially S3,
         may or may not be available without a proxy, depending on the region.
