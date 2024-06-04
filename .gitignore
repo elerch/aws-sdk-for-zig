@@ -11,3 +11,4 @@ libs/
 src/git_version.zig
 zig-out
 core
+.zig-cache

@@ -72,7 +72,7 @@ pub fn build(b: *Builder) !void {
     // It relies on code gen and is all fouled up when getting imported
     const exe = b.addExecutable(.{
         .name = "demo",
-        .root_source_file = .{ .path = "src/main.zig" },
+        .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -86,13 +86,13 @@ pub fn build(b: *Builder) !void {
 
     // Expose module to others
     _ = b.addModule("aws", .{
-        .root_source_file = .{ .path = "src/aws.zig" },
+        .root_source_file = b.path("src/aws.zig"),
         .imports = &.{.{ .name = "smithy", .module = smithy_module }},
     });
 
     // Expose module to others
     _ = b.addModule("aws-signing", .{
-        .root_source_file = .{ .path = "src/aws_signing.zig" },
+        .root_source_file = b.path("src/aws_signing.zig"),
         .imports = &.{.{ .name = "smithy", .module = smithy_module }},
     });
     // TODO: This does not work correctly due to https://github.com/ziglang/zig/issues/16354
@@ -122,7 +122,7 @@ pub fn build(b: *Builder) !void {
 
         const cg_exe = b.addExecutable(.{
             .name = "codegen",
-            .root_source_file = .{ .path = "codegen/src/main.zig" },
+            .root_source_file = b.path("codegen/src/main.zig"),
             // We need this generated for the host, not the real target
             .target = b.host,
             .optimize = if (b.verbose) .Debug else .ReleaseSafe,
@@ -197,7 +197,7 @@ pub fn build(b: *Builder) !void {
         // Creates a step for unit testing. This only builds the test executable
         // but does not run it.
         const unit_tests = b.addTest(.{
-            .root_source_file = .{ .path = "src/aws.zig" },
+            .root_source_file = b.path("src/aws.zig"),
             .target = b.resolveTargetQuery(t),
             .optimize = optimize,
         });

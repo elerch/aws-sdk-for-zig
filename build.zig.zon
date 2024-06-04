@@ -2,15 +2,17 @@
     .name = "aws",
     .version = "0.0.1",
     .paths = .{
-      "build.zig",
-      "build.zig.zon",
-      "src",
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "README.md",
+        "LICENSE.md",
     },
 
     .dependencies = .{
         .smithy = .{
-            .url = "https://git.lerch.org/lobo/smithy/archive/1e534201c4df5ea4f615faeedc69d414adbec0b1.tar.gz",
-            .hash = "1220af63ae0498010004af79936cedf3fe6702f516daab77ebbd97a274eba1b42aad",
+            .url = "https://git.lerch.org/lobo/smithy/archive/6083ceefe262bb016033a7dfbd995968c86b48b2.tar.gz",
+            .hash = "122036fbf9a1aae606de5e1a622d7dbbc37338d0fad7a4a018920c1365a1c49ba497",
         },
         .models = .{
             .url = "https://github.com/aws/aws-sdk-go-v2/archive/58cf6509525a12d64fd826da883bfdbacbd2f00e.tar.gz",

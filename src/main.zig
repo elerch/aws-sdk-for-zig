@@ -32,8 +32,8 @@ pub fn log(
     const prefix = "[" ++ @tagName(level) ++ "] " ++ scope_prefix;
 
     // Print the message to stderr, silently ignoring any errors
-    std.debug.getStderrMutex().lock();
-    defer std.debug.getStderrMutex().unlock();
+    std.debug.lockStdErr();
+    defer std.debug.unlockStdErr();
     const stderr = std.io.getStdErr().writer();
     nosuspend stderr.print(prefix ++ format ++ "\n", args) catch return;
 }

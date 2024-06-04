@@ -34,7 +34,7 @@ pub fn main() anyerror!void {
             models_dir = try std.fs.cwd().openDir(args[i + 1], .{ .iterate = true });
     }
     // TODO: Seems like we should remove this in favor of a package
-    try output_dir.writeFile("json.zig", json_zig);
+    try output_dir.writeFile(.{ .sub_path = "json.zig", .data = json_zig });
 
     // TODO: We need a different way to handle this file...
     const manifest_file_started = false;
@@ -123,11 +123,11 @@ fn processDirectories(models_dir: std.fs.Dir, output_dir: std.fs.Dir) !void {
     // re-calculate so we can store the manifest
     model_digest = calculated_manifest.model_dir_hash_digest;
     calculated_manifest = try calculateDigests(models_dir, output_dir, &thread_pool);
-    try output_dir.writeFile("output_manifest.json", try std.json.stringifyAlloc(
+    try output_dir.writeFile(.{ .sub_path = "output_manifest.json", .data = try std.json.stringifyAlloc(
         allocator,
         calculated_manifest,
         .{ .whitespace = .indent_2 },
-    ));
+    ) });
 }
 
 var model_digest: ?[Hasher.hex_multihash_len]u8 = null;
