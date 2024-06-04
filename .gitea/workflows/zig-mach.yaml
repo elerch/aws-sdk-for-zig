@@ -7,8 +7,7 @@ on:
     branches:
       - 'zig-develop*'
 env:
-  ACTIONS_RUNTIME_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  ACTIONS_RUNTIME_URL: ${{ env.GITHUB_SERVER_URL }}/api/actions_pipeline/
+  PKG_PREFIX: nominated-zig
 jobs:
   build-zig-nominated-mach-latest:
     runs-on: ubuntu-latest
@@ -25,6 +24,8 @@ jobs:
         uses: https://git.lerch.org/lobo/setup-zig@v3
         with:
           version: mach-latest
+      - name: Run tests
+        run: zig build test --verbose
       # Zig package manager expects everything to be inside a directory in the archive,
       # which it then strips out on download. So we need to shove everything inside a directory
       # the way GitHub/Gitea does for repo archives
@@ -34,7 +35,7 @@ jobs:
       # should be using git archive, but we need our generated code to be part of it
       - name: Package source code with generated models
         run: |
-          tar -czf ${{ runner.temp }}/${{ github.sha }}-with-models.tar.gz \
+          tar -czf ${{ runner.temp }}/${{ github.sha }}${{ env.PKG_PREFIX }}-with-models.tar.gz \
             --format ustar \
             --exclude 'zig-*' \
             --transform 's,^,${{ github.sha }}/,' *
@@ -58,8 +59,8 @@ jobs:
       - name: Publish source code with generated models
         run: |
           curl --user ${{ github.actor }}:${{ secrets.PACKAGE_PUSH }} \
-            --upload-file ${{ runner.temp }}/${{ github.sha }}-with-models.tar.gz \
-            https://git.lerch.org/api/packages/lobo/generic/aws-sdk-with-models/${{ github.sha }}/${{ github.sha }}-with-models.tar.gz
+            --upload-file ${{ runner.temp }}/${{ github.sha }}${{ env.PKG_PREFIX }}-with-models.tar.gz \
+            https://git.lerch.org/api/packages/lobo/generic/aws-sdk-with-models/${{ github.sha }}/${{ github.sha }}${{ env.PKG_PREFIX }}-with-models.tar.gz
       - name: Build example
         run: ( cd example && zig build ) # Make sure example builds
       - name: Notify
