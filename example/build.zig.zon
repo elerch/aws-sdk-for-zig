@@ -5,12 +5,12 @@
 
     .dependencies = .{
         .smithy = .{
-            .url = "https://git.lerch.org/lobo/smithy/archive/1e534201c4df5ea4f615faeedc69d414adbec0b1.tar.gz",
-            .hash = "1220af63ae0498010004af79936cedf3fe6702f516daab77ebbd97a274eba1b42aad",
+            .url = "https://git.lerch.org/lobo/smithy/archive/6083ceefe262bb016033a7dfbd995968c86b48b2.tar.gz",
+            .hash = "122036fbf9a1aae606de5e1a622d7dbbc37338d0fad7a4a018920c1365a1c49ba497",
         },
         .@"aws-zig" = .{
-            .url = "https://git.lerch.org/api/packages/lobo/generic/aws-sdk-with-models/a0773971f2f52182c8a5235582500d36afda2e81/a0773971f2f52182c8a5235582500d36afda2e81-with-models.tar.gz",
-            .hash = "1220198f7b734c1cc6a683ad13246439a59be934156a2df3a734bcaf15433b33eead",
+            .url = "https://git.lerch.org/api/packages/lobo/generic/aws-sdk-with-models/7d80f42a3e136fb7bb6a1836f1e01432be1e91d8/7d80f42a3e136fb7bb6a1836f1e01432be1e91d8-with-models.tar.gz",
+            .hash = "1220152890f0c2788a1158b184f201c9ea8f5fa9a5cb3a3b5bdf56cdac5bf4cfa00a",
         },
     },
 }
