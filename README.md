@@ -7,15 +7,11 @@ AWS SDK for Zig
 
 [Last Mach Nominated Zig Version](https://machengine.org/about/nominated-zig/):
 
-[![Build Status: Zig 0.12.0-dev.3180+83e578a18](https://git.lerch.org/lobo/aws-sdk-for-zig/actions/workflows/zig-mach.yaml/badge.svg?branch=zig-develop)](https://git.lerch.org/lobo/aws-sdk-for-zig/actions?workflow=zig-mach.yaml&state=closed)
+[![Build Status: Mach nominated](https://git.lerch.org/lobo/aws-sdk-for-zig/actions/workflows/zig-mach.yaml/badge.svg?branch=zig-develop)](https://git.lerch.org/lobo/aws-sdk-for-zig/actions?workflow=zig-mach.yaml&state=closed)
 
 [Nightly Zig](https://ziglang.org/download/):
 
 [![Build Status: Zig Nightly](https://git.lerch.org/lobo/aws-sdk-for-zig/actions/workflows/zig-nightly.yaml/badge.svg?branch=zig-develop)](https://git.lerch.org/lobo/aws-sdk-for-zig/actions?workflow=zig-nightly.yaml&state=closed)
-
-**NOTE: TLS 1.3 support is still deploying across AWS. Some services, especially S3,
-        may or may not be available without a proxy, depending on the region.
-        See limitations section below**
 
 Current executable size for the demo is 980k after compiling with -Doptimize=ReleaseSmall
 in x86_linux, and will vary based on services used. Tested targets:
@@ -73,13 +69,6 @@ variable that will supersede all other configuration.
 Limitations
 -----------
 
-The zig 0.11 HTTP client supports TLS 1.3 only. AWS has committed to
-[TLS 1.3 support across all services by the end of 2023](https://aws.amazon.com/blogs/security/faster-aws-cloud-connections-with-tls-1-3/),
-but a few services as of April 1, 2024 have not been upgraded, and S3 is
-a bit intermittent. Proxy support has been added, so to get to the services that
-do not yet support TLS 1.3, you can use something like [mitmproxy](https://mitmproxy.org/)
-to proxy those requests until roll out is complete.
-
 WebIdentityToken is not yet implemented.
 
 TODO List:
@@ -96,24 +85,12 @@ TODO List:
 * Implement timeouts and other TODO's in the code
 * Add option to cache signature keys
 
-Services without TLS 1.3 support (4 services out of 255 total)
----------------------------------------------------------------
+Services without TLS 1.3 support
+--------------------------------
 
-The following service list is based on limited testing against us-west-2
-region. Your mileage may vary, as there are thousands of endpoints against
-many regions. It appears the TLS 1.3 rollout is fairly far along at
-this point.
-
-NOTE ON S3: For me, S3 is currently intermittently available using TLS 1.3, so
-it appears deployments are in progress. The last couple days it has been
-not been available consistently, so I have added it back to the list.
-
-```
-data.iot
-models.lex
-opsworks
-s3
-```
+All AWS services should support TLS 1.3 at this point, but there are many regions
+and several partitions, and not all of them have been tested, so your mileage
+may vary.
 
 Dependency tree
 ---------------
