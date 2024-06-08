@@ -6,13 +6,13 @@
         "build.zig.zon",
         "src",
         "README.md",
-        "LICENSE.md",
+        "LICENSE",
     },
 
     .dependencies = .{
         .smithy = .{
-            .url = "https://git.lerch.org/lobo/smithy/archive/6083ceefe262bb016033a7dfbd995968c86b48b2.tar.gz",
-            .hash = "122036fbf9a1aae606de5e1a622d7dbbc37338d0fad7a4a018920c1365a1c49ba497",
+            .url = "https://git.lerch.org/lobo/smithy/archive/4ce057ffcb79b470f436a16c86d2e3a72f6fe023.tar.gz",
+            .hash = "122054e5a87f8f50a987511636c881119209258f49d92cd2666220d9659cfbe71dce",
         },
         .models = .{
             .url = "https://github.com/aws/aws-sdk-go-v2/archive/58cf6509525a12d64fd826da883bfdbacbd2f00e.tar.gz",
