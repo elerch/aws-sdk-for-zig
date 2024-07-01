@@ -24,13 +24,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    // const smithy_dep = b.dependency("smithy", .{
-    //     // These are the two arguments to the dependency. It expects a target and optimization level.
-    //     .target = target,
-    //     .optimize = optimize,
-    // });
-    // exe.addModule("smithy", smithy_dep.module("smithy"));
-    const aws_dep = b.dependency("aws-zig", .{
+    const aws_dep = b.dependency("aws", .{
         // These are the two arguments to the dependency. It expects a target and optimization level.
         .target = target,
         .optimize = optimize,
