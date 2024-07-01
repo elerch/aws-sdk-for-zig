@@ -371,7 +371,7 @@ fn proxyFromString(string: []const u8) !std.http.Client.Proxy {
         rc.port = 443;
         rc.protocol = .tls;
     } else return error.InvalidScheme;
-    var split_iterator = std.mem.split(u8, remaining, ":");
+    var split_iterator = std.mem.splitScalar(u8, remaining, ':');
     rc.host = std.mem.trimRight(u8, split_iterator.first(), "/");
     if (split_iterator.next()) |port|
         rc.port = try std.fmt.parseInt(u16, port, 10);

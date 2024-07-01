@@ -392,7 +392,7 @@ fn verifyParsedAuthorization(
     // Credential=ACCESS/20230908/us-west-2/s3/aws4_request
     // SignedHeaders=accept;content-length;content-type;host;x-amz-content-sha256;x-amz-date;x-amz-storage-class
     // Signature=fcc43ce73a34c9bd1ddf17e8a435f46a859812822f944f9eeb2aabcd64b03523
-    var credential_iterator = std.mem.split(u8, credential, "/");
+    var credential_iterator = std.mem.splitScalar(u8, credential, '/');
     const access_key = credential_iterator.next().?;
     const credentials = credentials_fn(access_key) orelse return error.CredentialsNotFound;
     // TODO: https://stackoverflow.com/questions/29276609/aws-authentication-requires-a-valid-date-or-x-amz-date-header-curl
@@ -750,7 +750,7 @@ fn canonicalQueryString(allocator: std.mem.Allocator, path: []const u8) ![]const
     const query = path[first_question.? + 1 ..];
 
     // Split this by component
-    var portions = std.mem.split(u8, query, "&");
+    var portions = std.mem.splitScalar(u8, query, '&');
     var sort_me = std.ArrayList([]const u8).init(allocator);
     defer sort_me.deinit();
     while (portions.next()) |item|
