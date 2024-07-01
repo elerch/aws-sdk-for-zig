@@ -4,7 +4,7 @@ const Builder = @import("std").Build;
 
 const models_subdir = "codegen/sdk-codegen/aws-models/"; // note will probably not work on windows
 
-const test_targets = [_]std.zig.CrossTarget{
+const test_targets = [_]std.Target.Query{
     .{}, // native
     .{
         .cpu_arch = .x86_64,
