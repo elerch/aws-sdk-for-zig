@@ -4,10 +4,6 @@
     .paths = .{""},
 
     .dependencies = .{
-        .@"aws-zig" = .{
-            .url = "https://git.lerch.org/api/packages/lobo/generic/aws-sdk-with-models/3307eb6b8f04659c37df90162094427f15698161/3307eb6b8f04659c37df90162094427f15698161nominated-zig-with-models.tar.gz",
-            .hash = "122077dfab147124a5ddae1981a787a72bd5f823d30826e2d2147cf321a799feedf7",
-        },
         .aws = .{
             .url = "https://git.lerch.org/lobo/-/packages/generic/aws-sdk-with-models/3e89ec468a493b239f01df81b1d0998ca925709f/files/510",
             .hash = "122015b35d150e9c641a8f577ea07bb5cf52020038d052bcabc5d89214ac36e82c4e",
