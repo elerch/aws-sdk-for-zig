@@ -2510,7 +2510,7 @@ pub fn unescapeValidString(output: []u8, input: []const u8) !void {
                     mem.nativeToLittle(u16, firstCodeUnit),
                     mem.nativeToLittle(u16, secondCodeUnit),
                 };
-                if (std.unicode.utf16leToUtf8(output[outIndex..], &utf16le_seq)) |byteCount| {
+                if (std.unicode.utf16LeToUtf8(output[outIndex..], &utf16le_seq)) |byteCount| {
                     outIndex += byteCount;
                     inIndex += 12;
                 } else |_| {
