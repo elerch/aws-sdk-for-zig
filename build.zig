@@ -211,5 +211,7 @@ pub fn build(b: *Builder) !void {
 
         test_step.dependOn(&run_unit_tests.step);
     }
+    const check = b.step("check", "Check compilation errors");
+    check.dependOn(&exe.step);
     b.installArtifact(exe);
 }
