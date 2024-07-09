@@ -2,7 +2,7 @@ name: aws-zig nightly build
 run-name: ${{ github.actor }} building AWS Zig SDK
 on:
   schedule:
-    - cron: '0 12 30 * *' # 12:30 UTC, 4:30AM Pacific
+    - cron: '30 12 * * *' # 12:30 UTC, 4:30AM Pacific
   push:
     branches:
       - 'zig-develop*'
