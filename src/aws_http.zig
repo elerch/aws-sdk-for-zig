@@ -190,6 +190,16 @@ pub const AwsHttp = struct {
             .response_storage = .{ .dynamic = &resp_payload },
             .raw_uri = true,
             .location = .{ .url = url },
+            // we need full control over most headers. I wish libraries would do a
+            // better job of having default headers as an opt-in...
+            .headers = .{
+                .host = .omit,
+                .authorization = .omit,
+                .user_agent = .omit,
+                .connection = .default, // we can let the client manage this...it has no impact to us
+                .accept_encoding = .default, // accept encoding (gzip, deflate) *should* be ok
+                .content_type = .omit,
+            },
             .extra_headers = headers.items,
         });
         // TODO: Need to test for payloads > 2^14. I believe one of our tests does this, but not sure
