@@ -5,8 +5,8 @@
 
     .dependencies = .{
         .aws = .{
-            .url = "https://git.lerch.org/lobo/-/packages/generic/aws-sdk-with-models/3e89ec468a493b239f01df81b1d0998ca925709f/files/510",
-            .hash = "122015b35d150e9c641a8f577ea07bb5cf52020038d052bcabc5d89214ac36e82c4e",
+            .url = "https://git.lerch.org/api/packages/lobo/generic/aws-sdk-with-models/e5b662873a6745a7e761643b1ca3d8637bf1222f/e5b662873a6745a7e761643b1ca3d8637bf1222f-with-models.tar.gz",
+            .hash = "12206394d50a9df1bf3fa6390cd5525bf97448d0f74a85113ef70c3bb60dcf4b7292",
         },
     },
 }
