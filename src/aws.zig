@@ -1380,6 +1380,49 @@ const TestOptions = struct {
 
     const Self = @This();
 
+    /// Builtin hashmap for strings as keys.
+    /// Key memory is managed by the caller.  Keys and values
+    /// will not automatically be freed.
+    pub fn StringCaseInsensitiveHashMap(comptime V: type) type {
+        return std.HashMap([]const u8, V, StringInsensitiveContext, std.hash_map.default_max_load_percentage);
+    }
+
+    pub const StringInsensitiveContext = struct {
+        pub fn hash(self: @This(), s: []const u8) u64 {
+            _ = self;
+            return hashString(s);
+        }
+        pub fn eql(self: @This(), a: []const u8, b: []const u8) bool {
+            _ = self;
+            return eqlString(a, b);
+        }
+    };
+
+    pub fn eqlString(a: []const u8, b: []const u8) bool {
+        return std.ascii.eqlIgnoreCase(a, b);
+    }
+
+    pub fn hashString(s: []const u8) u64 {
+        var buf: [1024]u8 = undefined;
+        if (s.len > buf.len) unreachable; // tolower has a debug assert, but we want non-debug check too
+        const lower_s = std.ascii.lowerString(buf[0..], s);
+        return std.hash.Wyhash.hash(0, lower_s);
+    }
+
+    fn expectNoDuplicateHeaders(self: *Self) !void {
+        // As header keys are
+        var hm = StringCaseInsensitiveHashMap(void).init(self.allocator);
+        try hm.ensureTotalCapacity(@intCast(self.request_headers.len));
+        defer hm.deinit();
+        for (self.request_headers) |h| {
+            if (hm.getKey(h.name)) |_| {
+                log.err("Duplicate key detected. Key name: {s}", .{h.name});
+                return error.duplicateKeyDetected;
+            }
+            try hm.put(h.name, {});
+        }
+    }
+
     fn expectHeader(self: *Self, name: []const u8, value: []const u8) !void {
         for (self.request_headers) |h|
             if (std.ascii.eqlIgnoreCase(name, h.name) and
@@ -1992,6 +2035,9 @@ test "rest_xml_anything_but_s3: CloudFront list key groups" {
     try std.testing.expectEqual(@as(i64, 100), call.response.key_group_list.?.max_items);
 }
 test "rest_xml_with_input: S3 put object" {
+    // const old = std.testing.log_level;
+    // defer std.testing.log_level = old;
+    // std.testing.log_level = .debug;
     const allocator = std.testing.allocator;
     var test_harness = TestSetup.init(.{
         .allocator = allocator,
@@ -2018,13 +2064,14 @@ test "rest_xml_with_input: S3 put object" {
         .body = "bar",
         .storage_class = "STANDARD",
     }, s3opts);
+    defer result.deinit();
     for (test_harness.request_options.request_headers) |header| {
         std.log.info("Request header: {s}: {s}", .{ header.name, header.value });
     }
+    try test_harness.request_options.expectNoDuplicateHeaders();
     std.log.info("PutObject Request id: {s}", .{result.response_metadata.request_id});
     std.log.info("PutObject etag: {s}", .{result.response.e_tag.?});
     //mysfitszj3t6webstack-hostingbucketa91a61fe-1ep3ezkgwpxr0.s3.us-west-2.amazonaws.com
-    defer result.deinit();
     test_harness.stop();
     // Request expectations
     try std.testing.expectEqual(std.http.Method.PUT, test_harness.request_options.request_method);
