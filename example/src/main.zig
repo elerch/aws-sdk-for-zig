@@ -36,10 +36,8 @@ pub fn main() anyerror!void {
         .client = client,
     };
 
-    // As of 2023-08-28, only ECS from this list supports TLS v1.3
-    // AWS commitment is to enable all services by 2023-12-31
     const services = aws.Services(.{ .sts, .kms }){};
-    try stdout.print("Calling KMS ListKeys, a TLS 1.3 enabled service\n", .{});
+    try stdout.print("Calling KMS ListKeys\n", .{});
     try stdout.print("You likely have at least some AWS-generated keys in your account,\n", .{});
     try stdout.print("but if the account has not had many services used, this may return 0 keys\n\n", .{});
     const call_kms = try aws.Request(services.kms.list_keys).call(.{}, options);
@@ -51,8 +49,7 @@ pub fn main() anyerror!void {
     }
     defer call_kms.deinit();
 
-    try stdout.print("\n\n\nCalling STS GetCallerIdentity. This does not have TLS 1.3 in September 2023\n", .{});
-    try stdout.print("A failure may occur\n\n", .{});
+    try stdout.print("\n\n\nCalling STS GetCallerIdentity\n", .{});
     const call = try aws.Request(services.sts.get_caller_identity).call(.{}, options);
     defer call.deinit();
     try stdout.print("\tarn: {s}\n", .{call.response.arn.?});
