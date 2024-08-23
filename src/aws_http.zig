@@ -251,6 +251,7 @@ pub const AwsHttp = struct {
 
 fn getRegion(service: []const u8, region: []const u8) []const u8 {
     if (std.mem.eql(u8, service, "cloudfront")) return "us-east-1";
+    if (std.mem.eql(u8, service, "iam")) return "us-east-1";
     return region;
 }
 
