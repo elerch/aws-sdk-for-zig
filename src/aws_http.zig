@@ -338,6 +338,26 @@ fn endpointException(
     dualstack: []const u8,
     domain: []const u8,
 ) !?EndPoint {
+    // Global endpoints (https://docs.aws.amazon.com/general/latest/gr/rande.html#global-endpoints):
+    //   ✓ Amazon CloudFront
+    //   AWS Global Accelerator
+    //   ✓ AWS Identity and Access Management (IAM)
+    //   AWS Network Manager
+    //   AWS Organizations
+    //   Amazon Route 53
+    //   AWS Shield Advanced
+    //   AWS WAF Classic
+
+    if (std.mem.eql(u8, service, "iam")) {
+        return EndPoint{
+            .uri = try allocator.dupe(u8, "https://iam.amazonaws.com"),
+            .host = try allocator.dupe(u8, "iam.amazonaws.com"),
+            .scheme = "https",
+            .port = 443,
+            .allocator = allocator,
+            .path = try allocator.dupe(u8, request.path),
+        };
+    }
     if (std.mem.eql(u8, service, "cloudfront")) {
         return EndPoint{
             .uri = try allocator.dupe(u8, "https://cloudfront.amazonaws.com"),
