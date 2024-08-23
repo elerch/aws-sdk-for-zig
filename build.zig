@@ -6,42 +6,18 @@ const models_subdir = "codegen/sdk-codegen/aws-models/"; // note will probably n
 
 const test_targets = [_]std.Target.Query{
     .{}, // native
-    .{
-        .cpu_arch = .x86_64,
-        .os_tag = .linux,
-    },
-    .{
-        .cpu_arch = .aarch64,
-        .os_tag = .linux,
-    },
+    .{ .cpu_arch = .x86_64, .os_tag = .linux },
+    .{ .cpu_arch = .aarch64, .os_tag = .linux },
     // The test executable linking process just spins forever in LLVM using nominated zig 0.13 May 2024
     // This is likely a LLVM problem unlikely to be fixed in zig 0.13
     // Potentially this issue: https://github.com/llvm/llvm-project/issues/81440
     // Zig tracker: https://github.com/ziglang/zig/issues/18872
-    // .{
-    //     .cpu_arch = .riscv64,
-    //     .os_tag = .linux,
-    // },
-    .{
-        .cpu_arch = .arm,
-        .os_tag = .linux,
-    },
-    .{
-        .cpu_arch = .x86_64,
-        .os_tag = .windows,
-    },
-    .{
-        .cpu_arch = .aarch64,
-        .os_tag = .macos,
-    },
-    .{
-        .cpu_arch = .x86_64,
-        .os_tag = .macos,
-    },
-    // .{
-    //     .cpu_arch = .wasm32,
-    //     .os_tag = .wasi,
-    // },
+    // .{ .cpu_arch = .riscv64, .os_tag = .linux },
+    .{ .cpu_arch = .arm, .os_tag = .linux },
+    .{ .cpu_arch = .x86_64, .os_tag = .windows },
+    .{ .cpu_arch = .aarch64, .os_tag = .macos },
+    .{ .cpu_arch = .x86_64, .os_tag = .macos },
+    .{ .cpu_arch = .wasm32, .os_tag = .wasi },
 };
 
 pub fn build(b: *Builder) !void {
