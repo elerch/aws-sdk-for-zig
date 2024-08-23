@@ -353,7 +353,7 @@ pub fn Request(comptime request_action: anytype) type {
             // First, we need to determine if we care about a response at all
             // If the expected result has no fields, there's no sense in
             // doing any more work. Let's bail early
-            var expected_body_field_len = std.meta.fields(action.Response).len;
+            comptime var expected_body_field_len = std.meta.fields(action.Response).len;
             if (@hasDecl(action.Response, "http_header"))
                 expected_body_field_len -= std.meta.fields(@TypeOf(action.Response.http_header)).len;
             if (@hasDecl(action.Response, "http_payload")) {
@@ -379,8 +379,6 @@ pub fn Request(comptime request_action: anytype) type {
 
             // We don't care about the body if there are no fields we expect there...
             if (std.meta.fields(action.Response).len == 0 or expected_body_field_len == 0) {
-                // ^^ This should be redundant, but is necessary. I suspect it's a compiler quirk
-                //
                 // Do we care if an unexpected body comes in?
                 return FullResponseType{
                     .response = .{},
@@ -1635,6 +1633,58 @@ test "query_no_input: sts getCallerIdentity comptime" {
     try std.testing.expectEqualStrings("AIDAYAM4POHXHRVANDQBQ", call.response.user_id.?);
     try std.testing.expectEqualStrings("123456789012", call.response.account.?);
     try std.testing.expectEqualStrings("8f0d54da-1230-40f7-b4ac-95015c4b84cd", call.response_metadata.request_id);
+}
+test "query_with_input: iam getRole runtime" {
+    // sqs switched from query to json in aws sdk for go v2 commit f5a08768ef820ff5efd62a49ba50c61c9ca5dbcb
+    const allocator = std.testing.allocator;
+    var test_harness = TestSetup.init(.{
+        .allocator = allocator,
+        .server_response =
+        \\<GetRoleResponse xmlns="https://iam.amazonaws.com/doc/2010-05-08/">
+        \\<GetRoleResult>
+        \\  <Role>
+        \\    <Path>/application_abc/component_xyz/</Path>
+        \\    <Arn>arn:aws:iam::123456789012:role/application_abc/component_xyz/S3Access</Arn>
+        \\    <RoleName>S3Access</RoleName>
+        \\    <AssumeRolePolicyDocument>
+        \\      {"Version":"2012-10-17","Statement":[{"Effect":"Allow",
+        \\      "Principal":{"Service":["ec2.amazonaws.com"]},"Action":["sts:AssumeRole"]}]}
+        \\    </AssumeRolePolicyDocument>
+        \\    <CreateDate>2012-05-08T23:34:01Z</CreateDate>
+        \\    <RoleId>AROADBQP57FF2AEXAMPLE</RoleId>
+        \\    <RoleLastUsed>
+        \\      <LastUsedDate>2019-11-20T17:09:20Z</LastUsedDate>
+        \\      <Region>us-east-1</Region>
+        \\    </RoleLastUsed>
+        \\  </Role>
+        \\</GetRoleResult>
+        \\<ResponseMetadata>
+        \\  <RequestId>df37e965-9967-11e1-a4c3-270EXAMPLE04</RequestId>
+        \\</ResponseMetadata>
+        \\</GetRoleResponse>
+        ,
+        .server_response_headers = &.{
+            .{ .name = "Content-Type", .value = "text/xml" },
+            .{ .name = "x-amzn-RequestId", .value = "df37e965-9967-11e1-a4c3-270EXAMPLE04" },
+        },
+    });
+    defer test_harness.deinit();
+    const options = try test_harness.start();
+    const iam = (Services(.{.iam}){}).iam;
+    const call = try test_harness.client.call(iam.get_role.Request{
+        .role_name = "S3Access",
+    }, options);
+    defer call.deinit();
+    test_harness.stop();
+    // Request expectations
+    try std.testing.expectEqual(std.http.Method.POST, test_harness.request_options.request_method);
+    try std.testing.expectEqualStrings("/", test_harness.request_options.request_target);
+    try std.testing.expectEqualStrings(
+        \\Action=GetRole&Version=2010-05-08&RoleName=S3Access
+    , test_harness.request_options.request_body);
+    // Response expectations
+    try std.testing.expectEqualStrings("arn:aws:iam::123456789012:role/application_abc/component_xyz/S3Access", call.response.role.arn);
+    try std.testing.expectEqualStrings("df37e965-9967-11e1-a4c3-270EXAMPLE04", call.response_metadata.request_id);
 }
 test "query_with_input: sts getAccessKeyInfo runtime" {
     // sqs switched from query to json in aws sdk for go v2 commit f5a08768ef820ff5efd62a49ba50c61c9ca5dbcb
