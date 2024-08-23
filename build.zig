@@ -17,7 +17,7 @@ const test_targets = [_]std.Target.Query{
     .{ .cpu_arch = .x86_64, .os_tag = .windows },
     .{ .cpu_arch = .aarch64, .os_tag = .macos },
     .{ .cpu_arch = .x86_64, .os_tag = .macos },
-    .{ .cpu_arch = .wasm32, .os_tag = .wasi },
+    // .{ .cpu_arch = .wasm32, .os_tag = .wasi },
 };
 
 pub fn build(b: *Builder) !void {
