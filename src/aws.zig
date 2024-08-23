@@ -19,6 +19,18 @@ pub const Options = struct {
 
     /// Used for testing to provide consistent signing. If null, will use current time
     signing_time: ?i64 = null,
+    diagnostics: ?*Diagnostics = null,
+};
+
+pub const Diagnostics = struct {
+    http_code: i64,
+    response_body: []const u8,
+    allocator: std.mem.Allocator,
+
+    pub fn deinit(self: *Diagnostics) void {
+        self.allocator.free(self.response_body);
+        self.response_body = undefined;
+    }
 };
 
 /// Using this constant may blow up build times. Recommed using Services()
@@ -272,6 +284,10 @@ pub fn Request(comptime request_action: anytype) type {
             defer response.deinit();
             if (response.response_code != options.success_http_code) {
                 try reportTraffic(options.client.allocator, "Call Failed", aws_request, response, log.err);
+                if (options.diagnostics) |d| {
+                    d.http_code = response.response_code;
+                    d.response_body = try d.allocator.dupe(u8, response.body);
+                }
                 return error.HttpFailure;
             }
 
