@@ -2,6 +2,16 @@ const std = @import("std");
 // options is a json.Options, but since we're using our hacked json.zig we don't want to
 // specifically call this out
 pub fn serializeMap(map: anytype, key: []const u8, options: anytype, out_stream: anytype) !bool {
+    if (@typeInfo(@TypeOf(map)) == .Optional) {
+        if (map == null)
+            return true
+        else
+            return serializeMapInternal(map.?, key, options, out_stream);
+    }
+    return serializeMapInternal(map, key, options, out_stream);
+}
+
+fn serializeMapInternal(map: anytype, key: []const u8, options: anytype, out_stream: anytype) !bool {
     if (map.len == 0) return true;
     // TODO: Map might be [][]struct{key, value} rather than []struct{key, value}
     var child_options = options;
