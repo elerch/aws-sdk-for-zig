@@ -22,7 +22,7 @@ pub const Result = struct {
             self.allocator.free(h.value);
         }
         self.allocator.free(self.headers);
-        log.debug("http result deinit complete", .{});
+        //log.debug("http result deinit complete", .{});
         return;
     }
 };

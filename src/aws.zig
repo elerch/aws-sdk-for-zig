@@ -9,7 +9,69 @@ const date = @import("date.zig");
 const servicemodel = @import("servicemodel.zig");
 const xml_shaper = @import("xml_shaper.zig");
 
-const log = std.log.scoped(.aws);
+const scoped_log = std.log.scoped(.aws);
+
+/// control all logs directly/indirectly used by aws sdk. Not recommended for
+/// use under normal circumstances, but helpful for times when the zig logging
+/// controls are insufficient (e.g. use in build script)
+pub fn globalLogControl(aws_level: std.log.Level, http_level: std.log.Level, signing_level: std.log.Level, off: bool) void {
+    const signing = @import("aws_signing.zig");
+    logs_off = off;
+    signing.logs_off = off;
+    awshttp.logs_off = off;
+    log_level = aws_level;
+    awshttp.log_level = http_level;
+    signing.log_level = signing_level;
+}
+/// Specifies logging level. This should not be touched unless the normal
+/// zig logging capabilities are inaccessible (e.g. during a build)
+pub var log_level: std.log.Level = .debug;
+
+/// Turn off logging completely
+pub var logs_off: bool = false;
+const log = struct {
+    /// Log an error message. This log level is intended to be used
+    /// when something has gone wrong. This might be recoverable or might
+    /// be followed by the program exiting.
+    pub fn err(
+        comptime format: []const u8,
+        args: anytype,
+    ) void {
+        if (!logs_off and @intFromEnum(std.log.Level.err) <= @intFromEnum(log_level))
+            scoped_log.err(format, args);
+    }
+
+    /// Log a warning message. This log level is intended to be used if
+    /// it is uncertain whether something has gone wrong or not, but the
+    /// circumstances would be worth investigating.
+    pub fn warn(
+        comptime format: []const u8,
+        args: anytype,
+    ) void {
+        if (!logs_off and @intFromEnum(std.log.Level.warn) <= @intFromEnum(log_level))
+            scoped_log.warn(format, args);
+    }
+
+    /// Log an info message. This log level is intended to be used for
+    /// general messages about the state of the program.
+    pub fn info(
+        comptime format: []const u8,
+        args: anytype,
+    ) void {
+        if (!logs_off and @intFromEnum(std.log.Level.info) <= @intFromEnum(log_level))
+            scoped_log.info(format, args);
+    }
+
+    /// Log a debug message. This log level is intended to be used for
+    /// messages which are only useful for debugging.
+    pub fn debug(
+        comptime format: []const u8,
+        args: anytype,
+    ) void {
+        if (!logs_off and @intFromEnum(std.log.Level.debug) <= @intFromEnum(log_level))
+            scoped_log.debug(format, args);
+    }
+};
 
 pub const Options = struct {
     region: []const u8 = "aws-global",
