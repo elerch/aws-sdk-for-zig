@@ -2756,6 +2756,10 @@ pub const StringifyOptions = struct {
         }
     };
 
+    emit_null: bool = true,
+
+    exclude_fields: ?[][]const u8 = null,
+
     /// Controls the whitespace emitted
     whitespace: ?Whitespace = null,
 
@@ -2855,7 +2859,7 @@ pub fn stringify(
             }
 
             try out_stream.writeByte('{');
-            comptime var field_output = false;
+            var field_output = false;
             var child_options = options;
             if (child_options.whitespace) |*child_whitespace| {
                 child_whitespace.indent_level += 1;
@@ -2864,34 +2868,46 @@ pub fn stringify(
                 // don't include void fields
                 if (Field.type == void) continue;
 
-                if (!field_output) {
-                    field_output = true;
-                } else {
-                    try out_stream.writeByte(',');
-                }
-                if (child_options.whitespace) |child_whitespace| {
-                    try out_stream.writeByte('\n');
-                    try child_whitespace.outputIndent(out_stream);
-                }
-                var field_written = false;
-                if (comptime std.meta.hasFn(T, "jsonStringifyField"))
-                    field_written = try value.jsonStringifyField(Field.name, child_options, out_stream);
+                var output_this_field = true;
+                if (!options.emit_null and @typeInfo(Field.type) == .Optional and @field(value, Field.name) == null) output_this_field = false;
 
-                if (!field_written) {
-                    if (comptime std.meta.hasFn(T, "fieldNameFor")) {
-                        const name = value.fieldNameFor(Field.name);
-                        try stringify(name, options, out_stream);
-                    } else {
-                        try stringify(Field.name, options, out_stream);
-                    }
-
-                    try out_stream.writeByte(':');
-                    if (child_options.whitespace) |child_whitespace| {
-                        if (child_whitespace.separator) {
-                            try out_stream.writeByte(' ');
+                const final_name = if (comptime std.meta.hasFn(T, "fieldNameFor"))
+                    value.fieldNameFor(Field.name)
+                else
+                    Field.name;
+                if (options.exclude_fields) |exclude_fields| {
+                    for (exclude_fields) |exclude_field| {
+                        if (std.mem.eql(u8, final_name, exclude_field)) {
+                            output_this_field = false;
                         }
                     }
-                    try stringify(@field(value, Field.name), child_options, out_stream);
+                }
+
+                if (!field_output) {
+                    field_output = output_this_field;
+                } else {
+                    if (output_this_field) try out_stream.writeByte(',');
+                }
+                if (child_options.whitespace) |child_whitespace| {
+                    if (output_this_field) try out_stream.writeByte('\n');
+                    if (output_this_field) try child_whitespace.outputIndent(out_stream);
+                }
+                var field_written = false;
+                if (comptime std.meta.hasFn(T, "jsonStringifyField")) {
+                    if (output_this_field) field_written = try value.jsonStringifyField(Field.name, child_options, out_stream);
+                }
+
+                if (!field_written) {
+                    if (output_this_field) {
+                        try stringify(final_name, options, out_stream);
+                        try out_stream.writeByte(':');
+                    }
+                    if (child_options.whitespace) |child_whitespace| {
+                        if (child_whitespace.separator) {
+                            if (output_this_field) try out_stream.writeByte(' ');
+                        }
+                    }
+                    if (output_this_field) try stringify(@field(value, Field.name), child_options, out_stream);
                 }
             }
             if (field_output) {

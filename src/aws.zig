@@ -126,12 +126,15 @@ pub fn Request(comptime request_action: anytype) type {
             log.debug("Rest method: '{s}'", .{aws_request.method});
             log.debug("Rest success code: '{d}'", .{Action.http_config.success_code});
             log.debug("Rest raw uri: '{s}'", .{Action.http_config.uri});
+            var al = std.ArrayList([]const u8).init(options.client.allocator);
+            defer al.deinit();
             aws_request.path = try buildPath(
                 options.client.allocator,
                 Action.http_config.uri,
                 ActionRequest,
                 request,
                 !std.mem.eql(u8, Self.service_meta.sdk_id, "S3"),
+                &al,
             );
             defer options.client.allocator.free(aws_request.path);
             log.debug("Rest processed uri: '{s}'", .{aws_request.path});
@@ -163,7 +166,7 @@ pub fn Request(comptime request_action: anytype) type {
             defer nameAllocator.deinit();
             if (Self.service_meta.aws_protocol == .rest_json_1) {
                 if (std.mem.eql(u8, "PUT", aws_request.method) or std.mem.eql(u8, "POST", aws_request.method)) {
-                    try json.stringify(request, .{ .whitespace = .{} }, buffer.writer());
+                    try json.stringify(request, .{ .whitespace = .{}, .emit_null = false, .exclude_fields = al.items }, buffer.writer());
                 }
             }
             aws_request.body = buffer.items;
@@ -944,6 +947,7 @@ fn buildPath(
     comptime ActionRequest: type,
     request: anytype,
     encode_slash: bool,
+    replaced_fields: *std.ArrayList([]const u8),
 ) ![]const u8 {
     var buffer = try std.ArrayList(u8).initCapacity(allocator, raw_uri.len);
     // const writer = buffer.writer();
@@ -965,6 +969,7 @@ fn buildPath(
                 const replacement_label = raw_uri[start..end];
                 inline for (std.meta.fields(ActionRequest)) |field| {
                     if (std.mem.eql(u8, request.fieldNameFor(field.name), replacement_label)) {
+                        try replaced_fields.append(replacement_label);
                         var replacement_buffer = try std.ArrayList(u8).initCapacity(allocator, raw_uri.len);
                         defer replacement_buffer.deinit();
                         var encoded_buffer = try std.ArrayList(u8).initCapacity(allocator, raw_uri.len);
@@ -1254,23 +1259,27 @@ test "REST Json v1 serializes lists in queries" {
 }
 test "REST Json v1 buildpath substitutes" {
     const allocator = std.testing.allocator;
+    var al = std.ArrayList([]const u8).init(allocator);
+    defer al.deinit();
     const svs = Services(.{.lambda}){};
     const request = svs.lambda.list_functions.Request{
         .max_items = 1,
     };
     const input_path = "https://myhost/{MaxItems}/";
-    const output_path = try buildPath(allocator, input_path, @TypeOf(request), request, true);
+    const output_path = try buildPath(allocator, input_path, @TypeOf(request), request, true, &al);
     defer allocator.free(output_path);
     try std.testing.expectEqualStrings("https://myhost/1/", output_path);
 }
 test "REST Json v1 buildpath handles restricted characters" {
     const allocator = std.testing.allocator;
+    var al = std.ArrayList([]const u8).init(allocator);
+    defer al.deinit();
     const svs = Services(.{.lambda}){};
     const request = svs.lambda.list_functions.Request{
         .marker = ":",
     };
     const input_path = "https://myhost/{Marker}/";
-    const output_path = try buildPath(allocator, input_path, @TypeOf(request), request, true);
+    const output_path = try buildPath(allocator, input_path, @TypeOf(request), request, true, &al);
     defer allocator.free(output_path);
     try std.testing.expectEqualStrings("https://myhost/%3A/", output_path);
 }
@@ -1970,7 +1979,6 @@ test "rest_json_1_work_with_lambda: lambda tagResource (only), to excercise zig 
     try std.testing.expectEqual(std.http.Method.POST, test_harness.request_options.request_method);
     try std.testing.expectEqualStrings(
         \\{
-        \\    "Resource": "arn:aws:lambda:us-west-2:550620852718:function:awsome-lambda-LambdaStackawsomeLambda",
         \\    "Tags": {
         \\        "Foo": "Bar"
         \\    }
@@ -1978,6 +1986,45 @@ test "rest_json_1_work_with_lambda: lambda tagResource (only), to excercise zig 
     , test_harness.request_options.request_body);
     // Due to 17015, we see %253A instead of %3A
     try std.testing.expectEqualStrings("/2017-03-31/tags/arn%3Aaws%3Alambda%3Aus-west-2%3A550620852718%3Afunction%3Aawsome-lambda-LambdaStackawsomeLambda", test_harness.request_options.request_target);
+    // Response expectations
+    try std.testing.expectEqualStrings("a521e152-6e32-4e67-9fb3-abc94e34551b", call.response_metadata.request_id);
+}
+test "rest_json_1_url_parameters_not_in_request: lambda update_function_code" {
+    const allocator = std.testing.allocator;
+    var test_harness = TestSetup.init(.{
+        .allocator = allocator,
+        .server_response = "{\"CodeSize\": 42}",
+        .server_response_status = .ok,
+        .server_response_headers = &.{
+            .{ .name = "Content-Type", .value = "application/json" },
+            .{ .name = "x-amzn-RequestId", .value = "a521e152-6e32-4e67-9fb3-abc94e34551b" },
+        },
+    });
+    defer test_harness.deinit();
+    const options = try test_harness.start();
+    const lambda = (Services(.{.lambda}){}).lambda;
+    const architectures = [_][]const u8{"x86_64"};
+    const arches: [][]const u8 = @constCast(architectures[0..]);
+    const req = services.lambda.update_function_code.Request{
+        .function_name = "functionname",
+        .architectures = arches,
+        .zip_file = "zipfile",
+    };
+    const call = try Request(lambda.update_function_code).call(req, options);
+    defer call.deinit();
+    test_harness.stop();
+    // Request expectations
+    try std.testing.expectEqual(std.http.Method.PUT, test_harness.request_options.request_method);
+    try std.testing.expectEqualStrings(
+        \\{
+        \\    "ZipFile": "zipfile",
+        \\    "Architectures": [
+        \\        "x86_64"
+        \\    ]
+        \\}
+    , test_harness.request_options.request_body);
+    // Due to 17015, we see %253A instead of %3A
+    try std.testing.expectEqualStrings("/2015-03-31/functions/functionname/code", test_harness.request_options.request_target);
     // Response expectations
     try std.testing.expectEqualStrings("a521e152-6e32-4e67-9fb3-abc94e34551b", call.response_metadata.request_id);
 }
