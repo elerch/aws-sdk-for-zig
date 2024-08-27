@@ -16,12 +16,15 @@ const scoped_log = std.log.scoped(.aws);
 /// controls are insufficient (e.g. use in build script)
 pub fn globalLogControl(aws_level: std.log.Level, http_level: std.log.Level, signing_level: std.log.Level, off: bool) void {
     const signing = @import("aws_signing.zig");
+    const credentials = @import("aws_credentials.zig");
     logs_off = off;
     signing.logs_off = off;
+    credentials.logs_off = off;
     awshttp.logs_off = off;
     log_level = aws_level;
     awshttp.log_level = http_level;
     signing.log_level = signing_level;
+    credentials.log_level = signing_level;
 }
 /// Specifies logging level. This should not be touched unless the normal
 /// zig logging capabilities are inaccessible (e.g. during a build)
