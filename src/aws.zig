@@ -255,6 +255,7 @@ pub fn Request(comptime request_action: anytype) type {
                 .dualstack = options.dualstack,
                 .client = options.client,
                 .signing_time = options.signing_time,
+                .diagnostics = options.diagnostics,
             });
         }
 
