@@ -21,10 +21,12 @@ jobs:
         with:
           ref: zig-develop
       - name: Setup Zig
-        uses: https://git.lerch.org/lobo/setup-zig@v3
+        uses: mlugg/setup-zig@v1.2.1
         with:
           version: mach-latest
-      - name: Run tests
+      - name: Run smoke test
+        run: zig build smoke-test --verbose
+      - name: Run full tests
         run: zig build test --verbose
       # Zig package manager expects everything to be inside a directory in the archive,
       # which it then strips out on download. So we need to shove everything inside a directory
