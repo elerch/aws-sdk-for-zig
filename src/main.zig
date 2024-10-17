@@ -97,7 +97,7 @@ pub fn main() anyerror!void {
             }
             continue;
         }
-        inline for (@typeInfo(Tests).Enum.fields) |f| {
+        inline for (@typeInfo(Tests).@"enum".fields) |f| {
             if (std.mem.eql(u8, f.name, arg)) {
                 try tests.append(@field(Tests, f.name));
                 break;
@@ -105,7 +105,7 @@ pub fn main() anyerror!void {
         }
     }
     if (tests.items.len == 0) {
-        inline for (@typeInfo(Tests).Enum.fields) |f|
+        inline for (@typeInfo(Tests).@"enum".fields) |f|
             try tests.append(@field(Tests, f.name));
     }
 
@@ -192,7 +192,7 @@ pub fn main() anyerror!void {
                         const func = fns[0];
                         const arn = func.function_arn.?;
                         // This is a bit ugly. Maybe a helper function in the library would help?
-                        var tags = try std.ArrayList(@typeInfo(try typeForField(services.lambda.tag_resource.Request, "tags")).Pointer.child).initCapacity(allocator, 1);
+                        var tags = try std.ArrayList(@typeInfo(try typeForField(services.lambda.tag_resource.Request, "tags")).pointer.child).initCapacity(allocator, 1);
                         defer tags.deinit();
                         tags.appendAssumeCapacity(.{ .key = "Foo", .value = "Bar" });
                         const req = services.lambda.tag_resource.Request{ .resource = arn, .tags = tags.items };
@@ -380,8 +380,8 @@ fn proxyFromString(string: []const u8) !std.http.Client.Proxy {
 fn typeForField(comptime T: type, comptime field_name: []const u8) !type {
     const ti = @typeInfo(T);
     switch (ti) {
-        .Struct => {
-            inline for (ti.Struct.fields) |field| {
+        .@"struct" => {
+            inline for (ti.@"struct".fields) |field| {
                 if (std.mem.eql(u8, field.name, field_name))
                     return field.type;
             }

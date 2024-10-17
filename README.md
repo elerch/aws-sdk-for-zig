@@ -17,7 +17,7 @@ Current executable size for the demo is 980k after compiling with -Doptimize=Rel
 in x86_linux, and will vary based on services used. Tested targets:
 
 * x86_64-linux
-* riscv64-linux\*
+* riscv64-linux
 * aarch64-linux
 * x86_64-windows
 * arm-linux
@@ -25,9 +25,6 @@ in x86_linux, and will vary based on services used. Tested targets:
 * x86_64-macos
 
 Tested targets are built, but not continuously tested, by CI.
-
-\* On Zig 0.12/0.13, riscv64-linux disabled due to [LLLM's O(N^2) codegen](https://github.com/ziglang/zig/issues/18872)
-
 
 Zig-Develop Branch
 ------------------
