@@ -191,5 +191,24 @@ pub fn build(b: *Builder) !void {
     }
     const check = b.step("check", "Check compilation errors");
     check.dependOn(&exe.step);
+
+    // Similar to creating the run step earlier, this exposes a `test` step to
+    // the `zig build --help` menu, providing a way for the user to request
+    // running the unit tests.
+    const smoke_test_step = b.step("smoke-test", "Run unit tests");
+
+    // Creates a step for unit testing. This only builds the test executable
+    // but does not run it.
+    const smoke_test = b.addTest(.{
+        .root_source_file = b.path("src/aws.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    smoke_test.root_module.addImport("smithy", smithy_dep.module("smithy"));
+    smoke_test.step.dependOn(gen_step);
+
+    const run_smoke_test = b.addRunArtifact(smoke_test);
+
+    smoke_test_step.dependOn(&run_smoke_test.step);
     b.installArtifact(exe);
 }
