@@ -13,6 +13,10 @@ AWS SDK for Zig
 
 [![Build Status: Zig Nightly](https://git.lerch.org/lobo/aws-sdk-for-zig/actions/workflows/zig-nightly.yaml/badge.svg)](https://git.lerch.org/lobo/aws-sdk-for-zig/actions?workflow=zig-nightly.yaml&state=closed)
 
+**NOTE ON BUILD STATUS**: The nightly/mach nominated version of this currently
+panics under CI, but I have not yet reproduced this panic. Running manually on
+multiple machines appears to be working properly
+
 Current executable size for the demo is 980k after compiling with -Doptimize=ReleaseSmall
 in x86_linux, and will vary based on services used. Tested targets:
 
