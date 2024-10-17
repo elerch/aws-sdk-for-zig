@@ -1560,21 +1560,21 @@ fn skipValue(tokens: *TokenStream) SkipValueError!void {
 
 fn parseInternal(comptime T: type, token: Token, tokens: *TokenStream, options: ParseOptions) !T {
     switch (@typeInfo(T)) {
-        .Bool => {
+        .bool => {
             return switch (token) {
                 .True => true,
                 .False => false,
                 else => error.UnexpectedToken,
             };
         },
-        .Float, .ComptimeFloat => {
+        .float, .comptime_float => {
             const numberToken = switch (token) {
                 .Number => |n| n,
                 else => return error.UnexpectedToken,
             };
             return try std.fmt.parseFloat(T, numberToken.slice(tokens.slice, tokens.i - 1));
         },
-        .Int, .ComptimeInt => {
+        .int, .comptime_int => {
             const numberToken = switch (token) {
                 .Number => |n| n,
                 else => return error.UnexpectedToken,
@@ -1587,14 +1587,14 @@ fn parseInternal(comptime T: type, token: Token, tokens: *TokenStream, options: 
             if (std.math.round(float) != float) return error.InvalidNumber;
             return @as(T, @intFromFloat(float));
         },
-        .Optional => |optionalInfo| {
+        .optional => |optionalInfo| {
             if (token == .Null) {
                 return null;
             } else {
                 return try parseInternal(optionalInfo.child, token, tokens, options);
             }
         },
-        .Enum => |enumInfo| {
+        .@"enum" => |enumInfo| {
             switch (token) {
                 .Number => |numberToken| {
                     if (!numberToken.is_integer) return error.UnexpectedToken;
@@ -1618,7 +1618,7 @@ fn parseInternal(comptime T: type, token: Token, tokens: *TokenStream, options: 
                 else => return error.UnexpectedToken,
             }
         },
-        .Union => |unionInfo| {
+        .@"union" => |unionInfo| {
             if (unionInfo.tag_type) |_| {
                 // try each of the union fields until we find one that matches
                 inline for (unionInfo.fields) |u_field| {
@@ -1642,7 +1642,7 @@ fn parseInternal(comptime T: type, token: Token, tokens: *TokenStream, options: 
                 @compileError("Unable to parse into untagged union '" ++ @typeName(T) ++ "'");
             }
         },
-        .Struct => |structInfo| {
+        .@"struct" => |structInfo| {
             switch (token) {
                 .ObjectBegin => {},
                 else => return error.UnexpectedToken,
@@ -1736,7 +1736,7 @@ fn parseInternal(comptime T: type, token: Token, tokens: *TokenStream, options: 
             }
             return r;
         },
-        .Array => |arrayInfo| {
+        .array => |arrayInfo| {
             switch (token) {
                 .ArrayBegin => {
                     var r: T = undefined;
@@ -1770,7 +1770,7 @@ fn parseInternal(comptime T: type, token: Token, tokens: *TokenStream, options: 
                 else => return error.UnexpectedToken,
             }
         },
-        .Pointer => |ptrInfo| {
+        .pointer => |ptrInfo| {
             const allocator = options.allocator orelse return error.AllocatorRequired;
             switch (ptrInfo.size) {
                 .One => {
@@ -1863,8 +1863,8 @@ fn parseInternal(comptime T: type, token: Token, tokens: *TokenStream, options: 
 fn typeForField(comptime T: type, comptime field_name: []const u8) ?type {
     const ti = @typeInfo(T);
     switch (ti) {
-        .Struct => {
-            inline for (ti.Struct.fields) |field| {
+        .@"struct" => {
+            inline for (ti.@"struct".fields) |field| {
                 if (std.mem.eql(u8, field.name, field_name))
                     return field.type;
             }
@@ -1878,14 +1878,14 @@ fn isMapPattern(comptime T: type) bool {
     // We should be getting a type that is a pointer to a slice.
     // Let's just double check before proceeding
     const ti = @typeInfo(T);
-    if (ti != .Pointer) return false;
-    if (ti.Pointer.size != .Slice) return false;
-    const ti_child = @typeInfo(ti.Pointer.child);
-    if (ti_child != .Struct) return false;
-    if (ti_child.Struct.fields.len != 2) return false;
+    if (ti != .pointer) return false;
+    if (ti.pointer.size != .Slice) return false;
+    const ti_child = @typeInfo(ti.pointer.child);
+    if (ti_child != .@"struct") return false;
+    if (ti_child.@"struct".fields.len != 2) return false;
     var key_found = false;
     var value_found = false;
-    inline for (ti_child.Struct.fields) |field| {
+    inline for (ti_child.@"struct".fields) |field| {
         if (std.mem.eql(u8, "key", field.name))
             key_found = true;
         if (std.mem.eql(u8, "value", field.name))
@@ -1903,13 +1903,13 @@ pub fn parse(comptime T: type, tokens: *TokenStream, options: ParseOptions) !T {
 /// Should be called with the same type and `ParseOptions` that were passed to `parse`
 pub fn parseFree(comptime T: type, value: T, options: ParseOptions) void {
     switch (@typeInfo(T)) {
-        .Bool, .Float, .ComptimeFloat, .Int, .ComptimeInt, .Enum => {},
-        .Optional => {
+        .bool, .float, .comptime_float, .int, .comptime_int, .@"enum" => {},
+        .optional => {
             if (value) |v| {
                 return parseFree(@TypeOf(v), v, options);
             }
         },
-        .Union => |unionInfo| {
+        .@"union" => |unionInfo| {
             if (unionInfo.tag_type) |UnionTagType| {
                 inline for (unionInfo.fields) |u_field| {
                     if (value == @field(UnionTagType, u_field.name)) {
@@ -1921,17 +1921,17 @@ pub fn parseFree(comptime T: type, value: T, options: ParseOptions) void {
                 unreachable;
             }
         },
-        .Struct => |structInfo| {
+        .@"struct" => |structInfo| {
             inline for (structInfo.fields) |field| {
                 parseFree(field.type, @field(value, field.name), options);
             }
         },
-        .Array => |arrayInfo| {
+        .array => |arrayInfo| {
             for (value) |v| {
                 parseFree(arrayInfo.child, v, options);
             }
         },
-        .Pointer => |ptrInfo| {
+        .pointer => |ptrInfo| {
             const allocator = options.allocator orelse unreachable;
             switch (ptrInfo.size) {
                 .One => {
@@ -2811,38 +2811,38 @@ pub fn stringify(
 ) !void {
     const T = @TypeOf(value);
     switch (@typeInfo(T)) {
-        .Float, .ComptimeFloat => {
+        .float, .comptime_float => {
             return std.fmt.format(out_stream, "{e}", .{value});
         },
-        .Int, .ComptimeInt => {
+        .int, .comptime_int => {
             return std.fmt.formatIntValue(value, "", std.fmt.FormatOptions{}, out_stream);
         },
-        .Bool => {
+        .bool => {
             return out_stream.writeAll(if (value) "true" else "false");
         },
-        .Null => {
+        .null => {
             return out_stream.writeAll("null");
         },
-        .Optional => {
+        .optional => {
             if (value) |payload| {
                 return try stringify(payload, options, out_stream);
             } else {
                 return try stringify(null, options, out_stream);
             }
         },
-        .Enum => {
+        .@"enum" => {
             if (comptime std.meta.hasFn(T, "jsonStringify")) {
                 return value.jsonStringify(options, out_stream);
             }
 
             @compileError("Unable to stringify enum '" ++ @typeName(T) ++ "'");
         },
-        .Union => {
+        .@"union" => {
             if (comptime std.meta.hasFn(T, "jsonStringify")) {
                 return value.jsonStringify(options, out_stream);
             }
 
-            const info = @typeInfo(T).Union;
+            const info = @typeInfo(T).@"union";
             if (info.tag_type) |UnionTagType| {
                 inline for (info.fields) |u_field| {
                     if (value == @field(UnionTagType, u_field.name)) {
@@ -2853,7 +2853,7 @@ pub fn stringify(
                 @compileError("Unable to stringify untagged union '" ++ @typeName(T) ++ "'");
             }
         },
-        .Struct => |S| {
+        .@"struct" => |S| {
             if (comptime std.meta.hasFn(T, "jsonStringify")) {
                 return value.jsonStringify(options, out_stream);
             }
@@ -2869,7 +2869,7 @@ pub fn stringify(
                 if (Field.type == void) continue;
 
                 var output_this_field = true;
-                if (!options.emit_null and @typeInfo(Field.type) == .Optional and @field(value, Field.name) == null) output_this_field = false;
+                if (!options.emit_null and @typeInfo(Field.type) == .optional and @field(value, Field.name) == null) output_this_field = false;
 
                 const final_name = if (comptime std.meta.hasFn(T, "fieldNameFor"))
                     value.fieldNameFor(Field.name)
@@ -2919,10 +2919,10 @@ pub fn stringify(
             try out_stream.writeByte('}');
             return;
         },
-        .ErrorSet => return stringify(@as([]const u8, @errorName(value)), options, out_stream),
-        .Pointer => |ptr_info| switch (ptr_info.size) {
+        .error_set => return stringify(@as([]const u8, @errorName(value)), options, out_stream),
+        .pointer => |ptr_info| switch (ptr_info.size) {
             .One => switch (@typeInfo(ptr_info.child)) {
-                .Array => {
+                .array => {
                     const Slice = []const std.meta.Elem(ptr_info.child);
                     return stringify(@as(Slice, value), options, out_stream);
                 },
@@ -3001,8 +3001,8 @@ pub fn stringify(
             },
             else => @compileError("Unable to stringify type '" ++ @typeName(T) ++ "'"),
         },
-        .Array => return stringify(&value, options, out_stream),
-        .Vector => |info| {
+        .array => return stringify(&value, options, out_stream),
+        .vector => |info| {
             const array: [info.len]info.child = value;
             return stringify(&array, options, out_stream);
         },

@@ -96,14 +96,14 @@ pub fn parse(comptime T: type, source: []const u8, options: ParseOptions) !Parse
 
 fn parseInternal(comptime T: type, element: *xml.Element, options: ParseOptions) !T {
     switch (@typeInfo(T)) {
-        .Bool => {
+        .bool => {
             if (std.ascii.eqlIgnoreCase("true", element.children.items[0].CharData))
                 return true;
             if (std.ascii.eqlIgnoreCase("false", element.children.items[0].CharData))
                 return false;
             return error.UnexpectedToken;
         },
-        .Float, .ComptimeFloat => {
+        .float, .comptime_float => {
             return std.fmt.parseFloat(T, element.children.items[0].CharData) catch |e| {
                 if (log_parse_traces) {
                     std.log.err(
@@ -121,7 +121,7 @@ fn parseInternal(comptime T: type, element: *xml.Element, options: ParseOptions)
                 return e;
             };
         },
-        .Int, .ComptimeInt => {
+        .int, .comptime_int => {
             // 2021-10-05T16:39:45.000Z
             return std.fmt.parseInt(T, element.children.items[0].CharData, 10) catch |e| {
                 if (element.children.items[0].CharData[element.children.items[0].CharData.len - 1] == 'Z') {
@@ -146,7 +146,7 @@ fn parseInternal(comptime T: type, element: *xml.Element, options: ParseOptions)
                 return e;
             };
         },
-        .Optional => |optional_info| {
+        .optional => |optional_info| {
             if (element.children.items.len == 0) {
                 // This is almost certainly incomplete. Empty strings? xsi:nil?
                 return null;
@@ -156,7 +156,7 @@ fn parseInternal(comptime T: type, element: *xml.Element, options: ParseOptions)
                 return try parseInternal(optional_info.child, element, options);
             }
         },
-        .Enum => |enum_info| {
+        .@"enum" => |enum_info| {
             _ = enum_info;
             // const numeric: ?enum_info.tag_type = std.fmt.parseInt(enum_info.tag_type, element.children.items[0].CharData, 10) catch null;
             // if (numeric) |num| {
@@ -166,7 +166,7 @@ fn parseInternal(comptime T: type, element: *xml.Element, options: ParseOptions)
             //     return std.meta.stringToEnum(T, element.CharData);
             // }
         },
-        .Union => |union_info| {
+        .@"union" => |union_info| {
             if (union_info.tag_type) |_| {
                 // try each of the union fields until we find one that matches
                 // inline for (union_info.fields) |u_field| {
@@ -189,7 +189,7 @@ fn parseInternal(comptime T: type, element: *xml.Element, options: ParseOptions)
             }
             @compileError("Unable to parse into untagged union '" ++ @typeName(T) ++ "'");
         },
-        .Struct => |struct_info| {
+        .@"struct" => |struct_info| {
             var r: T = undefined;
             var fields_seen = [_]bool{false} ** struct_info.fields.len;
             var fields_set: u64 = 0;
@@ -244,7 +244,7 @@ fn parseInternal(comptime T: type, element: *xml.Element, options: ParseOptions)
                     fields_set = fields_set + 1;
                     found_value = true;
                 }
-                if (@typeInfo(field.type) == .Optional) {
+                if (@typeInfo(field.type) == .optional) {
                     // Test "compiler assertion failure 2"
                     // Zig compiler bug circa 0.9.0. Using "and !found_value"
                     // in the if statement above will trigger assertion failure
@@ -269,7 +269,7 @@ fn parseInternal(comptime T: type, element: *xml.Element, options: ParseOptions)
                 return error.FieldElementMismatch; // see fields_seen for details
             return r;
         },
-        .Array => //|array_info| {
+        .array => //|array_info| {
         return error.ArrayNotImplemented,
         // switch (token) {
         //     .ArrayBegin => {
@@ -304,7 +304,7 @@ fn parseInternal(comptime T: type, element: *xml.Element, options: ParseOptions)
         //     else => return error.UnexpectedToken,
         // }
         // },
-        .Pointer => |ptr_info| {
+        .pointer => |ptr_info| {
             const allocator = options.allocator orelse return error.AllocatorRequired;
             switch (ptr_info.size) {
                 .One => {
