@@ -24,6 +24,8 @@ jobs:
         uses: mlugg/setup-zig@v1.2.1
         with:
           version: mach-latest
+      - name: Run gen
+        run: zig build gen --verbose
       - name: Run smoke test
         run: zig build smoke-test --verbose
       - name: Run full tests
