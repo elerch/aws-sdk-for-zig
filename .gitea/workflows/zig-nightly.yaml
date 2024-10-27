@@ -10,6 +10,11 @@ env:
   PKG_PREFIX: nightly-zig
 jobs:
   build-zig-nightly:
+    container:
+      # We need CAP_SYS_PTRACE for stack traces due to a regression in 0.14.0
+      # TODO: Remove this after https://github.com/ziglang/zig/issues/21815 is
+      # addressed
+      options: --cap-add CAP_SYS_PTRACE
     runs-on: ubuntu-latest
     # Need to use the default container with node and all that, so we can
     # use JS-based actions like actions/checkout@v3...
