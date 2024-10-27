@@ -1,5 +1,4 @@
 name: AWS-Zig Build
-run-name: ${{ github.actor }} building AWS Zig SDK
 on:
   push:
     branches:
@@ -8,23 +7,14 @@ on:
 jobs:
   build-zig-0-12-0-amd64:
     runs-on: ubuntu-latest
-    env:
-      ZIG_VERSION: 0.13.0
-      ARCH: x86_64
     if: ${{ github.env.GITEA_ACTIONS != 'true' }}
     steps:
       - name: Check out repository code
         uses: actions/checkout@v4
-      # ARCH is fine, but we can't substitute directly because zig
-      # uses x86_64 instead of amd64. They also use aarch64 instead of arm64.
-      #
-      # However, arm64/linux isn't quite fully tier 1 yet, so this is more of a
-      # TODO: https://github.com/ziglang/zig/issues/2443
-      - name: Install zig
-        run: |
-          wget -q https://ziglang.org/download/${ZIG_VERSION}/zig-linux-${ARCH}-${ZIG_VERSION}.tar.xz
-          sudo tar x -C /usr/local -f zig-linux-${ARCH}-${ZIG_VERSION}.tar.xz
-          sudo ln -s /usr/local/zig-linux-${ARCH}-${ZIG_VERSION}/zig /usr/local/bin/zig
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v1.2.1
+        with:
+          version: 0.13.0
       - name: Run tests
         run: zig build test -Dbroken-windows --verbose # Github runners try to run the windows tests despite disabling foreign checks
       - name: Build example
