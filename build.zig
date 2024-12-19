@@ -107,7 +107,7 @@ pub fn build(b: *Builder) !void {
             .name = "codegen",
             .root_source_file = b.path("codegen/src/main.zig"),
             // We need this generated for the host, not the real target
-            .target = b.host,
+            .target = b.graph.host,
             .optimize = if (b.verbose) .Debug else .ReleaseSafe,
         });
         cg_exe.use_llvm = !no_llvm;
