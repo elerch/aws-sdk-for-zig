@@ -1895,6 +1895,7 @@ fn isMapPattern(comptime T: type) bool {
 }
 
 pub fn parse(comptime T: type, tokens: *TokenStream, options: ParseOptions) !T {
+    // std.log.debug("parsing {s} into type {s}", .{ tokens.slice, @typeName(T) });
     const token = (try tokens.next()) orelse return error.UnexpectedEndOfJson;
     return parseInternal(T, token, tokens, options);
 }

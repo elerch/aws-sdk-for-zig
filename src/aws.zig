@@ -709,8 +709,10 @@ pub fn Request(comptime request_action: anytype) type {
 
             // Extract the first json key
             const key = firstJsonKey(data);
-            const found_normal_json_response = std.mem.eql(u8, key, action.action_name ++ "Response") or
-                std.mem.eql(u8, key, action.action_name ++ "Result");
+            const found_normal_json_response =
+                std.mem.eql(u8, key, action.action_name ++ "Response") or
+                std.mem.eql(u8, key, action.action_name ++ "Result") or
+                isOtherNormalResponse(response_types.NormalResponse, key);
             var raw_response_parsed = false;
             var stream = json.TokenStream.init(data);
             const parsed_response_ptr = blk: {
@@ -734,6 +736,7 @@ pub fn Request(comptime request_action: anytype) type {
                 log.debug("Appears server has provided a raw response", .{});
                 raw_response_parsed = true;
                 const ptr = try options.client.allocator.create(response_types.NormalResponse);
+                errdefer options.client.allocator.destroy(ptr);
                 @field(ptr.*, std.meta.fields(action.Response)[0].name) =
                     json.parse(response_types.RawResponse, &stream, parser_options) catch |e| {
                     log.err(
@@ -761,6 +764,14 @@ pub fn Request(comptime request_action: anytype) type {
     };
 }
 
+fn isOtherNormalResponse(comptime T: type, first_key: []const u8) bool {
+    const fields = std.meta.fields(T);
+    if (fields.len != 1) return false;
+    const first_field = fields[0];
+    if (!@hasDecl(T, "fieldNameFor")) return false;
+    const expected_key = T.fieldNameFor(undefined, first_field.name);
+    return std.mem.eql(u8, first_key, expected_key);
+}
 fn coerceFromString(comptime T: type, val: []const u8) anyerror!T {
     if (@typeInfo(T) == .Optional) return try coerceFromString(@typeInfo(T).Optional.child, val);
     // TODO: This is terrible...fix it
@@ -2269,4 +2280,60 @@ test "rest_xml_with_input: S3 put object" {
     try std.testing.expectEqualStrings("9PEYBAZ9J7TPRX43, host_id: jdRDo30t7Ge9lf6F+4WYpg+YKui8z0mz2+rwinL38xDZzvloJqrmpCAiKG375OSvHA9OBykJS44=", result.response_metadata.request_id);
     try std.testing.expectEqualStrings("AES256", result.response.server_side_encryption.?);
     try std.testing.expectEqualStrings("37b51d194a7513e45b56f6524f2d51f2", result.response.e_tag.?);
+}
+test "raw ECR timestamps" {
+    // This is a way to test the json parsing. Ultimately the more robust tests
+    // should be preferred, but in this case we were tracking down an issue
+    // for which the root cause was the incorrect type being passed to the parse
+    // routine
+    const allocator = std.testing.allocator;
+    const ecr = (Services(.{.ecr}){}).ecr;
+    const options = json.ParseOptions{
+        .allocator = allocator,
+        .allow_camel_case_conversion = true, // new option
+        .allow_snake_case_conversion = true, // new option
+        .allow_unknown_fields = true, // new option. Cannot yet handle non-struct fields though
+        .allow_missing_fields = false, // new option. Cannot yet handle non-struct fields though
+    };
+    var stream = json.TokenStream.init(
+        \\{"authorizationData":[{"authorizationToken":"***","expiresAt":1.7385984915E9,"proxyEndpoint":"https://146325435496.dkr.ecr.us-west-2.amazonaws.com"}]}
+    );
+    const ptr = try json.parse(ecr.get_authorization_token.Response, &stream, options);
+    defer json.parseFree(ecr.get_authorization_token.Response, ptr, options);
+}
+test "json_1_1: ECR timestamps" {
+    // See: https://github.com/elerch/aws-sdk-for-zig/issues/5
+    // const old = std.testing.log_level;
+    // defer std.testing.log_level = old;
+    // std.testing.log_level = .debug;
+    const allocator = std.testing.allocator;
+    var test_harness = TestSetup.init(.{
+        .allocator = allocator,
+        .server_response =
+        \\{"authorizationData":[{"authorizationToken":"***","expiresAt":1.7385984915E9,"proxyEndpoint":"https://146325435496.dkr.ecr.us-west-2.amazonaws.com"}]}
+        // \\{"authorizationData":[{"authorizationToken":"***","expiresAt":1.738598491557E9,"proxyEndpoint":"https://146325435496.dkr.ecr.us-west-2.amazonaws.com"}]}
+        ,
+        .server_response_headers = &.{
+            .{ .name = "Content-Type", .value = "application/json" },
+            .{ .name = "x-amzn-RequestId", .value = "QBI72OUIN8U9M9AG6PCSADJL4JVV4KQNSO5AEMVJF66Q9ASUAAJG" },
+        },
+    });
+    defer test_harness.deinit();
+    const options = try test_harness.start();
+    const ecr = (Services(.{.ecr}){}).ecr;
+    std.log.debug("Typeof response {}", .{@TypeOf(ecr.get_authorization_token.Response{})});
+    const call = try test_harness.client.call(ecr.get_authorization_token.Request{}, options);
+    defer call.deinit();
+    test_harness.stop();
+    // Request expectations
+    try std.testing.expectEqual(std.http.Method.POST, test_harness.request_options.request_method);
+    try std.testing.expectEqualStrings("/", test_harness.request_options.request_target);
+    try test_harness.request_options.expectHeader("X-Amz-Target", "AmazonEC2ContainerRegistry_V20150921.GetAuthorizationToken");
+    // Response expectations
+    try std.testing.expectEqualStrings("QBI72OUIN8U9M9AG6PCSADJL4JVV4KQNSO5AEMVJF66Q9ASUAAJG", call.response_metadata.request_id);
+    try std.testing.expectEqual(@as(usize, 1), call.response.authorization_data.?.len);
+    try std.testing.expectEqualStrings("***", call.response.authorization_data.?[0].authorization_token.?);
+    try std.testing.expectEqualStrings("https://146325435496.dkr.ecr.us-west-2.amazonaws.com", call.response.authorization_data.?[0].proxy_endpoint.?);
+    // try std.testing.expectEqual(@as(i64, 1.73859841557E9), call.response.authorization_data.?[0].expires_at.?);
+    try std.testing.expectEqual(@as(f128, 1.7385984915E9), call.response.authorization_data.?[0].expires_at.?);
 }
