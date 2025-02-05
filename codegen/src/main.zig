@@ -716,7 +716,7 @@ fn generateTypeFor(shape_id: []const u8, writer: anytype, state: GenerationState
             // The serializer will have to deal with the idea we might be an array
             return try generateTypeFor(shape.set.member_target, writer, state, true);
         },
-        .timestamp => |s| try generateSimpleTypeFor(s, "i64", writer),
+        .timestamp => |s| try generateSimpleTypeFor(s, "f128", writer),
         .blob => |s| try generateSimpleTypeFor(s, "[]const u8", writer),
         .boolean => |s| try generateSimpleTypeFor(s, "bool", writer),
         .double => |s| try generateSimpleTypeFor(s, "f64", writer),

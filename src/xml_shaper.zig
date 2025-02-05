@@ -105,6 +105,12 @@ fn parseInternal(comptime T: type, element: *xml.Element, options: ParseOptions)
         },
         .float, .comptime_float => {
             return std.fmt.parseFloat(T, element.children.items[0].CharData) catch |e| {
+                if (element.children.items[0].CharData[element.children.items[0].CharData.len - 1] == 'Z') {
+                    // We have an iso8601 in an integer field (we think)
+                    // Try to coerce this into our type
+                    const timestamp = try date.parseIso8601ToTimestamp(element.children.items[0].CharData);
+                    return @floatFromInt(timestamp);
+                }
                 if (log_parse_traces) {
                     std.log.err(
                         "Could not parse '{s}' as float in element '{s}': {any}",

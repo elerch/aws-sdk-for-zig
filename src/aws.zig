@@ -783,6 +783,12 @@ fn parseInt(comptime T: type, val: []const u8) !T {
             return e;
         };
     }
+    if (T == f128) {
+        return @as(f128, date.parseEnglishToTimestamp(val)) catch |e| {
+            log.err("Error coercing date string '{s}' to timestamp value", .{val});
+            return e;
+        };
+    }
     log.err("Error parsing string '{s}' to integer", .{val});
     return rc;
 }
