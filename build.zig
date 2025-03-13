@@ -95,7 +95,7 @@ pub fn build(b: *Builder) !void {
         .target = b.graph.host,
         .optimize = if (b.verbose) .Debug else .ReleaseSafe,
     });
-    cg_exe.root_module.addImport("smithy", smithy_dep.module("smithy"));
+    cg_exe.root_module.addImport("smithy", smithy_module);
     var cg_cmd = b.addRunArtifact(cg_exe);
     cg_cmd.addArg("--models");
     const hash = hash_blk: {
@@ -146,6 +146,9 @@ pub fn build(b: *Builder) !void {
         .target = target,
         .optimize = optimize,
     });
+    service_manifest_module.addImport("smithy", smithy_module);
+
+    exe.root_module.addImport("service_manifest", service_manifest_module);
 
     // Expose module to others
     _ = b.addModule("aws", .{
@@ -190,7 +193,8 @@ pub fn build(b: *Builder) !void {
             .target = b.resolveTargetQuery(t),
             .optimize = optimize,
         });
-        unit_tests.root_module.addImport("smithy", smithy_dep.module("smithy"));
+        unit_tests.root_module.addImport("smithy", smithy_module);
+        unit_tests.root_module.addImport("service_manifest", service_manifest_module);
         unit_tests.step.dependOn(cg);
 
         const run_unit_tests = b.addRunArtifact(unit_tests);
@@ -213,7 +217,8 @@ pub fn build(b: *Builder) !void {
         .target = target,
         .optimize = optimize,
     });
-    smoke_test.root_module.addImport("smithy", smithy_dep.module("smithy"));
+    smoke_test.root_module.addImport("smithy", smithy_module);
+    smoke_test.root_module.addImport("service_manifest", service_manifest_module);
     smoke_test.step.dependOn(cg);
 
     const run_smoke_test = b.addRunArtifact(smoke_test);
