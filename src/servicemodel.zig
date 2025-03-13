@@ -1,5 +1,5 @@
 const std = @import("std");
-const service_list = @import("models/service_manifest.zig");
+const service_list = @import("service_manifest");
 const expectEqualStrings = std.testing.expectEqualStrings;
 
 pub fn Services(comptime service_imports: anytype) type {
