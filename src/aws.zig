@@ -517,9 +517,9 @@ pub fn Request(comptime request_action: anytype) type {
                 // And the response property below will pull whatever is the ActionResult object
                 // We can grab index [0] as structs are guaranteed by zig to be returned in the order
                 // declared, and we're declaring in that order in ServerResponse().
-                const real_response = @field(parsed_response, @typeInfo(response_types.NormalResponse).Struct.fields[0].name);
+                const real_response = @field(parsed_response, @typeInfo(response_types.NormalResponse).@"struct".fields[0].name);
                 return FullResponseType{
-                    .response = @field(real_response, @typeInfo(@TypeOf(real_response)).Struct.fields[0].name),
+                    .response = @field(real_response, @typeInfo(@TypeOf(real_response)).@"struct".fields[0].name),
                     .response_metadata = .{
                         .request_id = try options.client.allocator.dupe(u8, real_response.ResponseMetadata.RequestId),
                     },
@@ -773,7 +773,7 @@ fn isOtherNormalResponse(comptime T: type, first_key: []const u8) bool {
     return std.mem.eql(u8, first_key, expected_key);
 }
 fn coerceFromString(comptime T: type, val: []const u8) anyerror!T {
-    if (@typeInfo(T) == .Optional) return try coerceFromString(@typeInfo(T).Optional.child, val);
+    if (@typeInfo(T) == .optional) return try coerceFromString(@typeInfo(T).optional.child, val);
     // TODO: This is terrible...fix it
     switch (T) {
         bool => return std.ascii.eqlIgnoreCase(val, "true"),
@@ -806,8 +806,8 @@ fn parseInt(comptime T: type, val: []const u8) !T {
 
 fn generalAllocPrint(allocator: std.mem.Allocator, val: anytype) !?[]const u8 {
     switch (@typeInfo(@TypeOf(val))) {
-        .Optional => if (val) |v| return generalAllocPrint(allocator, v) else return null,
-        .Array, .Pointer => return try std.fmt.allocPrint(allocator, "{s}", .{val}),
+        .optional => if (val) |v| return generalAllocPrint(allocator, v) else return null,
+        .array, .pointer => return try std.fmt.allocPrint(allocator, "{s}", .{val}),
         else => return try std.fmt.allocPrint(allocator, "{any}", .{val}),
     }
 }
@@ -926,7 +926,7 @@ fn ServerResponse(comptime action: anytype) type {
         RequestId: []u8,
     };
     const Result = @Type(.{
-        .Struct = .{
+        .@"struct" = .{
             .layout = .auto,
             .fields = &[_]std.builtin.Type.StructField{
                 .{
@@ -949,7 +949,7 @@ fn ServerResponse(comptime action: anytype) type {
         },
     });
     return @Type(.{
-        .Struct = .{
+        .@"struct" = .{
             .layout = .auto,
             .fields = &[_]std.builtin.Type.StructField{
                 .{
@@ -1015,8 +1015,8 @@ fn FullResponse(comptime action: anytype) type {
 }
 fn safeFree(allocator: std.mem.Allocator, obj: anytype) void {
     switch (@typeInfo(@TypeOf(obj))) {
-        .Pointer => allocator.free(obj),
-        .Optional => if (obj) |o| safeFree(allocator, o),
+        .pointer => allocator.free(obj),
+        .optional => if (obj) |o| safeFree(allocator, o),
         else => {},
     }
 }
@@ -1125,7 +1125,7 @@ fn buildQuery(allocator: std.mem.Allocator, request: anytype) ![]const u8 {
     var prefix = "?";
     if (@hasDecl(@TypeOf(request), "http_query")) {
         const query_arguments = @field(@TypeOf(request), "http_query");
-        inline for (@typeInfo(@TypeOf(query_arguments)).Struct.fields) |arg| {
+        inline for (@typeInfo(@TypeOf(query_arguments)).@"struct".fields) |arg| {
             const val = @field(request, arg.name);
             if (try addQueryArg(arg.type, prefix, @field(query_arguments, arg.name), val, writer))
                 prefix = "&";
@@ -1136,13 +1136,13 @@ fn buildQuery(allocator: std.mem.Allocator, request: anytype) ![]const u8 {
 
 fn addQueryArg(comptime ValueType: type, prefix: []const u8, key: []const u8, value: anytype, writer: anytype) !bool {
     switch (@typeInfo(@TypeOf(value))) {
-        .Optional => {
+        .optional => {
             if (value) |v|
                 return try addQueryArg(ValueType, prefix, key, v, writer);
             return false;
         },
         // if this is a pointer, we want to make sure it is more than just a string
-        .Pointer => |ptr| {
+        .pointer => |ptr| {
             if (ptr.child == u8 or ptr.size != .Slice) {
                 // This is just a string
                 return try addBasicQueryArg(prefix, key, value, writer);
@@ -1154,7 +1154,7 @@ fn addQueryArg(comptime ValueType: type, prefix: []const u8, key: []const u8, va
             }
             return std.mem.eql(u8, "&", p);
         },
-        .Array => |arr| {
+        .array => |arr| {
             if (arr.child == u8)
                 return try addBasicQueryArg(prefix, key, value, writer);
             var p = prefix;
@@ -1274,8 +1274,8 @@ fn reportTraffic(
 fn typeForField(comptime T: type, comptime field_name: []const u8) !type {
     const ti = @typeInfo(T);
     switch (ti) {
-        .Struct => {
-            inline for (ti.Struct.fields) |field| {
+        .@"struct" => {
+            inline for (ti.@"struct".fields) |field| {
                 if (std.mem.eql(u8, field.name, field_name))
                     return field.type;
             }
@@ -1289,7 +1289,7 @@ test "custom serialization for map objects" {
     const allocator = std.testing.allocator;
     var buffer = std.ArrayList(u8).init(allocator);
     defer buffer.deinit();
-    var tags = try std.ArrayList(@typeInfo(try typeForField(services.lambda.tag_resource.Request, "tags")).Pointer.child).initCapacity(allocator, 2);
+    var tags = try std.ArrayList(@typeInfo(try typeForField(services.lambda.tag_resource.Request, "tags")).pointer.child).initCapacity(allocator, 2);
     defer tags.deinit();
     tags.appendAssumeCapacity(.{ .key = "Foo", .value = "Bar" });
     tags.appendAssumeCapacity(.{ .key = "Baz", .value = "Qux" });
@@ -2051,7 +2051,7 @@ test "rest_json_1_work_with_lambda: lambda tagResource (only), to excercise zig 
     defer test_harness.deinit();
     const options = try test_harness.start();
     const lambda = (Services(.{.lambda}){}).lambda;
-    var tags = try std.ArrayList(@typeInfo(try typeForField(lambda.tag_resource.Request, "tags")).Pointer.child).initCapacity(allocator, 1);
+    var tags = try std.ArrayList(@typeInfo(try typeForField(lambda.tag_resource.Request, "tags")).pointer.child).initCapacity(allocator, 1);
     defer tags.deinit();
     tags.appendAssumeCapacity(.{ .key = "Foo", .value = "Bar" });
     const req = services.lambda.tag_resource.Request{ .resource = "arn:aws:lambda:us-west-2:550620852718:function:awsome-lambda-LambdaStackawsomeLambda", .tags = tags.items };

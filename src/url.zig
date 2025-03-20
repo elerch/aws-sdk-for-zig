@@ -24,7 +24,7 @@ fn encodeStruct(
     comptime options: EncodingOptions,
 ) !bool {
     var rc = first;
-    inline for (@typeInfo(@TypeOf(obj)).Struct.fields) |field| {
+    inline for (@typeInfo(@TypeOf(obj)).@"struct".fields) |field| {
         const field_name = try options.field_name_transformer(allocator, field.name);
         defer if (options.field_name_transformer.* != defaultTransformer)
             allocator.free(field_name);
@@ -47,10 +47,10 @@ pub fn encodeInternal(
     // @compileLog(@typeInfo(@TypeOf(obj)));
     var rc = first;
     switch (@typeInfo(@TypeOf(obj))) {
-        .Optional => if (obj) |o| {
+        .optional => if (obj) |o| {
             rc = try encodeInternal(allocator, parent, field_name, first, o, writer, options);
         },
-        .Pointer => |ti| if (ti.size == .One) {
+        .pointer => |ti| if (ti.size == .One) {
             rc = try encodeInternal(allocator, parent, field_name, first, obj.*, writer, options);
         } else {
             if (!first) _ = try writer.write("&");
@@ -61,7 +61,7 @@ pub fn encodeInternal(
                 try writer.print("{s}{s}={any}", .{ parent, field_name, obj });
             rc = false;
         },
-        .Struct => if (std.mem.eql(u8, "", field_name)) {
+        .@"struct" => if (std.mem.eql(u8, "", field_name)) {
             rc = try encodeStruct(allocator, parent, first, obj, writer, options);
         } else {
             // TODO: It would be lovely if we could concat at compile time or allocPrint at runtime
@@ -73,12 +73,12 @@ pub fn encodeInternal(
             rc = try encodeStruct(allocator, new_parent, first, obj, writer, options);
             // try encodeStruct(parent ++ field_name ++ ".", first, obj,  writer, options);
         },
-        .Array => {
+        .array => {
             if (!first) _ = try writer.write("&");
             try writer.print("{s}{s}={s}", .{ parent, field_name, obj });
             rc = false;
         },
-        .Int, .ComptimeInt, .Float, .ComptimeFloat => {
+        .int, .comptime_int, .float, .comptime_float => {
             if (!first) _ = try writer.write("&");
             try writer.print("{s}{s}={d}", .{ parent, field_name, obj });
             rc = false;

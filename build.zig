@@ -10,11 +10,7 @@ const test_targets = [_]std.Target.Query{
     .{}, // native
     .{ .cpu_arch = .x86_64, .os_tag = .linux },
     .{ .cpu_arch = .aarch64, .os_tag = .linux },
-    // The test executable linking process just spins forever in LLVM using nominated zig 0.13 May 2024
-    // This is likely a LLVM problem unlikely to be fixed in zig 0.13
-    // Potentially this issue: https://github.com/llvm/llvm-project/issues/81440
-    // Zig tracker: https://github.com/ziglang/zig/issues/18872
-    // .{ .cpu_arch = .riscv64, .os_tag = .linux },
+    .{ .cpu_arch = .riscv64, .os_tag = .linux },
     .{ .cpu_arch = .arm, .os_tag = .linux },
     .{ .cpu_arch = .x86_64, .os_tag = .windows },
     .{ .cpu_arch = .aarch64, .os_tag = .macos },
@@ -32,6 +28,12 @@ pub fn build(b: *Builder) !void {
     // Standard release options allow the person running `zig build` to select
     // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall.
     const optimize = b.standardOptimizeOption(.{});
+
+    const no_llvm = b.option(
+        bool,
+        "no-llvm",
+        "Disable LLVM",
+    ) orelse false;
 
     const broken_windows = b.option(
         bool,
@@ -56,6 +58,7 @@ pub fn build(b: *Builder) !void {
         .target = target,
         .optimize = optimize,
     });
+    exe.use_llvm = !no_llvm;
     const smithy_dep = b.dependency("smithy", .{
         // These are the arguments to the dependency. It expects a target and optimization level.
         .target = target,
@@ -107,6 +110,7 @@ pub fn build(b: *Builder) !void {
             .target = b.graph.host,
             .optimize = if (b.verbose) .Debug else .ReleaseSafe,
         });
+        cg_exe.use_llvm = !no_llvm;
         cg_exe.root_module.addImport("smithy", smithy_dep.module("smithy"));
         var cg_cmd = b.addRunArtifact(cg_exe);
         cg_cmd.addArg("--models");
@@ -183,6 +187,7 @@ pub fn build(b: *Builder) !void {
         });
         unit_tests.root_module.addImport("smithy", smithy_dep.module("smithy"));
         unit_tests.step.dependOn(gen_step);
+        unit_tests.use_llvm = !no_llvm;
 
         const run_unit_tests = b.addRunArtifact(unit_tests);
         run_unit_tests.skip_foreign_checks = true;
@@ -204,6 +209,7 @@ pub fn build(b: *Builder) !void {
         .target = target,
         .optimize = optimize,
     });
+    smoke_test.use_llvm = !no_llvm;
     smoke_test.root_module.addImport("smithy", smithy_dep.module("smithy"));
     smoke_test.step.dependOn(gen_step);
 

@@ -2,7 +2,7 @@ const std = @import("std");
 // options is a json.Options, but since we're using our hacked json.zig we don't want to
 // specifically call this out
 pub fn serializeMap(map: anytype, key: []const u8, options: anytype, out_stream: anytype) !bool {
-    if (@typeInfo(@TypeOf(map)) == .Optional) {
+    if (@typeInfo(@TypeOf(map)) == .optional) {
         if (map == null)
             return true
         else
