@@ -114,21 +114,10 @@ pub fn build(b: *Builder) !void {
         cg_exe.root_module.addImport("smithy", smithy_dep.module("smithy"));
         var cg_cmd = b.addRunArtifact(cg_exe);
         cg_cmd.addArg("--models");
-        const hash = hash_blk: {
-            for (b.available_deps) |dep| {
-                const dep_name = dep.@"0";
-                const dep_hash = dep.@"1";
-                if (std.mem.eql(u8, dep_name, "models"))
-                    break :hash_blk dep_hash;
-            }
-            return error.DependencyNamedModelsNotFoundInBuildZigZon;
-        };
         cg_cmd.addArg(try std.fs.path.join(
             b.allocator,
             &[_][]const u8{
-                b.graph.global_cache_root.path.?,
-                "p",
-                hash,
+                try b.dependency("models", .{}).path("").getPath3(b, null).toString(b.allocator),
                 models_subdir,
             },
         ));
