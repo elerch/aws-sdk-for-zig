@@ -2,7 +2,7 @@ name: AWS-Zig Build
 on:
   push:
     branches:
-      - 'master'
+      - 'zig-0.13'
 env:
   ACTIONS_RUNTIME_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   ACTIONS_RUNTIME_URL: ${{ env.GITHUB_SERVER_URL }}/api/actions_pipeline/
@@ -19,7 +19,7 @@ jobs:
       - name: Setup Zig
         uses: mlugg/setup-zig@v1.2.1
         with:
-          version: 0.14.0
+          version: 0.13.0
       - name: Run tests
         run: zig build test --verbose
       # Zig build scripts don't have the ability to import depenedencies directly

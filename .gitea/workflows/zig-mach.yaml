@@ -4,7 +4,7 @@ on:
     - cron: '0 12 * * *' # noon UTC, 4AM Pacific
   push:
     branches:
-      - 'zig-develop*'
+      - 'zig-mach*'
 env:
   PKG_PREFIX: nominated-zig
 jobs:
