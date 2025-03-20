@@ -653,7 +653,10 @@ fn dupeAndUnescape(alloc: Allocator, text: []const u8) ![]const u8 {
 
     // This error is not strictly true, but we need to match one of the items
     // from the error set provided by the other stdlib calls at the calling site
-    if (!alloc.resize(str, j)) return error.OutOfMemory;
+    if (!alloc.resize(str, j)) {
+        defer alloc.free(str);
+        return alloc.dupe(u8, str[0..j]) catch return error.OutOfMemory;
+    }
     return str[0..j];
 }
 

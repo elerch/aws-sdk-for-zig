@@ -1,6 +1,7 @@
 .{
-    .name = "aws",
+    .name = .aws,
     .version = "0.0.1",
+    .fingerprint = 0x1f26b7b27005bb49,
     .paths = .{
         "build.zig",
         "build.zig.zon",
@@ -11,8 +12,8 @@
 
     .dependencies = .{
         .smithy = .{
-            .url = "https://git.lerch.org/lobo/smithy/archive/3ed98751bc414e005af6ad185feb213d4366c0db.tar.gz",
-            .hash = "12204a784751a4ad5ed6c8955ba91fcbc4a3cad6c5a7da38f39abf074ef801d13172",
+            .url = "https://git.lerch.org/lobo/smithy/archive/a4c6ec6dfe552c57bab601c7d99e8de02bbab1fe.tar.gz",
+            .hash = "smithy-1.0.0-uAyBgS_MAgC4qgc9QaEy5Y5Nf7kv32buQZBYugqNQsAn",
         },
         .models = .{
             .url = "https://github.com/aws/aws-sdk-go-v2/archive/58cf6509525a12d64fd826da883bfdbacbd2f00e.tar.gz",

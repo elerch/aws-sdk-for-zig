@@ -435,7 +435,7 @@ fn generateServices(allocator: std.mem.Allocator, comptime _: []const u8, file: 
 
 fn generateAdditionalTypes(allocator: std.mem.Allocator, file_state: FileGenerationState, writer: anytype) !void {
     // More types may be added during processing
-    while (file_state.additional_types_to_generate.popOrNull()) |t| {
+    while (file_state.additional_types_to_generate.pop()) |t| {
         if (file_state.additional_types_generated.getEntry(t.name) != null) continue;
         // std.log.info("\t\t{s}", .{t.name});
         var type_stack = std.ArrayList(*const smithy.ShapeInfo).init(allocator);

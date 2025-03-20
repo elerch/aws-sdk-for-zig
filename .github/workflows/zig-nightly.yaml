@@ -1,4 +1,4 @@
-name: aws-zig nightly build
+name: Nightly zig version Build
 on:
   push:
     branches:

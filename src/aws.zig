@@ -263,9 +263,9 @@ pub fn Request(comptime request_action: anytype) type {
         fn callJson(request: ActionRequest, options: Options) !FullResponseType {
             const target =
                 try std.fmt.allocPrint(options.client.allocator, "{s}.{s}", .{
-                Self.service_meta.name,
-                action.action_name,
-            });
+                    Self.service_meta.name,
+                    action.action_name,
+                });
             defer options.client.allocator.free(target);
 
             var buffer = std.ArrayList(u8).init(options.client.allocator);
@@ -326,11 +326,11 @@ pub fn Request(comptime request_action: anytype) type {
             // originally?
             const body =
                 try std.fmt.allocPrint(options.client.allocator, "Action={s}&Version={s}{s}{s}", .{
-                action.action_name,
-                Self.service_meta.version,
-                continuation,
-                buffer.items,
-            });
+                    action.action_name,
+                    Self.service_meta.version,
+                    continuation,
+                    buffer.items,
+                });
             defer options.client.allocator.free(body);
             return try Self.callAws(.{
                 .query = query,
@@ -739,20 +739,20 @@ pub fn Request(comptime request_action: anytype) type {
                 errdefer options.client.allocator.destroy(ptr);
                 @field(ptr.*, std.meta.fields(action.Response)[0].name) =
                     json.parse(response_types.RawResponse, &stream, parser_options) catch |e| {
-                    log.err(
-                        \\Call successful, but unexpected response from service.
-                        \\This could be the result of a bug or a stale set of code generated
-                        \\service models.
-                        \\
-                        \\Model Type: {}
-                        \\
-                        \\Response from server:
-                        \\
-                        \\{s}
-                        \\
-                    , .{ action.Response, data });
-                    return e;
-                };
+                        log.err(
+                            \\Call successful, but unexpected response from service.
+                            \\This could be the result of a bug or a stale set of code generated
+                            \\service models.
+                            \\
+                            \\Model Type: {}
+                            \\
+                            \\Response from server:
+                            \\
+                            \\{s}
+                            \\
+                        , .{ action.Response, data });
+                        return e;
+                    };
                 break :blk ptr;
             };
             return ParsedJsonData(response_types.NormalResponse){
@@ -777,8 +777,12 @@ fn coerceFromString(comptime T: type, val: []const u8) anyerror!T {
     // TODO: This is terrible...fix it
     switch (T) {
         bool => return std.ascii.eqlIgnoreCase(val, "true"),
-        i64 => return parseInt(T, val) catch |e| {
-            log.err("Invalid string representing i64: {s}", .{val});
+        i64, i128 => return parseInt(T, val) catch |e| {
+            log.err("Invalid string representing {s}: {s}", .{ @typeName(T), val });
+            return e;
+        },
+        f64, f128 => return std.fmt.parseFloat(T, val) catch |e| {
+            log.err("Invalid string representing {s}: {s}", .{ @typeName(T), val });
             return e;
         },
         else => return val,
@@ -932,14 +936,14 @@ fn ServerResponse(comptime action: anytype) type {
                 .{
                     .name = action.action_name ++ "Result",
                     .type = T,
-                    .default_value = null,
+                    .default_value_ptr = null,
                     .is_comptime = false,
                     .alignment = 0,
                 },
                 .{
                     .name = "ResponseMetadata",
                     .type = ResponseMetadata,
-                    .default_value = null,
+                    .default_value_ptr = null,
                     .is_comptime = false,
                     .alignment = 0,
                 },
@@ -955,7 +959,7 @@ fn ServerResponse(comptime action: anytype) type {
                 .{
                     .name = action.action_name ++ "Response",
                     .type = Result,
-                    .default_value = null,
+                    .default_value_ptr = null,
                     .is_comptime = false,
                     .alignment = 0,
                 },
@@ -1143,7 +1147,7 @@ fn addQueryArg(comptime ValueType: type, prefix: []const u8, key: []const u8, va
         },
         // if this is a pointer, we want to make sure it is more than just a string
         .pointer => |ptr| {
-            if (ptr.child == u8 or ptr.size != .Slice) {
+            if (ptr.child == u8 or ptr.size != .slice) {
                 // This is just a string
                 return try addBasicQueryArg(prefix, key, value, writer);
             }

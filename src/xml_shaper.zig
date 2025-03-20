@@ -313,13 +313,13 @@ fn parseInternal(comptime T: type, element: *xml.Element, options: ParseOptions)
         .pointer => |ptr_info| {
             const allocator = options.allocator orelse return error.AllocatorRequired;
             switch (ptr_info.size) {
-                .One => {
+                .one => {
                     const r: T = try allocator.create(ptr_info.child);
                     errdefer allocator.free(r);
                     r.* = try parseInternal(ptr_info.child, element, options);
                     return r;
                 },
-                .Slice => {
+                .slice => {
                     // TODO: Detect and deal with arrays. This will require two
                     //       passes through the element children - one to
                     //       determine if it is an array, one to parse the elements
@@ -348,10 +348,10 @@ fn parseInternal(comptime T: type, element: *xml.Element, options: ParseOptions)
                     }
                     return try allocator.dupe(u8, element.children.items[0].CharData);
                 },
-                .Many => {
+                .many => {
                     return error.ManyPointerSizeNotImplemented;
                 },
-                .C => {
+                .c => {
                     return error.CPointerSizeNotImplemented;
                 },
             }

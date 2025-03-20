@@ -24,10 +24,11 @@ fn encodeStruct(
     comptime options: EncodingOptions,
 ) !bool {
     var rc = first;
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    const arena_alloc = arena.allocator();
     inline for (@typeInfo(@TypeOf(obj)).@"struct".fields) |field| {
-        const field_name = try options.field_name_transformer(allocator, field.name);
-        defer if (options.field_name_transformer.* != defaultTransformer)
-            allocator.free(field_name);
+        const field_name = try options.field_name_transformer(arena_alloc, field.name);
         // @compileLog(@typeInfo(field.field_type).Pointer);
         rc = try encodeInternal(allocator, parent, field_name, rc, @field(obj, field.name), writer, options);
     }
@@ -50,7 +51,7 @@ pub fn encodeInternal(
         .optional => if (obj) |o| {
             rc = try encodeInternal(allocator, parent, field_name, first, o, writer, options);
         },
-        .pointer => |ti| if (ti.size == .One) {
+        .pointer => |ti| if (ti.size == .one) {
             rc = try encodeInternal(allocator, parent, field_name, first, obj.*, writer, options);
         } else {
             if (!first) _ = try writer.write("&");

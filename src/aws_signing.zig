@@ -662,12 +662,12 @@ fn canonicalUri(allocator: std.mem.Allocator, path: []const u8, double_encode: b
     }
     defer allocator.free(encoded_once);
     var encoded_twice = try encodeUri(allocator, encoded_once);
+    defer allocator.free(encoded_twice);
     log.debug("encoded path (2): {s}", .{encoded_twice});
     if (std.mem.lastIndexOf(u8, encoded_twice, "?")) |i| {
-        _ = allocator.resize(encoded_twice, i);
-        return encoded_twice[0..i];
+        return try allocator.dupe(u8, encoded_twice[0..i]);
     }
-    return encoded_twice;
+    return try allocator.dupe(u8, encoded_twice);
 }
 
 fn encodeParamPart(allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
@@ -936,6 +936,7 @@ fn canonicalHeaderValue(allocator: std.mem.Allocator, value: []const u8) ![]cons
     const in_quote = false;
     var start: usize = 0;
     const rc = try allocator.alloc(u8, value.len);
+    defer allocator.free(rc);
     var rc_inx: usize = 0;
     for (value, 0..) |c, i| {
         if (!started and !std.ascii.isWhitespace(c)) {
@@ -953,8 +954,7 @@ fn canonicalHeaderValue(allocator: std.mem.Allocator, value: []const u8) ![]cons
     // Trim end
     while (std.ascii.isWhitespace(rc[rc_inx - 1]))
         rc_inx -= 1;
-    _ = allocator.resize(rc, rc_inx);
-    return rc[0..rc_inx];
+    return try allocator.dupe(u8, rc[0..rc_inx]);
 }
 fn lessThan(context: void, lhs: std.http.Header, rhs: std.http.Header) bool {
     _ = context;
@@ -986,6 +986,7 @@ test "canonical uri" {
     const path = "/documents and settings/?foo=bar";
     const expected = "/documents%2520and%2520settings/";
     const actual = try canonicalUri(allocator, path, true);
+
     defer allocator.free(actual);
     try std.testing.expectEqualStrings(expected, actual);
 

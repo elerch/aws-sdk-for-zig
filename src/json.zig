@@ -1723,7 +1723,7 @@ fn parseInternal(comptime T: type, token: Token, tokens: *TokenStream, options: 
             }
             inline for (structInfo.fields, 0..) |field, i| {
                 if (!fields_seen[i]) {
-                    if (field.default_value) |default_value_ptr| {
+                    if (field.default_value_ptr) |default_value_ptr| {
                         if (!field.is_comptime) {
                             const default_value = @as(*align(1) const field.type, @ptrCast(default_value_ptr)).*;
                             @field(r, field.name) = default_value;
@@ -1773,18 +1773,18 @@ fn parseInternal(comptime T: type, token: Token, tokens: *TokenStream, options: 
         .pointer => |ptrInfo| {
             const allocator = options.allocator orelse return error.AllocatorRequired;
             switch (ptrInfo.size) {
-                .One => {
+                .one => {
                     const r: T = try allocator.create(ptrInfo.child);
                     errdefer allocator.destroy(r);
                     r.* = try parseInternal(ptrInfo.child, token, tokens, options);
                     return r;
                 },
-                .Slice => {
+                .slice => {
                     switch (token) {
                         .ArrayBegin => {
                             var arraylist = std.ArrayList(ptrInfo.child).init(allocator);
                             errdefer {
-                                while (arraylist.popOrNull()) |v| {
+                                while (arraylist.pop()) |v| {
                                     parseFree(ptrInfo.child, v, options);
                                 }
                                 arraylist.deinit();
@@ -1829,7 +1829,7 @@ fn parseInternal(comptime T: type, token: Token, tokens: *TokenStream, options: 
                             if (value_type == null) return error.UnexpectedToken;
                             var arraylist = std.ArrayList(ptrInfo.child).init(allocator);
                             errdefer {
-                                while (arraylist.popOrNull()) |v| {
+                                while (arraylist.pop()) |v| {
                                     parseFree(ptrInfo.child, v, options);
                                 }
                                 arraylist.deinit();
@@ -1879,7 +1879,7 @@ fn isMapPattern(comptime T: type) bool {
     // Let's just double check before proceeding
     const ti = @typeInfo(T);
     if (ti != .pointer) return false;
-    if (ti.pointer.size != .Slice) return false;
+    if (ti.pointer.size != .slice) return false;
     const ti_child = @typeInfo(ti.pointer.child);
     if (ti_child != .@"struct") return false;
     if (ti_child.@"struct".fields.len != 2) return false;
@@ -1935,11 +1935,11 @@ pub fn parseFree(comptime T: type, value: T, options: ParseOptions) void {
         .pointer => |ptrInfo| {
             const allocator = options.allocator orelse unreachable;
             switch (ptrInfo.size) {
-                .One => {
+                .one => {
                     parseFree(ptrInfo.child, value.*, options);
                     allocator.destroy(value);
                 },
-                .Slice => {
+                .slice => {
                     for (value) |v| {
                         parseFree(ptrInfo.child, v, options);
                     }
@@ -2284,7 +2284,7 @@ pub const Parser = struct {
                         return;
                     }
 
-                    var value = p.stack.pop();
+                    var value = p.stack.pop().?;
                     try p.pushToParent(&value);
                 },
                 .String => |s| {
@@ -2350,7 +2350,7 @@ pub const Parser = struct {
                             return;
                         }
 
-                        var value = p.stack.pop();
+                        var value = p.stack.pop().?;
                         try p.pushToParent(&value);
                     },
                     .ObjectBegin => {
@@ -2922,7 +2922,7 @@ pub fn stringify(
         },
         .error_set => return stringify(@as([]const u8, @errorName(value)), options, out_stream),
         .pointer => |ptr_info| switch (ptr_info.size) {
-            .One => switch (@typeInfo(ptr_info.child)) {
+            .one => switch (@typeInfo(ptr_info.child)) {
                 .array => {
                     const Slice = []const std.meta.Elem(ptr_info.child);
                     return stringify(@as(Slice, value), options, out_stream);
@@ -2933,7 +2933,7 @@ pub fn stringify(
                 },
             },
             // TODO: .Many when there is a sentinel (waiting for https://github.com/ziglang/zig/pull/3972)
-            .Slice => {
+            .slice => {
                 if (ptr_info.child == u8 and options.string == .String and std.unicode.utf8ValidateSlice(value)) {
                     try out_stream.writeByte('\"');
                     var i: usize = 0;

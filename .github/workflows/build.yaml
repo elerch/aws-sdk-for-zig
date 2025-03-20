@@ -1,11 +1,10 @@
-name: AWS-Zig Build
+name: Current zig version build
 on:
   push:
     branches:
-      - '*'
-      - '!zig-develop*'
+      - 'master'
 jobs:
-  build-zig-0-12-0-amd64:
+  build-amd64:
     runs-on: ubuntu-latest
     if: ${{ github.env.GITEA_ACTIONS != 'true' }}
     steps:
@@ -14,7 +13,7 @@ jobs:
       - name: Setup Zig
         uses: mlugg/setup-zig@v1.2.1
         with:
-          version: 0.13.0
+          version: 0.14.0
       - name: Run tests
         run: zig build test -Dbroken-windows --verbose # Github runners try to run the windows tests despite disabling foreign checks
       - name: Build example

@@ -12,7 +12,7 @@ pub fn Services(comptime service_imports: anytype) type {
         item.* = .{
             .name = @tagName(service_imports[i]),
             .type = @TypeOf(import_field),
-            .default_value = &import_field,
+            .default_value_ptr = &import_field,
             .is_comptime = false,
             .alignment = 0,
         };
