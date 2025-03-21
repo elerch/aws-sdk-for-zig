@@ -1,10 +1,11 @@
 name: aws-zig nightly build
 on:
+  workflow_dispatch:
   schedule:
     - cron: '30 12 * * *' # 12:30 UTC, 4:30AM Pacific
   push:
     branches:
-      - 'zig-develop*'
+      - 'zig-develop'
 env:
   PKG_PREFIX: nightly-zig
 jobs:

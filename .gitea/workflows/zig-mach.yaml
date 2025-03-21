@@ -1,10 +1,11 @@
 name: aws-zig mach nominated build
 on:
+  workflow_dispatch:
   schedule:
     - cron: '0 12 * * *' # noon UTC, 4AM Pacific
   push:
     branches:
-      - 'zig-mach*'
+      - 'zig-mach'
 env:
   PKG_PREFIX: nominated-zig
 jobs:
@@ -23,7 +24,7 @@ jobs:
       - name: Check out repository code
         uses: actions/checkout@v4
         with:
-          ref: zig-develop
+          ref: zig-mach
       - name: Setup Zig
         uses: mlugg/setup-zig@v1.2.1
         with:
