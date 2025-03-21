@@ -5,7 +5,7 @@ AWS SDK for Zig
 
 [![Build Status: Zig 0.14.0](https://git.lerch.org/lobo/aws-sdk-for-zig/actions/workflows/build.yaml/badge.svg)](https://git.lerch.org/lobo/aws-sdk-for-zig/actions?workflow=build.yaml&state=closed)
 
-[Last Mach Nominated Zig Version](https://machengine.org/about/nominated-zig/):
+[Last Mach Nominated Zig Version](https://machengine.org/docs/nominated-zig/):
 
 [![Build Status: Mach nominated](https://git.lerch.org/lobo/aws-sdk-for-zig/actions/workflows/zig-mach.yaml/badge.svg)](https://git.lerch.org/lobo/aws-sdk-for-zig/actions?workflow=zig-mach.yaml&state=closed)
 
