@@ -4,7 +4,7 @@ const std = @import("std");
 pub fn serializeMap(map: anytype, key: []const u8, options: anytype, out_stream: anytype) !bool {
     if (@typeInfo(@TypeOf(map)) == .optional) {
         if (map == null)
-            return true
+            return false
         else
             return serializeMapInternal(map.?, key, options, out_stream);
     }
@@ -12,7 +12,23 @@ pub fn serializeMap(map: anytype, key: []const u8, options: anytype, out_stream:
 }
 
 fn serializeMapInternal(map: anytype, key: []const u8, options: anytype, out_stream: anytype) !bool {
-    if (map.len == 0) return true;
+    if (map.len == 0) {
+        var child_options = options;
+        if (child_options.whitespace) |*child_ws|
+            child_ws.indent_level += 1;
+
+        try out_stream.writeByte('"');
+        try out_stream.writeAll(key);
+        _ = try out_stream.write("\":");
+        if (options.whitespace) |ws| {
+            if (ws.separator) {
+                try out_stream.writeByte(' ');
+            }
+        }
+        try out_stream.writeByte('{');
+        try out_stream.writeByte('}');
+        return true;
+    }
     // TODO: Map might be [][]struct{key, value} rather than []struct{key, value}
     var child_options = options;
     if (child_options.whitespace) |*child_ws|
