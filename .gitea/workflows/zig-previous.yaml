@@ -1,20 +1,14 @@
-name: aws-zig mach nominated build
+name: AWS-Zig Build
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '0 12 * * *' # noon UTC, 4AM Pacific
   push:
     branches:
-      - 'zig-mach'
+      - 'zig-0.13'
 env:
-  PKG_PREFIX: nominated-zig
+  ACTIONS_RUNTIME_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  ACTIONS_RUNTIME_URL: ${{ env.GITHUB_SERVER_URL }}/api/actions_pipeline/
 jobs:
-  build-zig-nominated-mach-latest:
-    container:
-      # We need CAP_SYS_PTRACE for stack traces due to a regression in 0.14.0
-      # TODO: Remove this after https://github.com/ziglang/zig/issues/21815 is
-      # addressed
-      options: --cap-add CAP_SYS_PTRACE
+  build-zig-amd64-host:
     runs-on: ubuntu-latest
     # Need to use the default container with node and all that, so we can
     # use JS-based actions like actions/checkout@v3...
@@ -24,17 +18,19 @@ jobs:
       - name: Check out repository code
         uses: actions/checkout@v4
         with:
-          ref: zig-mach
+          ref: zig-0.13
       - name: Setup Zig
         uses: mlugg/setup-zig@v1.2.1
         with:
-          version: mach-latest
-      - name: Run gen
-        run: zig build gen --verbose
-      - name: Run smoke test
-        run: zig build smoke-test --verbose
-      - name: Run full tests
+          version: 0.13.0
+      - name: Run tests
         run: zig build test --verbose
+      # Zig build scripts don't have the ability to import depenedencies directly
+      # (https://github.com/ziglang/zig/issues/18164). We can allow downstream
+      # build scripts to import aws with a few tweaks, but we can't @import("src/aws.zig")
+      # until we have our models built. So we have to have the build script
+      # basically modified, only during packaging, to allow this use case
+      #
       # Zig package manager expects everything to be inside a directory in the archive,
       # which it then strips out on download. So we need to shove everything inside a directory
       # the way GitHub/Gitea does for repo archives
@@ -44,10 +40,16 @@ jobs:
       # should be using git archive, but we need our generated code to be part of it
       - name: Package source code with generated models
         run: |
-          tar -czf ${{ runner.temp }}/${{ github.sha }}${{ env.PKG_PREFIX }}-with-models.tar.gz \
+          sed -i 's#// UNCOMMENT AFTER MODEL GEN TO USE IN BUILD SCRIPTS //##' build.zig
+          tar -czf ${{ runner.temp }}/${{ github.sha }}-with-models.tar.gz \
             --format ustar \
             --exclude 'zig-*' \
-            --transform 's,^,${{ github.sha }}/,' *
+            *
+      # Something in this PR broke this transform. I don't mind removing it, but
+      # the PR attempts to handle situations with or without a prefix, but it
+      # doesn't. I have not yet determined what the problem is, though
+      # https://github.com/ziglang/zig/pull/19111/files
+      # --transform 's,^,${{ github.sha }}/,' *
       # - name: Sign
       #   id: sign
       #   uses: https://git.lerch.org/lobo/action-hsm-sign@v1
@@ -68,8 +70,8 @@ jobs:
       - name: Publish source code with generated models
         run: |
           curl --user ${{ github.actor }}:${{ secrets.PACKAGE_PUSH }} \
-            --upload-file ${{ runner.temp }}/${{ github.sha }}${{ env.PKG_PREFIX }}-with-models.tar.gz \
-            https://git.lerch.org/api/packages/lobo/generic/aws-sdk-with-models/${{ github.sha }}/${{ github.sha }}${{ env.PKG_PREFIX }}-with-models.tar.gz
+            --upload-file ${{ runner.temp }}/${{ github.sha }}-with-models.tar.gz \
+            https://git.lerch.org/api/packages/lobo/generic/aws-sdk-with-models/${{ github.sha }}/${{ github.sha }}-with-models.tar.gz
       - name: Build example
         run: ( cd example && zig build ) # Make sure example builds
       - name: Notify

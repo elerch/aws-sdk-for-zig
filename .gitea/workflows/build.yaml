@@ -1,10 +1,8 @@
 name: AWS-Zig Build
-run-name: ${{ github.actor }} building AWS Zig SDK
 on:
   push:
     branches:
-      - '*'
-      - '!zig-develop*'
+      - 'master'
 env:
   ACTIONS_RUNTIME_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   ACTIONS_RUNTIME_URL: ${{ env.GITHUB_SERVER_URL }}/api/actions_pipeline/
@@ -17,11 +15,11 @@ jobs:
     #   image: alpine:3.15.0
     steps:
       - name: Check out repository code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: Setup Zig
-        uses: https://git.lerch.org/lobo/setup-zig@v3
+        uses: mlugg/setup-zig@v1.2.1
         with:
-          version: 0.13.0
+          version: 0.14.0
       - name: Run tests
         run: zig build test --verbose
       # Zig build scripts don't have the ability to import depenedencies directly
