@@ -1310,6 +1310,58 @@ test "custom serialization for map objects" {
     , buffer.items);
 }
 
+test "proper serialization for kms" {
+    // Github issue #8
+    // https://github.com/elerch/aws-sdk-for-zig/issues/8
+    const allocator = std.testing.allocator;
+    var buffer = std.ArrayList(u8).init(allocator);
+    defer buffer.deinit();
+    const req = services.kms.encrypt.Request{
+        .encryption_algorithm = "SYMMETRIC_DEFAULT",
+        // Since encryption_context is not null, we expect "{}" to be the value
+        // here, not "[]", because this is our special AWS map pattern
+        .encryption_context = &.{},
+        .key_id = "42",
+        .plaintext = "foo",
+        .dry_run = false,
+        .grant_tokens = &[_][]const u8{},
+    };
+    try json.stringify(req, .{ .whitespace = .{} }, buffer.writer());
+    try std.testing.expectEqualStrings(
+        \\{
+        \\    "KeyId": "42",
+        \\    "Plaintext": "foo",
+        \\    "EncryptionContext": {},
+        \\    "GrantTokens": [],
+        \\    "EncryptionAlgorithm": "SYMMETRIC_DEFAULT",
+        \\    "DryRun": false
+        \\}
+    , buffer.items);
+
+    var buffer_null = std.ArrayList(u8).init(allocator);
+    defer buffer_null.deinit();
+    const req_null = services.kms.encrypt.Request{
+        .encryption_algorithm = "SYMMETRIC_DEFAULT",
+        // Since encryption_context here *IS* null, we expect simply "null" to be the value
+        .encryption_context = null,
+        .key_id = "42",
+        .plaintext = "foo",
+        .dry_run = false,
+        .grant_tokens = &[_][]const u8{},
+    };
+    try json.stringify(req_null, .{ .whitespace = .{} }, buffer_null.writer());
+    try std.testing.expectEqualStrings(
+        \\{
+        \\    "KeyId": "42",
+        \\    "Plaintext": "foo",
+        \\    "EncryptionContext": null,
+        \\    "GrantTokens": [],
+        \\    "EncryptionAlgorithm": "SYMMETRIC_DEFAULT",
+        \\    "DryRun": false
+        \\}
+    , buffer_null.items);
+}
+
 test "REST Json v1 builds proper queries" {
     const allocator = std.testing.allocator;
     const svs = Services(.{.lambda}){};
