@@ -34,12 +34,12 @@ pub fn build(b: *Builder) !void {
         "no-llvm",
         "Disable LLVM",
     ) orelse false;
-
     const broken_windows = b.option(
         bool,
         "broken-windows",
         "Windows is broken in this environment (do not run Windows tests)",
     ) orelse false;
+    const no_bin = b.option(bool, "no-bin", "skip emitting binary") orelse false;
     // TODO: Embed the current git version in the code. We can do this
     // by looking for .git/HEAD (if it exists, follow the ref to /ref/heads/whatevs,
     // grab that commit, and use b.addOptions/exe.addOptions to generate the
@@ -102,12 +102,12 @@ pub fn build(b: *Builder) !void {
     var cg_cmd = b.addRunArtifact(cg_exe);
     cg_cmd.addArg("--models");
     cg_cmd.addArg(try std.fs.path.join(
-            b.allocator,
-            &[_][]const u8{
-                try b.dependency("models", .{}).path("").getPath3(b, null).toString(b.allocator),
-                models_subdir,
-            },
-        ));
+        b.allocator,
+        &[_][]const u8{
+            try b.dependency("models", .{}).path("").getPath3(b, null).toString(b.allocator),
+            models_subdir,
+        },
+    ));
     cg_cmd.addArg("--output");
     const cg_output_dir = cg_cmd.addOutputDirectoryArg("src/models");
     if (b.verbose)
@@ -218,5 +218,9 @@ pub fn build(b: *Builder) !void {
     const run_smoke_test = b.addRunArtifact(smoke_test);
 
     smoke_test_step.dependOn(&run_smoke_test.step);
-    b.installArtifact(exe);
+    if (no_bin) {
+        b.getInstallStep().dependOn(&exe.step);
+    } else {
+        b.installArtifact(exe);
+    }
 }
