@@ -34,12 +34,12 @@ pub fn build(b: *Builder) !void {
         "no-llvm",
         "Disable LLVM",
     ) orelse false;
-
     const broken_windows = b.option(
         bool,
         "broken-windows",
         "Windows is broken in this environment (do not run Windows tests)",
     ) orelse false;
+    const no_bin = b.option(bool, "no-bin", "skip emitting binary") orelse false;
     // TODO: Embed the current git version in the code. We can do this
     // by looking for .git/HEAD (if it exists, follow the ref to /ref/heads/whatevs,
     // grab that commit, and use b.addOptions/exe.addOptions to generate the
@@ -67,17 +67,6 @@ pub fn build(b: *Builder) !void {
     const smithy_module = smithy_dep.module("smithy");
     exe.root_module.addImport("smithy", smithy_module); // not sure this should be here...
 
-    // Expose module to others
-    _ = b.addModule("aws", .{
-        .root_source_file = b.path("src/aws.zig"),
-        .imports = &.{.{ .name = "smithy", .module = smithy_module }},
-    });
-
-    // Expose module to others
-    _ = b.addModule("aws-signing", .{
-        .root_source_file = b.path("src/aws_signing.zig"),
-        .imports = &.{.{ .name = "smithy", .module = smithy_module }},
-    });
     // TODO: This does not work correctly due to https://github.com/ziglang/zig/issues/16354
     //
     // We are working here with kind of a weird dependency though. So we can do this
@@ -100,51 +89,73 @@ pub fn build(b: *Builder) !void {
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
 
-    const gen_step = blk: {
-        const cg = b.step("gen", "Generate zig service code from smithy models");
+    const cg = b.step("gen", "Generate zig service code from smithy models");
 
-        const cg_exe = b.addExecutable(.{
-            .name = "codegen",
-            .root_source_file = b.path("codegen/src/main.zig"),
-            // We need this generated for the host, not the real target
-            .target = b.graph.host,
-            .optimize = if (b.verbose) .Debug else .ReleaseSafe,
-        });
-        cg_exe.use_llvm = !no_llvm;
-        cg_exe.root_module.addImport("smithy", smithy_dep.module("smithy"));
-        var cg_cmd = b.addRunArtifact(cg_exe);
-        cg_cmd.addArg("--models");
-        cg_cmd.addArg(try std.fs.path.join(
-            b.allocator,
-            &[_][]const u8{
-                try b.dependency("models", .{}).path("").getPath3(b, null).toString(b.allocator),
-                models_subdir,
-            },
-        ));
-        cg_cmd.addArg("--output");
-        cg_cmd.addDirectoryArg(b.path("src/models"));
-        if (b.verbose)
-            cg_cmd.addArg("--verbose");
-        // cg_cmd.step.dependOn(&fetch_step.step);
-        // TODO: this should use zig_exe from std.Build
-        // codegen should store a hash in a comment
-        // this would be hash of the exe that created the file
-        // concatenated with hash of input json. this would
-        // allow skipping generated files. May not include hash
-        // of contents of output file as maybe we want to tweak
-        // manually??
-        //
-        // All the hashes can be in service_manifest.zig, which
-        // could be fun to just parse and go nuts. Top of
-        // file, generator exe hash. Each import has comment
-        // with both input and output hash and we can decide
-        // later about warning on manual changes...
+    const cg_exe = b.addExecutable(.{
+        .name = "codegen",
+        .root_source_file = b.path("codegen/src/main.zig"),
+        // We need this generated for the host, not the real target
+        .target = b.graph.host,
+        .optimize = if (b.verbose) .Debug else .ReleaseSafe,
+    });
+    cg_exe.root_module.addImport("smithy", smithy_module);
+    var cg_cmd = b.addRunArtifact(cg_exe);
+    cg_cmd.addArg("--models");
+    cg_cmd.addArg(try std.fs.path.join(
+        b.allocator,
+        &[_][]const u8{
+            try b.dependency("models", .{}).path("").getPath3(b, null).toString(b.allocator),
+            models_subdir,
+        },
+    ));
+    cg_cmd.addArg("--output");
+    const cg_output_dir = cg_cmd.addOutputDirectoryArg("src/models");
+    if (b.verbose)
+        cg_cmd.addArg("--verbose");
+    // cg_cmd.step.dependOn(&fetch_step.step);
+    // TODO: this should use zig_exe from std.Build
+    // codegen should store a hash in a comment
+    // this would be hash of the exe that created the file
+    // concatenated with hash of input json. this would
+    // allow skipping generated files. May not include hash
+    // of contents of output file as maybe we want to tweak
+    // manually??
+    //
+    // All the hashes can be in service_manifest.zig, which
+    // could be fun to just parse and go nuts. Top of
+    // file, generator exe hash. Each import has comment
+    // with both input and output hash and we can decide
+    // later about warning on manual changes...
 
-        cg.dependOn(&cg_cmd.step);
-        break :blk cg;
-    };
+    cg.dependOn(&cg_cmd.step);
 
-    exe.step.dependOn(gen_step);
+    exe.step.dependOn(cg);
+
+    // This allows us to have each module depend on the
+    // generated service manifest.
+    const service_manifest_module = b.createModule(.{
+        .root_source_file = cg_output_dir.path(b, "service_manifest.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    service_manifest_module.addImport("smithy", smithy_module);
+
+    exe.root_module.addImport("service_manifest", service_manifest_module);
+
+    // Expose module to others
+    _ = b.addModule("aws", .{
+        .root_source_file = b.path("src/aws.zig"),
+        .imports = &.{
+            .{ .name = "smithy", .module = smithy_module },
+            .{ .name = "service_manifest", .module = service_manifest_module },
+        },
+    });
+
+    // Expose module to others
+    _ = b.addModule("aws-signing", .{
+        .root_source_file = b.path("src/aws_signing.zig"),
+        .imports = &.{.{ .name = "smithy", .module = smithy_module }},
+    });
 
     // Similar to creating the run step earlier, this exposes a `test` step to
     // the `zig build --help` menu, providing a way for the user to request
@@ -174,8 +185,9 @@ pub fn build(b: *Builder) !void {
             .target = b.resolveTargetQuery(t),
             .optimize = optimize,
         });
-        unit_tests.root_module.addImport("smithy", smithy_dep.module("smithy"));
-        unit_tests.step.dependOn(gen_step);
+        unit_tests.root_module.addImport("smithy", smithy_module);
+        unit_tests.root_module.addImport("service_manifest", service_manifest_module);
+        unit_tests.step.dependOn(cg);
         unit_tests.use_llvm = !no_llvm;
 
         const run_unit_tests = b.addRunArtifact(unit_tests);
@@ -199,11 +211,16 @@ pub fn build(b: *Builder) !void {
         .optimize = optimize,
     });
     smoke_test.use_llvm = !no_llvm;
-    smoke_test.root_module.addImport("smithy", smithy_dep.module("smithy"));
-    smoke_test.step.dependOn(gen_step);
+    smoke_test.root_module.addImport("smithy", smithy_module);
+    smoke_test.root_module.addImport("service_manifest", service_manifest_module);
+    smoke_test.step.dependOn(cg);
 
     const run_smoke_test = b.addRunArtifact(smoke_test);
 
     smoke_test_step.dependOn(&run_smoke_test.step);
-    b.installArtifact(exe);
+    if (no_bin) {
+        b.getInstallStep().dependOn(&exe.step);
+    } else {
+        b.installArtifact(exe);
+    }
 }
