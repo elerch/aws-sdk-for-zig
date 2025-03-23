@@ -6,6 +6,7 @@
         "build.zig",
         "build.zig.zon",
         "src",
+        "codegen",
         "README.md",
         "LICENSE",
     },
