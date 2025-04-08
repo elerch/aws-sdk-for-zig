@@ -1702,7 +1702,7 @@ const TestSetup = struct {
     request_options: TestOptions,
     server_thread: std.Thread = undefined,
     creds: aws_auth.Credentials = undefined,
-    client: *Client = undefined,
+    client: Client = undefined,
     started: bool = false,
 
     const Self = @This();
@@ -1738,8 +1738,8 @@ const TestSetup = struct {
             null,
         );
         aws_creds.static_credentials = self.creds;
-        var client = Client.init(self.allocator, .{});
-        self.client = &client;
+        const client = Client.init(self.allocator, .{});
+        self.client = client;
         return .{
             .region = "us-west-2",
             .client = client,
