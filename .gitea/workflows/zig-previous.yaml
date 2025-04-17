@@ -20,11 +20,18 @@ jobs:
         with:
           ref: zig-0.13
       - name: Setup Zig
-        uses: mlugg/setup-zig@v1.2.1
+        uses: https://github.com/mlugg/setup-zig@v1.2.1
         with:
           version: 0.13.0
-      - name: Run tests
-        run: zig build test --verbose
+      - name: Restore Zig caches
+        uses: https://github.com/Hanaasagi/zig-action-cache@3954aae427f8b05914e08dfd79f15e1f2e435929
+      - name: Run smoke test
+        run: zig build smoke-test --verbose
+      - name: Run full tests
+        run: zig build test --verbose --summary all
+      # Release mode fix not backported to 0.13.0 code
+      #- name: Run tests (release mode)
+      #  run: zig build test -Doptimize=ReleaseSafe --verbose
       # Zig build scripts don't have the ability to import depenedencies directly
       # (https://github.com/ziglang/zig/issues/18164). We can allow downstream
       # build scripts to import aws with a few tweaks, but we can't @import("src/aws.zig")
@@ -69,7 +76,7 @@ jobs:
       # - run: echo "URL of foo (1) is ${{ steps.sign.outputs.URL_1 }}"
       - name: Publish source code with generated models
         run: |
-          curl --user ${{ github.actor }}:${{ secrets.PACKAGE_PUSH }} \
+          curl -s --user ${{ github.actor }}:${{ secrets.PACKAGE_PUSH }} \
             --upload-file ${{ runner.temp }}/${{ github.sha }}-with-models.tar.gz \
             https://git.lerch.org/api/packages/lobo/generic/aws-sdk-with-models/${{ github.sha }}/${{ github.sha }}-with-models.tar.gz
       - name: Build example

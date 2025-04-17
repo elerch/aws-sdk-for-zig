@@ -14,7 +14,11 @@ jobs:
         uses: mlugg/setup-zig@v1.2.1
         with:
           version: mach-latest
+      - name: Restore Zig caches
+        uses: Hanaasagi/zig-action-cache@3954aae427f8b05914e08dfd79f15e1f2e435929
       - name: Run tests
         run: zig build test -Dbroken-windows --verbose
+      - name: Run tests (release mode)
+        run: zig build test -Doptimize=ReleaseSafe -Dbroken-windows --verbose # Github runners try to run the windows tests despite disabling foreign checks
       - name: Build example
         run: ( cd example && zig build ) # Make sure example builds
