@@ -1588,10 +1588,11 @@ const TestOptions = struct {
         return error.HeaderOrValueNotFound;
     }
     fn waitForReady(self: *Self) !void {
-        // While this doesn't return an error, we can use !void
-        // to prepare for addition of timeout
-        while (!self.server_ready)
+        // Set 1 minute timeout...this is way longer than necessary
+        var remaining_iters: isize = std.time.ns_per_min / 100;
+        while (!self.server_ready and remaining_iters > 0) : (remaining_iters -= 1)
             std.time.sleep(100);
+        if (!self.server_ready) return error.TestServerTimeoutWaitingForReady;
     }
 };
 
@@ -1619,6 +1620,7 @@ fn threadMain(options: *TestOptions) !void {
     // var aa = arena.allocator();
     // We're in control of all requests/responses, so this flag will tell us
     // when it's time to shut down
+    defer options.server_ready = true; // In case remaining_requests = 0, we don't want to wait forever
     while (options.server_remaining_requests > 0) {
         options.server_remaining_requests -= 1;
         processRequest(options, &http_server) catch |e| {
