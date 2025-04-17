@@ -40,6 +40,12 @@ pub fn build(b: *Builder) !void {
         "Windows is broken in this environment (do not run Windows tests)",
     ) orelse false;
     const no_bin = b.option(bool, "no-bin", "skip emitting binary") orelse false;
+
+    const test_filters: []const []const u8 = b.option(
+        []const []const u8,
+        "test-filter",
+        "Skip tests that do not match any of the specified filters",
+    ) orelse &.{};
     // TODO: Embed the current git version in the code. We can do this
     // by looking for .git/HEAD (if it exists, follow the ref to /ref/heads/whatevs,
     // grab that commit, and use b.addOptions/exe.addOptions to generate the
@@ -184,6 +190,7 @@ pub fn build(b: *Builder) !void {
             .root_source_file = b.path("src/aws.zig"),
             .target = b.resolveTargetQuery(t),
             .optimize = optimize,
+            .filters = test_filters,
         });
         unit_tests.root_module.addImport("smithy", smithy_module);
         unit_tests.root_module.addImport("service_manifest", service_manifest_module);
@@ -209,6 +216,7 @@ pub fn build(b: *Builder) !void {
         .root_source_file = b.path("src/aws.zig"),
         .target = target,
         .optimize = optimize,
+        .filters = test_filters,
     });
     smoke_test.use_llvm = !no_llvm;
     smoke_test.root_module.addImport("smithy", smithy_module);
