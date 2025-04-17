@@ -688,7 +688,6 @@ pub fn Request(comptime request_action: anytype) type {
 
         fn ParsedJsonData(comptime T: type) type {
             return struct {
-                raw_response_parsed: bool,
                 parsed_response_ptr: *T,
                 allocator: std.mem.Allocator,
 
@@ -697,8 +696,7 @@ pub fn Request(comptime request_action: anytype) type {
                 pub fn deinit(self: MySelf) void {
                     // This feels like it should result in a use after free, but it
                     // seems to be working?
-                    if (self.raw_response_parsed)
-                        self.allocator.destroy(self.parsed_response_ptr);
+                    self.allocator.destroy(self.parsed_response_ptr);
                 }
             };
         }
@@ -713,11 +711,13 @@ pub fn Request(comptime request_action: anytype) type {
                 std.mem.eql(u8, key, action.action_name ++ "Response") or
                 std.mem.eql(u8, key, action.action_name ++ "Result") or
                 isOtherNormalResponse(response_types.NormalResponse, key);
-            var raw_response_parsed = false;
             var stream = json.TokenStream.init(data);
             const parsed_response_ptr = blk: {
-                if (!response_types.isRawPossible or found_normal_json_response)
-                    break :blk &(json.parse(response_types.NormalResponse, &stream, parser_options) catch |e| {
+                const ptr = try options.client.allocator.create(response_types.NormalResponse);
+                errdefer options.client.allocator.destroy(ptr);
+
+                if (!response_types.isRawPossible or found_normal_json_response) {
+                    ptr.* = (json.parse(response_types.NormalResponse, &stream, parser_options) catch |e| {
                         log.err(
                             \\Call successful, but unexpected response from service.
                             \\This could be the result of a bug or a stale set of code generated
@@ -733,10 +733,10 @@ pub fn Request(comptime request_action: anytype) type {
                         return e;
                     });
 
+                    break :blk ptr;
+                }
+
                 log.debug("Appears server has provided a raw response", .{});
-                raw_response_parsed = true;
-                const ptr = try options.client.allocator.create(response_types.NormalResponse);
-                errdefer options.client.allocator.destroy(ptr);
                 @field(ptr.*, std.meta.fields(action.Response)[0].name) =
                     json.parse(response_types.RawResponse, &stream, parser_options) catch |e| {
                         log.err(
@@ -756,8 +756,7 @@ pub fn Request(comptime request_action: anytype) type {
                 break :blk ptr;
             };
             return ParsedJsonData(response_types.NormalResponse){
-                .raw_response_parsed = raw_response_parsed,
-                .parsed_response_ptr = @constCast(parsed_response_ptr), //TODO: why doesn't changing const->var above fix this?
+                .parsed_response_ptr = parsed_response_ptr,
                 .allocator = options.client.allocator,
             };
         }
@@ -1702,7 +1701,7 @@ const TestSetup = struct {
     request_options: TestOptions,
     server_thread: std.Thread = undefined,
     creds: aws_auth.Credentials = undefined,
-    client: *Client = undefined,
+    client: Client = undefined,
     started: bool = false,
 
     const Self = @This();
@@ -1738,8 +1737,8 @@ const TestSetup = struct {
             null,
         );
         aws_creds.static_credentials = self.creds;
-        var client = Client.init(self.allocator, .{});
-        self.client = &client;
+        const client = Client.init(self.allocator, .{});
+        self.client = client;
         return .{
             .region = "us-west-2",
             .client = client,
