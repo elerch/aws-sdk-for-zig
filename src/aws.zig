@@ -1533,7 +1533,7 @@ const TestOptions = struct {
     request_target: []const u8 = undefined,
     request_headers: []std.http.Header = undefined,
     test_server_runtime_uri: ?[]u8 = null,
-    server_ready: bool = false,
+    server_ready: std.Thread.Semaphore = .{},
     requests_processed: usize = 0,
 
     const Self = @This();
@@ -1588,11 +1588,18 @@ const TestOptions = struct {
         return error.HeaderOrValueNotFound;
     }
     fn waitForReady(self: *Self) !void {
-        // Set 1 minute timeout...this is way longer than necessary
-        var remaining_iters: isize = std.time.ns_per_min / 100;
-        while (!self.server_ready and remaining_iters > 0) : (remaining_iters -= 1)
-            std.time.sleep(100);
-        if (!self.server_ready) return error.TestServerTimeoutWaitingForReady;
+        // Set 10s timeout...this is way longer than necessary
+        log.debug("waiting for ready", .{});
+        try self.server_ready.timedWait(1000 * std.time.ns_per_ms);
+        // var deadline = std.Thread.Futex.Deadline.init(1000 * std.time.ns_per_ms);
+        // if (self.futex_word.load(.acquire) != 0) return;
+        // log.debug("futex zero", .{});
+        // // note that this seems backwards from the documentation...
+        // deadline.wait(self.futex_word, 1) catch {
+        //     log.err("futex value {d}", .{self.futex_word.load(.acquire)});
+        //     return error.TestServerTimeoutWaitingForReady;
+        // };
+        log.debug("the wait is over!", .{});
     }
 };
 
@@ -1620,9 +1627,9 @@ fn threadMain(options: *TestOptions) !void {
     // var aa = arena.allocator();
     // We're in control of all requests/responses, so this flag will tell us
     // when it's time to shut down
-    defer options.server_ready = true; // In case remaining_requests = 0, we don't want to wait forever
-    while (options.server_remaining_requests > 0) {
-        options.server_remaining_requests -= 1;
+    if (options.server_remaining_requests == 0)
+        options.server_ready.post(); // This will cause the wait for server to return
+    while (options.server_remaining_requests > 0) : (options.server_remaining_requests -= 1) {
         processRequest(options, &http_server) catch |e| {
             log.err("Unexpected error processing request: {any}", .{e});
             if (@errorReturnTrace()) |trace| {
@@ -1633,12 +1640,13 @@ fn threadMain(options: *TestOptions) !void {
 }
 
 fn processRequest(options: *TestOptions, net_server: *std.net.Server) !void {
-    options.server_ready = true;
-    errdefer options.server_ready = false;
     log.debug(
         "tid {d} (server): server waiting to accept. requests remaining: {d}",
-        .{ std.Thread.getCurrentId(), options.server_remaining_requests + 1 },
+        .{ std.Thread.getCurrentId(), options.server_remaining_requests },
     );
+    // options.futex_word.store(1, .release);
+    // errdefer options.futex_word.store(0, .release);
+    options.server_ready.post();
     var connection = try net_server.accept();
     defer connection.stream.close();
     var read_buffer: [1024 * 16]u8 = undefined;
@@ -1657,8 +1665,6 @@ fn processRequest(options: *TestOptions, net_server: *std.net.Server) !void {
 }
 
 fn serveRequest(options: *TestOptions, request: *std.http.Server.Request) !void {
-    options.server_ready = false;
-
     options.requests_processed += 1;
     options.request_body = try (try request.reader()).readAllAlloc(options.allocator, std.math.maxInt(usize));
     options.request_method = request.head.method;
@@ -1728,7 +1734,8 @@ const TestSetup = struct {
         // Not sure why we're getting sprayed here, but we have an arena allocator, and this
         // is testing, so yolo
         awshttp.endpoint_override = self.request_options.test_server_runtime_uri;
-        log.debug("endpoint override set to {?s}", .{awshttp.endpoint_override});
+        if (awshttp.endpoint_override == null) return error.TestSetupStartFailure;
+        std.log.debug("endpoint override set to {?s}", .{awshttp.endpoint_override});
         self.creds = aws_auth.Credentials.init(
             self.allocator,
             try self.allocator.dupe(u8, "ACCESS"),
@@ -1746,6 +1753,27 @@ const TestSetup = struct {
     }
 
     fn stop(self: *Self) void {
+        if (self.request_options.server_remaining_requests > 0)
+            if (test_error_log_enabled)
+                std.log.err(
+                    "Test server has {d} request(s) remaining to issue! Draining",
+                    .{self.request_options.server_remaining_requests},
+                )
+            else
+                std.log.info(
+                    "Test server has {d} request(s) remaining to issue! Draining",
+                    .{self.request_options.server_remaining_requests},
+                );
+
+        var rr = self.request_options.server_remaining_requests;
+        while (rr > 0) : (rr -= 1) {
+            std.log.debug("rr: {d}", .{self.request_options.server_remaining_requests});
+            // We need to drain all remaining requests, otherwise the server
+            // will hang indefinitely
+            var client = std.http.Client{ .allocator = self.allocator };
+            defer client.deinit();
+            _ = client.fetch(.{ .location = .{ .url = self.request_options.test_server_runtime_uri.? } }) catch unreachable;
+        }
         self.server_thread.join();
     }
 
@@ -2390,4 +2418,34 @@ test "json_1_1: ECR timestamps" {
     try std.testing.expectEqualStrings("https://146325435496.dkr.ecr.us-west-2.amazonaws.com", call.response.authorization_data.?[0].proxy_endpoint.?);
     // try std.testing.expectEqual(@as(i64, 1.73859841557E9), call.response.authorization_data.?[0].expires_at.?);
     try std.testing.expectEqual(@as(f128, 1.7385984915E9), call.response.authorization_data.?[0].expires_at.?);
+}
+var test_error_log_enabled = true;
+test "test server timeout works" {
+    // const old = std.testing.log_level;
+    // defer std.testing.log_level = old;
+    // std.testing.log_level = .debug;
+    // defer std.testing.log_level = old;
+    // std.testing.log_level = .debug;
+    test_error_log_enabled = false;
+    defer test_error_log_enabled = true;
+    std.log.debug("test start", .{});
+    const allocator = std.testing.allocator;
+    var test_harness = TestSetup.init(.{
+        .allocator = allocator,
+        .server_response =
+        \\{}
+        ,
+        .server_response_headers = &.{
+            .{ .name = "Content-Type", .value = "application/json" },
+            .{ .name = "x-amzn-RequestId", .value = "QBI72OUIN8U9M9AG6PCSADJL4JVV4KQNSO5AEMVJF66Q9ASUAAJG" },
+        },
+    });
+    defer test_harness.deinit();
+    defer test_harness.creds.deinit(); // Usually this gets done during the call,
+    // but we're purposely not making a call
+    // here, so we have to deinit() manually
+    _ = try test_harness.start();
+    std.log.debug("harness started", .{});
+    test_harness.stop();
+    std.log.debug("test complete", .{});
 }
