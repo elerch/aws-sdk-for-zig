@@ -20,6 +20,9 @@ pub const StringifyOptions = struct {
     /// Root element name to use when serializing a value that doesn't have a natural name
     root_name: ?[]const u8 = "root",
 
+    /// Root attributes (e.g. xmlns="...") that will be added to the root element node only
+    root_attributes: []const u8 = "",
+
     /// Function to determine the element name for an array item based on the element
     /// name of the array containing the elements. See arrayElementPluralToSingluarTransformation
     /// and arrayElementNoopTransformation functions for examples
@@ -58,7 +61,10 @@ pub fn stringify(
 
     // Start serialization with the root element
     const root_name = options.root_name;
-    try serializeValue(value, root_name, options, writer.any(), 0);
+    if (@typeInfo(@TypeOf(value)) != .optional or value == null)
+        try serializeValue(value, root_name, options, writer.any(), 0)
+    else
+        try serializeValue(value.?, root_name, options, writer.any(), 0);
 }
 
 /// Serializes a value to XML and returns an allocated string
@@ -84,18 +90,21 @@ fn serializeValue(
 ) !void {
     const T = @TypeOf(value);
 
-    try writeIndent(writer, depth, options.whitespace);
+    // const output_indent = !(!options.emit_null_optional_fields and @typeInfo(@TypeOf(value)) == .optional and value == null);
+    const output_indent = options.emit_null_optional_fields or @typeInfo(@TypeOf(value)) != .optional or value != null;
 
-    // const write_outer_element =
-    //     @typeInfo(T) != .optional or
-    //     options.emit_strings_as_arrays == false or
-    //     (@typeInfo(T) == .optional and element_name != null) or
-    //     (options.emit_strings_as_arrays and (@typeInfo(T) != .array or @typeInfo(T).array.child != u8));
+    if (output_indent and element_name != null)
+        try writeIndent(writer, depth, options.whitespace);
+
     // Start element tag
     if (@typeInfo(T) != .optional and @typeInfo(T) != .array) {
         if (element_name) |n| {
             try writer.writeAll("<");
             try writer.writeAll(n);
+            if (depth == 0 and options.root_attributes.len > 0) {
+                try writer.writeByte(' ');
+                try writer.writeAll(options.root_attributes);
+            }
             try writer.writeAll(">");
         }
     }
@@ -197,8 +206,9 @@ fn serializeValue(
                     else
                         field.name; // TODO: field mapping
 
+                const field_value = @field(value, field.name);
                 try serializeValue(
-                    @field(value, field.name),
+                    field_value,
                     field_name,
                     options,
                     writer,
@@ -206,7 +216,11 @@ fn serializeValue(
                 );
 
                 if (options.whitespace != .minified) {
-                    try writer.writeByte('\n');
+                    if (!options.emit_null_optional_fields and @typeInfo(@TypeOf(field_value)) == .optional and field_value == null) {
+                        // Skip writing anything
+                    } else {
+                        try writer.writeByte('\n');
+                    }
                 }
             }
 
@@ -657,6 +671,122 @@ test "structs with custom field names" {
             \\<root>
             \\  <GivenName>John</GivenName>
             \\  <FamilyName>Doe</FamilyName>
+            \\</root>
+        , result);
+    }
+}
+
+test "structs with optional values" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
+    const Person = struct {
+        first_name: []const u8,
+        middle_name: ?[]const u8 = null,
+        last_name: []const u8,
+    };
+
+    const person = Person{
+        .first_name = "John",
+        .last_name = "Doe",
+    };
+
+    {
+        const result = try stringifyAlloc(
+            allocator,
+            person,
+            .{
+                .whitespace = .indent_2,
+                .emit_null_optional_fields = false,
+                .root_attributes = "xmlns=\"http://example.com/blah/xxxx/\"",
+            },
+        );
+        defer allocator.free(result);
+        try testing.expectEqualStrings(
+            \\<?xml version="1.0" encoding="UTF-8"?>
+            \\<root xmlns="http://example.com/blah/xxxx/">
+            \\  <first_name>John</first_name>
+            \\  <last_name>Doe</last_name>
+            \\</root>
+        , result);
+    }
+}
+
+test "optional structs with value" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
+    const Person = struct {
+        first_name: []const u8,
+        middle_name: ?[]const u8 = null,
+        last_name: []const u8,
+    };
+
+    const person: ?Person = Person{
+        .first_name = "John",
+        .last_name = "Doe",
+    };
+
+    {
+        const result = try stringifyAlloc(
+            allocator,
+            person,
+            .{
+                .whitespace = .indent_2,
+                .emit_null_optional_fields = false,
+                .root_attributes = "xmlns=\"http://example.com/blah/xxxx/\"",
+            },
+        );
+        defer allocator.free(result);
+        try testing.expectEqualStrings(
+            \\<?xml version="1.0" encoding="UTF-8"?>
+            \\<root xmlns="http://example.com/blah/xxxx/">
+            \\  <first_name>John</first_name>
+            \\  <last_name>Doe</last_name>
+            \\</root>
+        , result);
+    }
+}
+
+test "nested optional structs with value" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
+    const Name = struct {
+        first_name: []const u8,
+        middle_name: ?[]const u8 = null,
+        last_name: []const u8,
+    };
+
+    const Person = struct {
+        name: ?Name,
+    };
+
+    const person: ?Person = Person{
+        .name = .{
+            .first_name = "John",
+            .last_name = "Doe",
+        },
+    };
+
+    {
+        const result = try stringifyAlloc(
+            allocator,
+            person,
+            .{
+                .whitespace = .indent_2,
+                .emit_null_optional_fields = false,
+                .root_attributes = "xmlns=\"http://example.com/blah/xxxx/\"",
+            },
+        );
+        defer allocator.free(result);
+        try testing.expectEqualStrings(
+            \\<?xml version="1.0" encoding="UTF-8"?>
+            \\<root xmlns="http://example.com/blah/xxxx/">
+            \\  <name>
+            \\    <first_name>John</first_name>
+            \\    <last_name>Doe</last_name>
+            \\  </name>
             \\</root>
         , result);
     }

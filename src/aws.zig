@@ -236,6 +236,8 @@ pub fn Request(comptime request_action: anytype) type {
                 }
             }
             aws_request.body = buffer.items;
+            var rest_xml_body: ?[]const u8 = null;
+            defer if (rest_xml_body) |b| options.client.allocator.free(b);
             if (Self.service_meta.aws_protocol == .rest_xml) {
                 if (std.mem.eql(u8, "PUT", aws_request.method) or std.mem.eql(u8, "POST", aws_request.method)) {
                     if (@hasDecl(ActionRequest, "http_payload")) {
@@ -255,8 +257,37 @@ pub fn Request(comptime request_action: anytype) type {
                             body_assigned = true;
                         }
 
-                        if (!body_assigned)
-                            return error.XmlSerializationNotImplemented;
+                        if (!body_assigned) {
+                            const sm = ActionRequest.metaInfo().service_metadata;
+                            if (!std.mem.eql(u8, sm.endpoint_prefix, "s3"))
+                                // Because the attributes below are most likely only
+                                // applicable to s3, we are better off to fail
+                                // early. This portion of the code base should
+                                // only be executed for s3 as no other known
+                                // service uses this protocol
+                                return error.NotImplemented;
+
+                            const attrs = try std.fmt.allocPrint(
+                                options.client.allocator,
+                                "xmlns=\"http://{s}.amazonaws.com/doc/{s}/\"",
+                                .{ sm.endpoint_prefix, sm.version },
+                            );
+                            defer options.client.allocator.free(attrs); // once serialized, the value should be copied over
+
+                            // Need to serialize this
+                            rest_xml_body = try xml_serializer.stringifyAlloc(
+                                options.client.allocator,
+                                payload,
+                                .{
+                                    .whitespace = .indent_2,
+                                    .root_name = request.fieldNameFor(ActionRequest.http_payload),
+                                    .root_attributes = attrs,
+                                    .emit_null_optional_fields = false,
+                                    .include_declaration = false,
+                                },
+                            );
+                            aws_request.body = rest_xml_body.?;
+                        }
                     } else {
                         return error.NotImplemented;
                     }
@@ -2305,7 +2336,10 @@ test "rest_xml_with_input_s3: S3 create bucket" {
         \\</CreateBucketConfiguration>
     , test_harness.request_options.request_body);
     // Response expectations
-    try std.testing.expectEqualStrings("9PEYBAZ9J7TPRX43", call.response_metadata.request_id);
+    try std.testing.expectEqualStrings(
+        "9PEYBAZ9J7TPRX43, host_id: u7lzgW0tIyRP15vSUsVOXxJ37OfVCO8lZmLIVuqeq5EE4tNp9qebb5fy+/kendlZpR4YQE+y4Xg=",
+        call.response_metadata.request_id,
+    );
 }
 test "rest_xml_no_input: S3 list buckets" {
     const allocator = std.testing.allocator;
