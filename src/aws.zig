@@ -8,6 +8,7 @@ const case = @import("case.zig");
 const date = @import("date.zig");
 const servicemodel = @import("servicemodel.zig");
 const xml_shaper = @import("xml_shaper.zig");
+const xml_serializer = @import("xml_serializer.zig");
 
 const scoped_log = std.log.scoped(.aws);
 
