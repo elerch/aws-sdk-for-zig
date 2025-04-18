@@ -243,7 +243,20 @@ pub fn Request(comptime request_action: anytype) type {
                         // the http_payload declaration on the request type.
                         // Hopefully these will always be ?[]const u8, otherwise
                         // we should see a compile error on this line
-                        aws_request.body = @field(request, ActionRequest.http_payload).?;
+                        const payload = @field(request, ActionRequest.http_payload);
+                        const T = @TypeOf(payload);
+                        var body_assigned = false;
+                        if (T == ?[]const u8) {
+                            aws_request.body = payload.?;
+                            body_assigned = true;
+                        }
+                        if (T == []const u8) {
+                            aws_request.body = payload;
+                            body_assigned = true;
+                        }
+
+                        if (!body_assigned)
+                            return error.XmlSerializationNotImplemented;
                     } else {
                         return error.NotImplemented;
                     }
