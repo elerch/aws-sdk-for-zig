@@ -2259,6 +2259,41 @@ test "ec2_query_with_input: EC2 describe instances" {
     try std.testing.expectEqualStrings("i-0212d7d1f62b96676", call.response.reservations.?[1].instances.?[0].instance_id.?);
     try std.testing.expectEqualStrings("123456789012:found-me", call.response.reservations.?[1].instances.?[0].tags.?[0].value.?);
 }
+test "rest_xml_with_input_s3: S3 create bucket" {
+    const allocator = std.testing.allocator;
+    var test_harness = TestSetup.init(.{
+        .allocator = allocator,
+        .server_response =
+        \\
+        ,
+        .server_response_headers = &.{ // I don't see content type coming back in actual S3 requests
+            .{ .name = "x-amzn-RequestId", .value = "9PEYBAZ9J7TPRX43" },
+            .{ .name = "x-amz-id-2", .value = "u7lzgW0tIyRP15vSUsVOXxJ37OfVCO8lZmLIVuqeq5EE4tNp9qebb5fy+/kendlZpR4YQE+y4Xg=" },
+        },
+    });
+    defer test_harness.deinit();
+    errdefer test_harness.creds.deinit();
+    const options = try test_harness.start();
+    const s3 = (Services(.{.s3}){}).s3;
+    const call = try test_harness.client.call(s3.create_bucket.Request{
+        .bucket = "",
+        .create_bucket_configuration = .{
+            .location_constraint = "us-west-2",
+        },
+    }, options);
+    defer call.deinit();
+    test_harness.stop();
+    // Request expectations
+    try std.testing.expectEqual(std.http.Method.PUT, test_harness.request_options.request_method);
+    try std.testing.expectEqualStrings("/", test_harness.request_options.request_target);
+    try std.testing.expectEqualStrings(
+        \\<CreateBucketConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+        \\  <LocationConstraint>us-west-2</LocationConstraint>
+        \\</CreateBucketConfiguration>
+    , test_harness.request_options.request_body);
+    // Response expectations
+    try std.testing.expectEqualStrings("9PEYBAZ9J7TPRX43", call.response_metadata.request_id);
+}
 test "rest_xml_no_input: S3 list buckets" {
     const allocator = std.testing.allocator;
     var test_harness = TestSetup.init(.{
