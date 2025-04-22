@@ -162,8 +162,10 @@ fn parseInternal(comptime T: type, element: *xml.Element, options: ParseOptions)
                 return try parseInternal(optional_info.child, element, options);
             }
         },
-        .@"enum" => |enum_info| {
-            _ = enum_info;
+        .@"enum" => {
+            if (T == date.Timestamp) {
+                return try date.Timestamp.parse(element.children.items[0].CharData);
+            }
             // const numeric: ?enum_info.tag_type = std.fmt.parseInt(enum_info.tag_type, element.children.items[0].CharData, 10) catch null;
             // if (numeric) |num| {
             //     return std.meta.intToEnum(T, num);

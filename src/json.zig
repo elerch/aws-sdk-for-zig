@@ -1597,12 +1597,22 @@ fn parseInternal(comptime T: type, token: Token, tokens: *TokenStream, options: 
         .@"enum" => |enumInfo| {
             switch (token) {
                 .Number => |numberToken| {
-                    if (!numberToken.is_integer) return error.UnexpectedToken;
+                    if (!numberToken.is_integer) {
+                        // probably is in scientific notation
+                        const n = try std.fmt.parseFloat(f128, numberToken.slice(tokens.slice, tokens.i - 1));
+                        return try std.meta.intToEnum(T, @as(i128, @intFromFloat(n)));
+                    }
+
                     const n = try std.fmt.parseInt(enumInfo.tag_type, numberToken.slice(tokens.slice, tokens.i - 1), 10);
                     return try std.meta.intToEnum(T, n);
                 },
                 .String => |stringToken| {
                     const source_slice = stringToken.slice(tokens.slice, tokens.i - 1);
+
+                    if (std.meta.hasFn(T, "parse")) {
+                        return try T.parse(source_slice);
+                    }
+
                     switch (stringToken.escapes) {
                         .None => return std.meta.stringToEnum(T, source_slice) orelse return error.InvalidEnumTag,
                         .Some => {

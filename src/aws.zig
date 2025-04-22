@@ -1,5 +1,6 @@
 const builtin = @import("builtin");
 const std = @import("std");
+const zeit = @import("zeit");
 
 const awshttp = @import("aws_http.zig");
 const json = @import("json.zig");
@@ -396,6 +397,7 @@ pub fn Request(comptime request_action: anytype) type {
                 },
             );
             defer response.deinit();
+
             if (response.response_code != options.success_http_code) {
                 try reportTraffic(options.client.allocator, "Call Failed", aws_request, response, log.err);
                 if (options.diagnostics) |d| {
@@ -484,8 +486,11 @@ pub fn Request(comptime request_action: anytype) type {
             // If the expected result has no fields, there's no sense in
             // doing any more work. Let's bail early
             comptime var expected_body_field_len = std.meta.fields(action.Response).len;
-            if (@hasDecl(action.Response, "http_header"))
+
+            if (@hasDecl(action.Response, "http_header")) {
                 expected_body_field_len -= std.meta.fields(@TypeOf(action.Response.http_header)).len;
+            }
+
             if (@hasDecl(action.Response, "http_payload")) {
                 var rc = FullResponseType{
                     .response = .{},
@@ -508,21 +513,23 @@ pub fn Request(comptime request_action: anytype) type {
             }
 
             // We don't care about the body if there are no fields we expect there...
-            if (std.meta.fields(action.Response).len == 0 or expected_body_field_len == 0) {
+            if (std.meta.fields(action.Response).len == 0 or expected_body_field_len == 0 or response.body.len == 0) {
                 // Do we care if an unexpected body comes in?
                 return FullResponseType{
-                    .response = .{},
+                    .response = undefined,
                     .response_metadata = .{
                         .request_id = try requestIdFromHeaders(aws_request, response, options),
                     },
                     .parser_options = .{ .json = .{} },
-                    .raw_parsed = .{ .raw = .{} },
+                    .raw_parsed = .{ .raw = undefined },
                     .allocator = options.client.allocator,
                 };
             }
-            const isJson = try isJsonResponse(response.headers);
-            if (!isJson) return try xmlReturn(aws_request, options, response);
-            return try jsonReturn(aws_request, options, response);
+
+            return switch (try getContentType(response.headers)) {
+                .json => try jsonReturn(aws_request, options, response),
+                .xml => try xmlReturn(aws_request, options, response),
+            };
         }
 
         fn jsonReturn(aws_request: awshttp.HttpRequest, options: Options, response: awshttp.HttpResult) !FullResponseType {
@@ -739,8 +746,6 @@ pub fn Request(comptime request_action: anytype) type {
                 const MySelf = @This();
 
                 pub fn deinit(self: MySelf) void {
-                    // This feels like it should result in a use after free, but it
-                    // seems to be working?
                     self.allocator.destroy(self.parsed_response_ptr);
                 }
             };
@@ -829,6 +834,10 @@ fn coerceFromString(comptime T: type, val: []const u8) anyerror!T {
             log.err("Invalid string representing {s}: {s}", .{ @typeName(T), val });
             return e;
         },
+        date.Timestamp => return date.Timestamp.parse(val) catch |e| {
+            log.debug("Failed to parse timestamp from string '{s}': {}", .{ val, e });
+            return e;
+        },
         else => return val,
     }
 }
@@ -910,23 +919,28 @@ fn firstJsonKey(data: []const u8) []const u8 {
     log.debug("First json key: {s}", .{key});
     return key;
 }
-fn isJsonResponse(headers: []const awshttp.Header) !bool {
+
+pub const ContentType = enum {
+    json,
+    xml,
+};
+
+fn getContentType(headers: []const awshttp.Header) !ContentType {
     // EC2 ignores our accept type, but technically query protocol only
     // returns XML as well. So, we'll ignore the protocol here and just
     // look at the return type
-    var isJson: ?bool = null;
     for (headers) |h| {
         if (std.ascii.eqlIgnoreCase("Content-Type", h.name)) {
             if (std.mem.startsWith(u8, h.value, "application/json")) {
-                isJson = true;
+                return .json;
             } else if (std.mem.startsWith(u8, h.value, "application/x-amz-json-1.0")) {
-                isJson = true;
+                return .json;
             } else if (std.mem.startsWith(u8, h.value, "application/x-amz-json-1.1")) {
-                isJson = true;
+                return .json;
             } else if (std.mem.startsWith(u8, h.value, "text/xml")) {
-                isJson = false;
+                return .xml;
             } else if (std.mem.startsWith(u8, h.value, "application/xml")) {
-                isJson = false;
+                return .xml;
             } else {
                 log.err("Unexpected content type: {s}", .{h.value});
                 return error.UnexpectedContentType;
@@ -934,8 +948,8 @@ fn isJsonResponse(headers: []const awshttp.Header) !bool {
             break;
         }
     }
-    if (isJson == null) return error.ContentTypeNotFound;
-    return isJson.?;
+
+    return error.ContentTypeNotFound;
 }
 /// Get request ID from headers. Caller responsible for freeing memory
 fn requestIdFromHeaders(request: awshttp.HttpRequest, response: awshttp.HttpResult, options: Options) ![]u8 {
@@ -2475,10 +2489,11 @@ test "json_1_1: ECR timestamps" {
     // defer std.testing.log_level = old;
     // std.testing.log_level = .debug;
     const allocator = std.testing.allocator;
+
     var test_harness = TestSetup.init(.{
         .allocator = allocator,
         .server_response =
-        \\{"authorizationData":[{"authorizationToken":"***","expiresAt":1.7385984915E9,"proxyEndpoint":"https://146325435496.dkr.ecr.us-west-2.amazonaws.com"}]}
+        \\{"authorizationData":[{"authorizationToken":"***","expiresAt":"2022-05-17T06:56:13.652000+00:00","proxyEndpoint":"https://146325435496.dkr.ecr.us-west-2.amazonaws.com"}]}
         // \\{"authorizationData":[{"authorizationToken":"***","expiresAt":1.738598491557E9,"proxyEndpoint":"https://146325435496.dkr.ecr.us-west-2.amazonaws.com"}]}
         ,
         .server_response_headers = &.{
@@ -2503,7 +2518,13 @@ test "json_1_1: ECR timestamps" {
     try std.testing.expectEqualStrings("***", call.response.authorization_data.?[0].authorization_token.?);
     try std.testing.expectEqualStrings("https://146325435496.dkr.ecr.us-west-2.amazonaws.com", call.response.authorization_data.?[0].proxy_endpoint.?);
     // try std.testing.expectEqual(@as(i64, 1.73859841557E9), call.response.authorization_data.?[0].expires_at.?);
-    try std.testing.expectEqual(@as(f128, 1.7385984915E9), call.response.authorization_data.?[0].expires_at.?);
+
+    const expected_ins = try zeit.instant(.{
+        .source = .{ .iso8601 = "2022-05-17T06:56:13.652000+00:00" },
+    });
+    const expected_ts: date.Timestamp = @enumFromInt(expected_ins.timestamp);
+
+    try std.testing.expectEqual(expected_ts, call.response.authorization_data.?[0].expires_at.?);
 }
 var test_error_log_enabled = true;
 test "test server timeout works" {

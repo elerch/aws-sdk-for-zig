@@ -65,26 +65,22 @@ pub fn build(b: *Builder) !void {
         .optimize = optimize,
     });
     exe.use_llvm = !no_llvm;
-    const smithy_dep = b.dependency("smithy", .{
-        // These are the arguments to the dependency. It expects a target and optimization level.
+
+    // External dependencies
+    const dep_smithy = b.dependency("smithy", .{
         .target = target,
         .optimize = optimize,
     });
-    const smithy_module = smithy_dep.module("smithy");
-    exe.root_module.addImport("smithy", smithy_module); // not sure this should be here...
+    const mod_smithy = dep_smithy.module("smithy");
+    exe.root_module.addImport("smithy", mod_smithy); // not sure this should be here...
 
-    // TODO: This does not work correctly due to https://github.com/ziglang/zig/issues/16354
-    //
-    // We are working here with kind of a weird dependency though. So we can do this
-    // another way
-    //
-    // TODO: These target/optimize are not correct, as we need to run the thing
-    // const codegen = b.anonymousDependency("codegen/", @import("codegen/build.zig"), .{
-    //     .target = target,
-    //     .optimize = optimize,
-    // });
-    // const codegen_cmd = b.addRunArtifact(codegen.artifact("codegen"));
-    // exe.step.dependOn(&codegen_cmd.step);
+    const dep_zeit = b.dependency("zeit", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    const mod_zeit = dep_zeit.module("zeit");
+    exe.root_module.addImport("zeit", mod_zeit);
+    // End External dependencies
 
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
@@ -104,7 +100,7 @@ pub fn build(b: *Builder) !void {
         .target = b.graph.host,
         .optimize = if (b.verbose) .Debug else .ReleaseSafe,
     });
-    cg_exe.root_module.addImport("smithy", smithy_module);
+    cg_exe.root_module.addImport("smithy", mod_smithy);
     var cg_cmd = b.addRunArtifact(cg_exe);
     cg_cmd.addArg("--models");
     cg_cmd.addArg(try std.fs.path.join(
@@ -137,6 +133,21 @@ pub fn build(b: *Builder) !void {
 
     exe.step.dependOn(cg);
 
+    // Codegen private modules
+    const mod_json = b.createModule(.{
+        .root_source_file = b.path("codegen/src/json.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const mod_date = b.createModule(.{
+        .root_source_file = b.path("codegen/src/date.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    mod_date.addImport("zeit", mod_zeit);
+    // End codegen private modules
+
     // This allows us to have each module depend on the
     // generated service manifest.
     const service_manifest_module = b.createModule(.{
@@ -144,23 +155,25 @@ pub fn build(b: *Builder) !void {
         .target = target,
         .optimize = optimize,
     });
-    service_manifest_module.addImport("smithy", smithy_module);
+    service_manifest_module.addImport("smithy", mod_smithy);
+    service_manifest_module.addImport("date", mod_date);
+    service_manifest_module.addImport("json", mod_json);
+    service_manifest_module.addImport("zeit", mod_zeit);
 
     exe.root_module.addImport("service_manifest", service_manifest_module);
 
     // Expose module to others
-    _ = b.addModule("aws", .{
+    const mod_aws = b.addModule("aws", .{
         .root_source_file = b.path("src/aws.zig"),
-        .imports = &.{
-            .{ .name = "smithy", .module = smithy_module },
-            .{ .name = "service_manifest", .module = service_manifest_module },
-        },
     });
+    mod_aws.addImport("smithy", mod_smithy);
+    mod_aws.addImport("service_manifest", service_manifest_module);
+    mod_aws.addImport("date", mod_date);
 
     // Expose module to others
     _ = b.addModule("aws-signing", .{
         .root_source_file = b.path("src/aws_signing.zig"),
-        .imports = &.{.{ .name = "smithy", .module = smithy_module }},
+        .imports = &.{.{ .name = "smithy", .module = mod_smithy }},
     });
 
     // Similar to creating the run step earlier, this exposes a `test` step to
@@ -184,16 +197,24 @@ pub fn build(b: *Builder) !void {
     // test_step.dependOn(&run_unit_tests.step);
     for (test_targets) |t| {
         if (broken_windows and t.os_tag == .windows) continue;
-        // Creates a step for unit testing. This only builds the test executable
-        // but does not run it.
-        const unit_tests = b.addTest(.{
+
+        const mod_unit_tests = b.createModule(.{
             .root_source_file = b.path("src/aws.zig"),
             .target = b.resolveTargetQuery(t),
             .optimize = optimize,
+        });
+        mod_unit_tests.addImport("smithy", mod_smithy);
+        mod_unit_tests.addImport("service_manifest", service_manifest_module);
+        mod_unit_tests.addImport("date", mod_date);
+        mod_unit_tests.addImport("zeit", mod_zeit);
+
+        // Creates a step for unit testing. This only builds the test executable
+        // but does not run it.
+        const unit_tests = b.addTest(.{
+            .root_module = mod_unit_tests,
             .filters = test_filters,
         });
-        unit_tests.root_module.addImport("smithy", smithy_module);
-        unit_tests.root_module.addImport("service_manifest", service_manifest_module);
+
         unit_tests.step.dependOn(cg);
         unit_tests.use_llvm = !no_llvm;
 
@@ -219,7 +240,7 @@ pub fn build(b: *Builder) !void {
         .filters = test_filters,
     });
     smoke_test.use_llvm = !no_llvm;
-    smoke_test.root_module.addImport("smithy", smithy_module);
+    smoke_test.root_module.addImport("smithy", mod_smithy);
     smoke_test.root_module.addImport("service_manifest", service_manifest_module);
     smoke_test.step.dependOn(cg);
 

@@ -2,7 +2,6 @@ const std = @import("std");
 const smithy = @import("smithy");
 const snake = @import("snake.zig");
 const Hasher = @import("Hasher.zig");
-const json_zig = @embedFile("json.zig");
 
 var verbose = false;
 
@@ -33,8 +32,6 @@ pub fn main() anyerror!void {
         if (std.mem.eql(u8, "--models", arg))
             models_dir = try std.fs.cwd().openDir(args[i + 1], .{ .iterate = true });
     }
-    // TODO: Seems like we should remove this in favor of a package
-    try output_dir.writeFile(.{ .sub_path = "json.zig", .data = json_zig });
 
     // TODO: We need a different way to handle this file...
     const manifest_file_started = false;
@@ -186,8 +183,13 @@ fn processFile(file_name: []const u8, output_dir: std.fs.Dir, manifest: anytype)
     defer arena.deinit();
     const allocator = arena.allocator();
     _ = try writer.write("const std = @import(\"std\");\n");
-    _ = try writer.write("const serializeMap = @import(\"json.zig\").serializeMap;\n");
-    _ = try writer.write("const smithy = @import(\"smithy\");\n\n");
+    _ = try writer.write("const smithy = @import(\"smithy\");\n");
+    _ = try writer.write("const json = @import(\"json\");\n");
+    _ = try writer.write("const date = @import(\"date\");\n");
+    _ = try writer.write("const zeit = @import(\"zeit\");\n");
+    _ = try writer.write("\n");
+    _ = try writer.write("const serializeMap = json.serializeMap;\n");
+    _ = try writer.write("\n");
     if (verbose) std.log.info("Processing file: {s}", .{file_name});
     const service_names = generateServicesForFilePath(allocator, ";", file_name, writer) catch |err| {
         std.log.err("Error processing file: {s}", .{file_name});
@@ -716,7 +718,7 @@ fn generateTypeFor(shape_id: []const u8, writer: anytype, state: GenerationState
             // The serializer will have to deal with the idea we might be an array
             return try generateTypeFor(shape.set.member_target, writer, state, true);
         },
-        .timestamp => |s| try generateSimpleTypeFor(s, "f128", writer),
+        .timestamp => |s| try generateSimpleTypeFor(s, "date.Timestamp", writer),
         .blob => |s| try generateSimpleTypeFor(s, "[]const u8", writer),
         .boolean => |s| try generateSimpleTypeFor(s, "bool", writer),
         .double => |s| try generateSimpleTypeFor(s, "f64", writer),
