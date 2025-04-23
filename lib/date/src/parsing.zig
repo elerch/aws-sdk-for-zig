@@ -45,9 +45,6 @@ pub const DateTime = struct {
     }
 };
 
-const SECONDS_PER_DAY = 86400; //*  24* 60 * 60 */
-const DAYS_PER_YEAR = 365; //* Normal year (no leap year) */
-
 pub fn timestampToDateTime(timestamp: zeit.Seconds) DateTime {
     const ins = zeit.instant(.{ .source = .{ .unix_timestamp = timestamp } }) catch @panic("Failed to create instant from timestamp");
     return DateTime.fromInstant(ins);
@@ -162,10 +159,6 @@ fn endIsoState(current_state: IsoParsingState, date: *DateTime, prev_data: []con
 pub fn dateTimeToTimestamp(datetime: DateTime) !zeit.Seconds {
     return (try datetime.instant()).unixTimestamp();
 }
-
-const DateTimeToTimestampError = error{
-    DateTimeOutOfRange,
-};
 
 fn printDateTime(dt: DateTime) void {
     log.debug("{:0>4}-{:0>2}-{:0>2}T{:0>2}:{:0>2}:{:0<2}Z", .{
