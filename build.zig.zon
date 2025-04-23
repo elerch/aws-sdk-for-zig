@@ -28,5 +28,8 @@
         .date = .{
             .path = "lib/date",
         },
+        .json = .{
+            .path = "lib/json",
+        },
     },
 }

@@ -81,11 +81,12 @@ pub fn build(b: *Builder) !void {
     // End External dependencies
 
     // Private modules/dependencies
-    const mod_json = b.createModule(.{
-        .root_source_file = b.path("codegen/src/json.zig"),
+    const dep_json = b.dependency("json", .{
         .target = target,
         .optimize = optimize,
     });
+    const mod_json = dep_json.module("json");
+    mod_exe.addImport("json", mod_json);
 
     const dep_date = b.dependency("date", .{
         .target = target,
@@ -114,6 +115,7 @@ pub fn build(b: *Builder) !void {
     });
     cg_mod.addImport("smithy", mod_smithy);
     cg_mod.addImport("date", mod_date);
+    cg_mod.addImport("json", mod_json);
 
     const cg_exe = b.addExecutable(.{
         .name = "codegen",
@@ -163,7 +165,7 @@ pub fn build(b: *Builder) !void {
     service_manifest_module.addImport("json", mod_json);
     service_manifest_module.addImport("zeit", mod_zeit);
 
-    exe.root_module.addImport("service_manifest", service_manifest_module);
+    mod_exe.addImport("service_manifest", service_manifest_module);
 
     // Expose module to others
     const mod_aws = b.addModule("aws", .{
@@ -174,6 +176,7 @@ pub fn build(b: *Builder) !void {
     mod_aws.addImport("smithy", mod_smithy);
     mod_aws.addImport("service_manifest", service_manifest_module);
     mod_aws.addImport("date", mod_date);
+    mod_aws.addImport("json", mod_json);
     mod_aws.addImport("zeit", mod_zeit);
 
     // Expose module to others
@@ -182,6 +185,7 @@ pub fn build(b: *Builder) !void {
     });
     mod_aws_signing.addImport("date", mod_date);
     mod_aws_signing.addImport("smithy", mod_smithy);
+    mod_aws_signing.addImport("json", mod_json);
 
     // Similar to creating the run step earlier, this exposes a `test` step to
     // the `zig build --help` menu, providing a way for the user to request
@@ -214,6 +218,7 @@ pub fn build(b: *Builder) !void {
         mod_unit_tests.addImport("service_manifest", service_manifest_module);
         mod_unit_tests.addImport("date", mod_date);
         mod_unit_tests.addImport("zeit", mod_zeit);
+        mod_unit_tests.addImport("json", mod_json);
 
         // Creates a step for unit testing. This only builds the test executable
         // but does not run it.

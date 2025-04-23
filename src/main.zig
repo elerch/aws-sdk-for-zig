@@ -1,6 +1,6 @@
 const std = @import("std");
 const aws = @import("aws.zig");
-const json = @import("json.zig");
+const json = @import("json");
 
 var verbose: u8 = 0;
 

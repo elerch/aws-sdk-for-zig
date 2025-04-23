@@ -3,7 +3,7 @@ const std = @import("std");
 const zeit = @import("zeit");
 
 const awshttp = @import("aws_http.zig");
-const json = @import("json.zig");
+const json = @import("json");
 const url = @import("url.zig");
 const case = @import("case.zig");
 const date = @import("date");
