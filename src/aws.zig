@@ -646,7 +646,13 @@ pub fn Request(comptime request_action: anytype) type {
             // }
             //
             // Big thing is that requestid, which we'll need to fetch "manually"
-            const xml_options = xml_shaper.ParseOptions{ .allocator = options.client.allocator, .elementToParse = findResult };
+            var arena = ArenaAllocator.init(options.client.allocator);
+
+            const xml_options = xml_shaper.ParseOptions{
+                .allocator = arena.allocator(),
+                .elementToParse = findResult,
+            };
+
             var body: []const u8 = result.body;
             var free_body = false;
             if (result.body.len < 20) {
@@ -677,12 +683,13 @@ pub fn Request(comptime request_action: anytype) type {
             };
 
             return try FullResponseType.init(.{
-                .arena = ArenaAllocator.init(options.client.allocator),
+                .arena = arena,
                 .response = parsed.parsed_value,
                 .request_id = request_id,
                 .raw_parsed = .{ .xml = parsed },
             });
         }
+
         const ServerResponseTypes = struct {
             NormalResponse: type,
             RawResponse: type,
