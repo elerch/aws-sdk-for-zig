@@ -1,5 +1,6 @@
 const std = @import("std");
 const zeit = @import("zeit");
+const json = @import("json");
 
 pub const DateFormat = enum {
     rfc1123,
@@ -9,7 +10,7 @@ pub const DateFormat = enum {
 pub const Timestamp = enum(zeit.Nanoseconds) {
     _,
 
-    pub fn jsonStringify(value: Timestamp, options: anytype, out_stream: anytype) !void {
+    pub fn jsonStringify(value: Timestamp, options: json.StringifyOptions, out_stream: anytype) !void {
         _ = options;
 
         const instant = try zeit.instant(.{

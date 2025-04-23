@@ -32,4 +32,10 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     lib_mod.addImport("zeit", dep_zeit.module("zeit"));
+
+    const dep_json = b.dependency("json", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    lib_mod.addImport("json", dep_json.module("json"));
 }
