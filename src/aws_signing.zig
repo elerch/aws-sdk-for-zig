@@ -1,7 +1,7 @@
 const std = @import("std");
 const base = @import("aws_http_base.zig");
 const auth = @import("aws_authentication.zig");
-const date = @import("date.zig");
+const date = @import("date");
 
 const scoped_log = std.log.scoped(.aws_signing);
 

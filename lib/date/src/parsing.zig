@@ -3,11 +3,7 @@
 // really requires the TZ DB.
 
 const std = @import("std");
-const codegen_date = @import("date");
-
 const log = std.log.scoped(.date);
-
-pub const Timestamp = codegen_date.Timestamp;
 
 pub const DateTime = struct { day: u8, month: u8, year: u16, hour: u8, minute: u8, second: u8 };
 

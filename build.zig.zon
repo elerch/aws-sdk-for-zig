@@ -7,6 +7,7 @@
         "build.zig.zon",
         "src",
         "codegen",
+        "lib",
         "README.md",
         "LICENSE",
     },
@@ -23,6 +24,9 @@
         .zeit = .{
             .url = "git+https://github.com/rockorager/zeit#fb6557ad4bd0cd0f0f728ae978061d7fe992c528",
             .hash = "zeit-0.6.0-5I6bk29nAgDhK6AVMtXMWhkKTYgUncrWjnlI_8X9DPSd",
+        },
+        .date = .{
+            .path = "lib/date",
         },
     },
 }

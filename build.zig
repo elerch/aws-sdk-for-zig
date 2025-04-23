@@ -19,14 +19,7 @@ const test_targets = [_]std.Target.Query{
 };
 
 pub fn build(b: *Builder) !void {
-    // Standard target options allows the person running `zig build` to choose
-    // what target to build for. Here we do not override the defaults, which
-    // means any target is allowed, and the default is native. Other options
-    // for restricting supported target set are available.
     const target = b.standardTargetOptions(.{});
-
-    // Standard release options allow the person running `zig build` to select
-    // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall.
     const optimize = b.standardOptimizeOption(.{});
 
     const no_llvm = b.option(
@@ -46,6 +39,7 @@ pub fn build(b: *Builder) !void {
         "test-filter",
         "Skip tests that do not match any of the specified filters",
     ) orelse &.{};
+
     // TODO: Embed the current git version in the code. We can do this
     // by looking for .git/HEAD (if it exists, follow the ref to /ref/heads/whatevs,
     // grab that commit, and use b.addOptions/exe.addOptions to generate the
@@ -58,13 +52,17 @@ pub fn build(b: *Builder) !void {
     // executable
     // TODO: This executable should not be built when importing as a package.
     // It relies on code gen and is all fouled up when getting imported
-    const exe = b.addExecutable(.{
-        .name = "demo",
+    const mod_exe = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
     });
-    exe.use_llvm = !no_llvm;
+
+    const exe = b.addExecutable(.{
+        .name = "demo",
+        .root_module = mod_exe,
+        .use_llvm = !no_llvm,
+    });
 
     // External dependencies
     const dep_smithy = b.dependency("smithy", .{
@@ -72,15 +70,30 @@ pub fn build(b: *Builder) !void {
         .optimize = optimize,
     });
     const mod_smithy = dep_smithy.module("smithy");
-    exe.root_module.addImport("smithy", mod_smithy); // not sure this should be here...
+    mod_exe.addImport("smithy", mod_smithy); // not sure this should be here...
 
     const dep_zeit = b.dependency("zeit", .{
         .target = target,
         .optimize = optimize,
     });
     const mod_zeit = dep_zeit.module("zeit");
-    exe.root_module.addImport("zeit", mod_zeit);
+    mod_exe.addImport("zeit", mod_zeit);
     // End External dependencies
+
+    // Private modules/dependencies
+    const mod_json = b.createModule(.{
+        .root_source_file = b.path("codegen/src/json.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const dep_date = b.dependency("date", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    const mod_date = dep_date.module("date");
+    mod_exe.addImport("date", mod_date);
+    // End private modules/dependencies
 
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
@@ -93,14 +106,19 @@ pub fn build(b: *Builder) !void {
 
     const cg = b.step("gen", "Generate zig service code from smithy models");
 
-    const cg_exe = b.addExecutable(.{
-        .name = "codegen",
+    const cg_mod = b.createModule(.{
         .root_source_file = b.path("codegen/src/main.zig"),
         // We need this generated for the host, not the real target
         .target = b.graph.host,
         .optimize = if (b.verbose) .Debug else .ReleaseSafe,
     });
-    cg_exe.root_module.addImport("smithy", mod_smithy);
+    cg_mod.addImport("smithy", mod_smithy);
+    cg_mod.addImport("date", mod_date);
+
+    const cg_exe = b.addExecutable(.{
+        .name = "codegen",
+        .root_module = cg_mod,
+    });
     var cg_cmd = b.addRunArtifact(cg_exe);
     cg_cmd.addArg("--models");
     cg_cmd.addArg(try std.fs.path.join(
@@ -133,21 +151,6 @@ pub fn build(b: *Builder) !void {
 
     exe.step.dependOn(cg);
 
-    // Codegen private modules
-    const mod_json = b.createModule(.{
-        .root_source_file = b.path("codegen/src/json.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-
-    const mod_date = b.createModule(.{
-        .root_source_file = b.path("codegen/src/date.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    mod_date.addImport("zeit", mod_zeit);
-    // End codegen private modules
-
     // This allows us to have each module depend on the
     // generated service manifest.
     const service_manifest_module = b.createModule(.{
@@ -165,16 +168,20 @@ pub fn build(b: *Builder) !void {
     // Expose module to others
     const mod_aws = b.addModule("aws", .{
         .root_source_file = b.path("src/aws.zig"),
+        .target = target,
+        .optimize = optimize,
     });
     mod_aws.addImport("smithy", mod_smithy);
     mod_aws.addImport("service_manifest", service_manifest_module);
     mod_aws.addImport("date", mod_date);
+    mod_aws.addImport("zeit", mod_zeit);
 
     // Expose module to others
-    _ = b.addModule("aws-signing", .{
+    const mod_aws_signing = b.addModule("aws-signing", .{
         .root_source_file = b.path("src/aws_signing.zig"),
-        .imports = &.{.{ .name = "smithy", .module = mod_smithy }},
     });
+    mod_aws_signing.addImport("date", mod_date);
+    mod_aws_signing.addImport("smithy", mod_smithy);
 
     // Similar to creating the run step earlier, this exposes a `test` step to
     // the `zig build --help` menu, providing a way for the user to request
@@ -234,14 +241,10 @@ pub fn build(b: *Builder) !void {
     // Creates a step for unit testing. This only builds the test executable
     // but does not run it.
     const smoke_test = b.addTest(.{
-        .root_source_file = b.path("src/aws.zig"),
-        .target = target,
-        .optimize = optimize,
+        .root_module = mod_aws,
         .filters = test_filters,
     });
     smoke_test.use_llvm = !no_llvm;
-    smoke_test.root_module.addImport("smithy", mod_smithy);
-    smoke_test.root_module.addImport("service_manifest", service_manifest_module);
     smoke_test.step.dependOn(cg);
 
     const run_smoke_test = b.addRunArtifact(smoke_test);

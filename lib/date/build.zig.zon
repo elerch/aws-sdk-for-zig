@@ -1,0 +1,17 @@
+.{
+    .name = .date,
+    .version = "0.0.0",
+    .fingerprint = 0xaa9e377a226d739e, // Changing this has security and trust implications.
+    .minimum_zig_version = "0.14.0",
+    .dependencies = .{
+        .zeit = .{
+            .url = "git+https://github.com/rockorager/zeit#fb6557ad4bd0cd0f0f728ae978061d7fe992c528",
+            .hash = "zeit-0.6.0-5I6bk29nAgDhK6AVMtXMWhkKTYgUncrWjnlI_8X9DPSd",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}

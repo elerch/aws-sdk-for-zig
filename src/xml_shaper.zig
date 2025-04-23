@@ -1,6 +1,6 @@
 const std = @import("std");
 const xml = @import("xml.zig");
-const date = @import("date.zig");
+const date = @import("date");
 
 const log = std.log.scoped(.xml_shaper);
 
