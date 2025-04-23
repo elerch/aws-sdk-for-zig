@@ -434,6 +434,7 @@ pub fn Request(comptime request_action: anytype) type {
                         .header_name = @field(action.Response.http_header, f.name),
                     };
                 }
+
                 inline for (fields) |f| {
                     for (response.headers) |header| {
                         if (std.mem.eql(u8, header.name, f.?.header_name)) {
@@ -450,7 +451,7 @@ pub fn Request(comptime request_action: anytype) type {
                             //
                             // Note: issues found on zig 0.9.0
                             setHeaderValue(
-                                options.client.allocator,
+                                full_response.arena.allocator(),
                                 &full_response.response,
                                 f.?.name,
                                 f.?.T,
