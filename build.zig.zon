@@ -21,7 +21,7 @@
             .hash = "122017a2f3081ce83c23e0c832feb1b8b4176d507b6077f522855dc774bcf83ee315",
         },
         .zeit = .{
-            .url = "https://github.com/deevus/zeit/archive/refs/heads/rfc1123.tar.gz",
+            .url = "git+https://github.com/rockorager/zeit#fb6557ad4bd0cd0f0f728ae978061d7fe992c528",
             .hash = "zeit-0.6.0-5I6bk29nAgDhK6AVMtXMWhkKTYgUncrWjnlI_8X9DPSd",
         },
     },
