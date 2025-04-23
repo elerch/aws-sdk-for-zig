@@ -501,9 +501,11 @@ pub fn Request(comptime request_action: anytype) type {
             var buf_request_id: [256]u8 = undefined;
             const request_id = try requestIdFromHeaders(&buf_request_id, options.client.allocator, aws_request, response);
 
+            const arena = ArenaAllocator.init(options.client.allocator);
+
             if (@hasDecl(action.Response, "http_payload")) {
                 var rc = try FullResponseType.init(.{
-                    .arena = ArenaAllocator.init(options.client.allocator),
+                    .arena = arena,
                     .response = .{},
                     .request_id = request_id,
                     .raw_parsed = .{ .raw = .{} },
@@ -524,10 +526,8 @@ pub fn Request(comptime request_action: anytype) type {
             if (std.meta.fields(action.Response).len == 0 or expected_body_field_len == 0 or response.body.len == 0) {
                 // Do we care if an unexpected body comes in?
                 return try FullResponseType.init(.{
-                    .arena = ArenaAllocator.init(options.client.allocator),
-                    .response = undefined,
+                    .arena = arena,
                     .request_id = request_id,
-                    .raw_parsed = .{ .raw = undefined },
                 });
             }
 
@@ -538,8 +538,10 @@ pub fn Request(comptime request_action: anytype) type {
         }
 
         fn jsonReturn(aws_request: awshttp.HttpRequest, options: Options, response: awshttp.HttpResult) !FullResponseType {
+            var arena = ArenaAllocator.init(options.client.allocator);
+
             const parser_options = json.ParseOptions{
-                .allocator = options.client.allocator,
+                .allocator = arena.allocator(),
                 .allow_camel_case_conversion = true, // new option
                 .allow_snake_case_conversion = true, // new option
                 .allow_unknown_fields = true, // new option. Cannot yet handle non-struct fields though
@@ -577,7 +579,7 @@ pub fn Request(comptime request_action: anytype) type {
                 const real_response = @field(parsed_response, @typeInfo(response_types.NormalResponse).@"struct".fields[0].name);
 
                 return try FullResponseType.init(.{
-                    .arena = ArenaAllocator.init(options.client.allocator),
+                    .arena = arena,
                     .response = @field(real_response, @typeInfo(@TypeOf(real_response)).@"struct".fields[0].name),
                     .request_id = real_response.ResponseMetadata.RequestId,
                     .raw_parsed = .{ .server = parsed_response },
@@ -588,7 +590,7 @@ pub fn Request(comptime request_action: anytype) type {
                 const request_id = try requestIdFromHeaders(&buf_request_id, options.client.allocator, aws_request, response);
 
                 return try FullResponseType.init(.{
-                    .arena = ArenaAllocator.init(options.client.allocator),
+                    .arena = arena,
                     .response = parsed_response,
                     .request_id = request_id,
                     .raw_parsed = .{ .raw = parsed_response },
