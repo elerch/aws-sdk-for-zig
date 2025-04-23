@@ -463,41 +463,19 @@ fn s3BucketFromPath(path: []const u8) []const u8 {
 /// allocator: Will be used only to construct the EndPoint struct
 /// uri: string constructed in such a way that deallocation is needed
 fn endPointFromUri(allocator: std.mem.Allocator, uri: []const u8, path: []const u8) !EndPoint {
-    var scheme: []const u8 = "";
-    var host: []const u8 = "";
-    var port: u16 = 443;
-    var host_start: usize = 0;
-    var host_end: usize = 0;
-    for (uri, 0..) |ch, i| {
-        switch (ch) {
-            ':' => {
-                if (!std.mem.eql(u8, scheme, "")) {
-                    // here to end is port - this is likely a bug if ipv6 address used
-                    const rest_of_uri = uri[i + 1 ..];
-                    port = try std.fmt.parseUnsigned(u16, rest_of_uri, 10);
-                    host_end = i;
-                }
-            },
-            '/' => {
-                if (host_start == 0) {
-                    host_start = i + 2;
-                    scheme = uri[0 .. i - 1];
-                    if (std.mem.eql(u8, scheme, "http")) {
-                        port = 80;
-                    } else {
-                        port = 443;
-                    }
-                }
-            },
-            else => continue,
-        }
-    }
-    if (host_end == 0) {
-        host_end = uri.len;
-    }
-    host = try allocator.dupe(u8, uri[host_start..host_end]);
+    const parsed_uri = try std.Uri.parse(uri);
+
+    const scheme = parsed_uri.scheme;
+    const host = try allocator.dupe(u8, parsed_uri.host.?.percent_encoded);
+    const port: u16 = blk: {
+        if (parsed_uri.port) |port| break :blk port;
+        if (std.mem.eql(u8, scheme, "http")) break :blk 80;
+        if (std.mem.eql(u8, scheme, "https")) break :blk 443;
+        break :blk 0;
+    };
 
     log.debug("host: {s}, scheme: {s}, port: {}", .{ host, scheme, port });
+
     return EndPoint{
         .uri = uri,
         .host = host,
