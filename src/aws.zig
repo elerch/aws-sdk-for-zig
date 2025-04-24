@@ -493,7 +493,8 @@ pub fn Request(comptime request_action: anytype) type {
             // First, we need to determine if we care about a response at all
             // If the expected result has no fields, there's no sense in
             // doing any more work. Let's bail early
-            comptime var expected_body_field_len = std.meta.fields(action.Response).len;
+            const fields = @typeInfo(action.Response).@"struct".fields;
+            var expected_body_field_len = fields.len;
 
             if (@hasDecl(action.Response, "http_header")) {
                 expected_body_field_len -= std.meta.fields(@TypeOf(action.Response.http_header)).len;
@@ -525,15 +526,33 @@ pub fn Request(comptime request_action: anytype) type {
             }
 
             // We don't care about the body if there are no fields we expect there...
-            if (std.meta.fields(action.Response).len == 0 or expected_body_field_len == 0 or response.body.len == 0) {
+            if (fields.len == 0 or expected_body_field_len == 0 or response.body.len == 0) {
+                // Makes sure we can't get here with an `action.Response` that has required fields
+                // Without this block there is a compilation error when running tests
+                // Perhaps there is a better way to handle this
+                {
+                    comptime var required_fields = 0;
+
+                    inline for (fields) |field| {
+                        const field_type_info = @typeInfo(field.type);
+                        if (field_type_info != .optional and field.defaultValue() == null) {
+                            required_fields += 1;
+                        }
+                    }
+
+                    if (required_fields > 0) unreachable;
+                }
+
                 // Do we care if an unexpected body comes in?
                 return try FullResponseType.init(.{
                     .arena = arena,
                     .request_id = request_id,
+                    .response = .{},
                 });
             }
 
-            return switch (try getContentType(response.headers)) {
+            const content_type = try getContentType(response.headers);
+            return switch (content_type) {
                 .json => try jsonReturn(aws_request, options, response),
                 .xml => try xmlReturn(aws_request, options, response),
             };
