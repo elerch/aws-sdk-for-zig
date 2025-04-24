@@ -1329,7 +1329,8 @@ fn reportTraffic(
     }
     try writer.print("\tContent-Type: {s}\n\n", .{request.content_type});
 
-    _ = try writer.write("Request Body:\n");
+    try writer.print("Request URL: {s}\n", .{request.path});
+    try writer.writeAll("Request Body:\n");
     try writer.print("-------------\n{s}\n", .{request.body});
     _ = try writer.write("-------------\n");
     _ = try writer.write("Response Headers:\n");
