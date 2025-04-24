@@ -405,7 +405,7 @@ pub fn Request(comptime request_action: anytype) type {
             );
             defer response.deinit();
 
-            if (response.response_code != options.success_http_code) {
+            if (response.response_code != options.success_http_code and response.response_code != 404) {
                 try reportTraffic(options.client.allocator, "Call Failed", aws_request, response, log.err);
                 if (options.diagnostics) |d| {
                     d.http_code = response.response_code;
