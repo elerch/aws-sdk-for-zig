@@ -518,6 +518,35 @@ fn generateOperation(allocator: std.mem.Allocator, operation: smithy.ShapeInfo, 
     child_state.indent_level += 1;
     // indent should start at 4 spaces here
     const operation_name = avoidReserved(snake_case_name);
+
+    // Request type
+    _ = try writer.print("pub const {s}Request = ", .{operation.name});
+    if (operation.shape.operation.input == null or
+        (try shapeInfoForId(operation.shape.operation.input.?, state)).shape == .unit)
+    {
+        _ = try writer.write("struct {\n");
+        try generateMetadataFunction(operation_name, state, writer);
+    } else if (operation.shape.operation.input) |member| {
+        if (try generateTypeFor(member, writer, state, false)) unreachable; // we expect only structs here
+        _ = try writer.write("\n");
+        try generateMetadataFunction(operation_name, state, writer);
+    }
+    _ = try writer.write(";\n\n");
+
+    // Response type
+    _ = try writer.print("pub const {s}Response = ", .{operation.name});
+    if (operation.shape.operation.output == null or
+        (try shapeInfoForId(operation.shape.operation.output.?, state)).shape == .unit)
+    {
+        _ = try writer.write("struct {\n");
+        try generateMetadataFunction(operation_name, state, writer);
+    } else if (operation.shape.operation.output) |member| {
+        if (try generateTypeFor(member, writer, state, false)) unreachable; // we expect only structs here
+        _ = try writer.write("\n");
+        try generateMetadataFunction(operation_name, state, writer);
+    }
+    _ = try writer.write(";\n\n");
+
     try writer.print("pub const {s}: struct ", .{operation_name});
     _ = try writer.write("{\n");
     for (operation.shape.operation.traits) |trait| {
@@ -538,28 +567,10 @@ fn generateOperation(allocator: std.mem.Allocator, operation: smithy.ShapeInfo, 
     try outputIndent(state, writer);
     try writer.print("action_name: []const u8 = \"{s}\",\n", .{operation.name});
     try outputIndent(state, writer);
-    _ = try writer.write("Request: type = ");
-    if (operation.shape.operation.input == null or
-        (try shapeInfoForId(operation.shape.operation.input.?, state)).shape == .unit)
-    {
-        _ = try writer.write("struct {\n");
-        try generateMetadataFunction(operation_name, state, writer);
-    } else if (operation.shape.operation.input) |member| {
-        if (try generateTypeFor(member, writer, state, false)) unreachable; // we expect only structs here
-        _ = try writer.write("\n");
-        try generateMetadataFunction(operation_name, state, writer);
-    }
-    _ = try writer.write(",\n");
+    _ = try writer.print("Request: type = {s}Request,\n", .{operation.name});
+
     try outputIndent(state, writer);
-    _ = try writer.write("Response: type = ");
-    if (operation.shape.operation.output == null or
-        (try shapeInfoForId(operation.shape.operation.output.?, state)).shape == .unit)
-    {
-        _ = try writer.write("struct {}"); // we want to maintain consistency with other ops
-    } else if (operation.shape.operation.output) |member| {
-        if (try generateTypeFor(member, writer, state, true)) unreachable; // we expect only structs here
-    }
-    _ = try writer.write(",\n");
+    _ = try writer.print("Response: type = {s}Response,\n", .{operation.name});
 
     if (operation.shape.operation.errors) |errors| {
         try outputIndent(state, writer);
