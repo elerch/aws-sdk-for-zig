@@ -514,10 +514,11 @@ pub fn Request(comptime request_action: anytype) type {
 
                 const body_field = @field(rc.response, action.Response.http_payload);
                 const BodyField = @TypeOf(body_field);
+
                 if (BodyField == []const u8 or BodyField == ?[]const u8) {
                     expected_body_field_len = 0;
                     // We can't use body_field for this set - only @field will work
-                    // @field(rc.response, action.Response.http_payload) = try rc.arena.allocator().dupe(u8, response.body);
+                    @field(rc.response, action.Response.http_payload) = try rc.arena.allocator().dupe(u8, response.body);
                     return rc;
                 }
                 rc.deinit();
