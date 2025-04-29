@@ -40,61 +40,26 @@ pub fn build(b: *Builder) !void {
         "Skip tests that do not match any of the specified filters",
     ) orelse &.{};
 
-    // TODO: Embed the current git version in the code. We can do this
-    // by looking for .git/HEAD (if it exists, follow the ref to /ref/heads/whatevs,
-    // grab that commit, and use b.addOptions/exe.addOptions to generate the
-    // Options file. See https://github.com/ziglang/zig/issues/14979 for usage
-    // example.
-    //
-    // From there, I'm not sure what the generated file looks like or quite how
-    // to use, but that should be easy. It may also give some ideas on the
-    // code gen piece itself, though it might be nice to leave as a seperate
-    // executable
-    // TODO: This executable should not be built when importing as a package.
-    // It relies on code gen and is all fouled up when getting imported
+    const dep_mods = try getDependencyModules(b, .{
+        .target = target,
+        .optimize = optimize,
+    });
+
     const mod_exe = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
     });
+    mod_exe.addImport("smithy", dep_mods.get("smithy").?);
+    mod_exe.addImport("zeit", dep_mods.get("zeit").?);
+    mod_exe.addImport("json", dep_mods.get("json").?);
+    mod_exe.addImport("date", dep_mods.get("date").?);
 
     const exe = b.addExecutable(.{
         .name = "demo",
         .root_module = mod_exe,
         .use_llvm = !no_llvm,
     });
-
-    // External dependencies
-    const dep_smithy = b.dependency("smithy", .{
-        .target = target,
-        .optimize = optimize,
-    });
-    const mod_smithy = dep_smithy.module("smithy");
-    mod_exe.addImport("smithy", mod_smithy); // not sure this should be here...
-
-    const dep_zeit = b.dependency("zeit", .{
-        .target = target,
-        .optimize = optimize,
-    });
-    const mod_zeit = dep_zeit.module("zeit");
-    mod_exe.addImport("zeit", mod_zeit);
-    // End External dependencies
-
-    // Private modules/dependencies
-    const dep_json = b.dependency("json", .{
-        .target = target,
-        .optimize = optimize,
-    });
-    const mod_json = dep_json.module("json");
-    mod_exe.addImport("json", mod_json);
-
-    const dep_date = b.dependency("date", .{
-        .target = target,
-        .optimize = optimize,
-    });
-    const mod_date = dep_date.module("date");
-    mod_exe.addImport("date", mod_date);
-    // End private modules/dependencies
 
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
@@ -113,9 +78,9 @@ pub fn build(b: *Builder) !void {
         .target = b.graph.host,
         .optimize = if (b.verbose) .Debug else .ReleaseSafe,
     });
-    cg_mod.addImport("smithy", mod_smithy);
-    cg_mod.addImport("date", mod_date);
-    cg_mod.addImport("json", mod_json);
+    cg_mod.addImport("smithy", dep_mods.get("smithy").?);
+    cg_mod.addImport("date", dep_mods.get("date").?);
+    cg_mod.addImport("json", dep_mods.get("json").?);
 
     const cg_exe = b.addExecutable(.{
         .name = "codegen",
@@ -160,10 +125,10 @@ pub fn build(b: *Builder) !void {
         .target = target,
         .optimize = optimize,
     });
-    service_manifest_module.addImport("smithy", mod_smithy);
-    service_manifest_module.addImport("date", mod_date);
-    service_manifest_module.addImport("json", mod_json);
-    service_manifest_module.addImport("zeit", mod_zeit);
+    service_manifest_module.addImport("smithy", dep_mods.get("smithy").?);
+    service_manifest_module.addImport("date", dep_mods.get("date").?);
+    service_manifest_module.addImport("json", dep_mods.get("json").?);
+    service_manifest_module.addImport("zeit", dep_mods.get("zeit").?);
 
     mod_exe.addImport("service_manifest", service_manifest_module);
 
@@ -173,19 +138,19 @@ pub fn build(b: *Builder) !void {
         .target = target,
         .optimize = optimize,
     });
-    mod_aws.addImport("smithy", mod_smithy);
+    mod_aws.addImport("smithy", dep_mods.get("smithy").?);
     mod_aws.addImport("service_manifest", service_manifest_module);
-    mod_aws.addImport("date", mod_date);
-    mod_aws.addImport("json", mod_json);
-    mod_aws.addImport("zeit", mod_zeit);
+    mod_aws.addImport("date", dep_mods.get("date").?);
+    mod_aws.addImport("json", dep_mods.get("json").?);
+    mod_aws.addImport("zeit", dep_mods.get("zeit").?);
 
     // Expose module to others
     const mod_aws_signing = b.addModule("aws-signing", .{
         .root_source_file = b.path("src/aws_signing.zig"),
     });
-    mod_aws_signing.addImport("date", mod_date);
-    mod_aws_signing.addImport("smithy", mod_smithy);
-    mod_aws_signing.addImport("json", mod_json);
+    mod_aws_signing.addImport("date", dep_mods.get("date").?);
+    mod_aws_signing.addImport("smithy", dep_mods.get("smithy").?);
+    mod_aws_signing.addImport("json", dep_mods.get("json").?);
 
     // Similar to creating the run step earlier, this exposes a `test` step to
     // the `zig build --help` menu, providing a way for the user to request
@@ -214,11 +179,11 @@ pub fn build(b: *Builder) !void {
             .target = b.resolveTargetQuery(t),
             .optimize = optimize,
         });
-        mod_unit_tests.addImport("smithy", mod_smithy);
+        mod_unit_tests.addImport("smithy", dep_mods.get("smithy").?);
         mod_unit_tests.addImport("service_manifest", service_manifest_module);
-        mod_unit_tests.addImport("date", mod_date);
-        mod_unit_tests.addImport("zeit", mod_zeit);
-        mod_unit_tests.addImport("json", mod_json);
+        mod_unit_tests.addImport("date", dep_mods.get("date").?);
+        mod_unit_tests.addImport("zeit", dep_mods.get("zeit").?);
+        mod_unit_tests.addImport("json", dep_mods.get("json").?);
 
         // Creates a step for unit testing. This only builds the test executable
         // but does not run it.
@@ -260,4 +225,30 @@ pub fn build(b: *Builder) !void {
     } else {
         b.installArtifact(exe);
     }
+}
+
+fn getDependencyModules(b: *std.Build, args: anytype) !std.StringHashMap(*std.Build.Module) {
+    var result = std.StringHashMap(*std.Build.Module).init(b.allocator);
+
+    // External dependencies
+    const dep_smithy = b.dependency("smithy", args);
+    const mod_smithy = dep_smithy.module("smithy");
+    try result.putNoClobber("smithy", mod_smithy);
+
+    const dep_zeit = b.dependency("zeit", args);
+    const mod_zeit = dep_zeit.module("zeit");
+    try result.putNoClobber("zeit", mod_zeit);
+    // End External dependencies
+
+    // Private modules/dependencies
+    const dep_json = b.dependency("json", args);
+    const mod_json = dep_json.module("json");
+    try result.putNoClobber("json", mod_json);
+
+    const dep_date = b.dependency("date", args);
+    const mod_date = dep_date.module("date");
+    try result.putNoClobber("date", mod_date);
+    // End private modules/dependencies
+
+    return result;
 }
