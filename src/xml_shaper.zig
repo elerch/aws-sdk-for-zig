@@ -122,16 +122,13 @@ fn detectArrayStyle(comptime T: type, element: *xml.Element, options: ParseOptio
     };
 
     var matching_fields: usize = 0;
-    for (element.children.items) |content| {
-        switch (content) {
-            .Element => |el| {
-                for (field_names) |field_name| {
-                    if (std.mem.eql(u8, field_name, el.tag)) {
-                        matching_fields += 1;
-                    }
-                }
-            },
-            else => continue,
+    var element_iterator = element.elements();
+
+    while (element_iterator.next()) |el| {
+        for (field_names) |field_name| {
+            if (std.mem.eql(u8, field_name, el.tag)) {
+                matching_fields += 1;
+            }
         }
     }
 
