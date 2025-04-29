@@ -380,7 +380,7 @@ fn parseInternal(comptime T: type, element: *xml.Element, options: ParseOptions)
                     if (ptr_info.child != u8) {
                         const array_style = try detectArrayStyle(ptr_info.child, element, options);
 
-                        std.log.debug("type = {s}, style = {s}, ptr_info.child == {s}, element = {s}", .{ @typeName(T), @tagName(array_style), @typeName(ptr_info.child), element.tag });
+                        log.debug("type = {s}, style = {s}, ptr_info.child == {s}, element = {s}", .{ @typeName(T), @tagName(array_style), @typeName(ptr_info.child), element.tag });
 
                         var children = std.ArrayList(ptr_info.child).init(allocator);
                         defer children.deinit();
