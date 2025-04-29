@@ -1,6 +1,7 @@
 const std = @import("std");
 const xml = @import("xml.zig");
 const date = @import("date");
+const sm = @import("service_manifest");
 
 const log = std.log.scoped(.xml_shaper);
 
@@ -92,6 +93,53 @@ pub fn parse(comptime T: type, source: []const u8, options: ParseOptions) !Parse
 
     const root = if (options.elementToParse) |e| e(parsed.root, opts) else parsed.root;
     return Parsed(T).init(arena_allocator, try parseInternal(T, root, opts), parsed);
+}
+
+pub const XmlArrayStyle = enum {
+    collection, // Has a container element and list of child elements
+    repeated_root, // Repeats the same element without a container, e.g. S3 ListBucketResult
+};
+
+fn detectArrayStyle(comptime T: type, element: *xml.Element, options: ParseOptions) !XmlArrayStyle {
+    _ = options;
+
+    if (@typeInfo(T) != .@"struct") {
+        return .collection;
+    }
+
+    // does the element have child elements that match our expected struct?
+    const field_names = comptime blk: {
+        var result: [std.meta.fieldNames(T).len][]const u8 = undefined;
+
+        for (std.meta.fieldNames(T), 0..) |field_name, i| {
+            result[i] = if (@hasDecl(T, "fieldNameFor"))
+                T.fieldNameFor(undefined, field_name)
+            else
+                field_name;
+        }
+
+        break :blk result;
+    };
+
+    var matching_fields: usize = 0;
+    for (element.children.items) |content| {
+        switch (content) {
+            .Element => |el| {
+                for (field_names) |field_name| {
+                    if (std.mem.eql(u8, field_name, el.tag)) {
+                        matching_fields += 1;
+                    }
+                }
+            },
+            else => continue,
+        }
+    }
+
+    if (matching_fields > 0) {
+        return .repeated_root;
+    }
+
+    return .collection;
 }
 
 fn parseInternal(comptime T: type, element: *xml.Element, options: ParseOptions) !T {
@@ -330,23 +378,31 @@ fn parseInternal(comptime T: type, element: *xml.Element, options: ParseOptions)
                     //   <Item>bar</Item>
                     // <Items>
                     if (ptr_info.child != u8) {
-                        log.debug("type = {s}, ptr_info.child == {s}, element = {s}", .{ @typeName(T), @typeName(ptr_info.child), element.tag });
-                        var iterator = element.elements();
+                        const array_style = try detectArrayStyle(ptr_info.child, element, options);
+
+                        std.log.debug("type = {s}, style = {s}, ptr_info.child == {s}, element = {s}", .{ @typeName(T), @tagName(array_style), @typeName(ptr_info.child), element.tag });
+
                         var children = std.ArrayList(ptr_info.child).init(allocator);
                         defer children.deinit();
-                        while (iterator.next()) |child_element| {
-                            try children.append(try parseInternal(ptr_info.child, child_element, options));
+
+                        switch (array_style) {
+                            .collection => {
+                                var iterator = element.elements();
+                                while (iterator.next()) |child_element| {
+                                    try children.append(try parseInternal(ptr_info.child, child_element, options));
+                                }
+                            },
+                            .repeated_root => {
+                                var current: ?*Element = element;
+                                while (current) |el| : (current = el.next_sibling) {
+                                    if (!std.mem.eql(u8, el.tag, element.tag)) continue;
+
+                                    try children.append(try parseInternal(ptr_info.child, el, options));
+                                }
+                            },
                         }
+
                         return children.toOwnedSlice();
-                        // var inx: usize = 0;
-                        // while (inx < children.len) {
-                        //     switch (element.children.items[inx]) {
-                        //         .Element => children[inx] = try parseInternal(ptr_info.child, element.children.items[inx].Element, options),
-                        //         .CharData => children[inx] = try allocator.dupe(u8, element.children.items[inx].CharData),
-                        //         .Comment => children[inx] = try allocator.dupe(u8, element.children.items[inx].Comment), // This might be an error...
-                        //     }
-                        //     inx += 1;
-                        // }
                     }
                     return try allocator.dupe(u8, element.children.items[0].CharData);
                 },
@@ -737,4 +793,34 @@ test "compiler assertion failure 2" {
     const parsed_data = try parse(Response, data, .{ .allocator = allocator });
     defer parsed_data.deinit();
     try testing.expect(parsed_data.parsed_value.key_group_list.?.quantity == 42);
+}
+
+test "can parse list objects" {
+    const data =
+        \\<?xml version="1.0" encoding="UTF-8"?>
+        \\<ListBucketResult>
+        \\    <Contents>
+        \\        <Key>file1.txt</Key>
+        \\        <Size>1024</Size>
+        \\    </Contents>
+        \\    <Contents>
+        \\        <Key>file2.jpg</Key>
+        \\        <Size>2048</Size>
+        \\    </Contents>
+        \\</ListBucketResult>
+    ;
+
+    const Response = sm.s3.list_objects_v2.Response;
+
+    const parsed_data = try parse(Response, data, .{ .allocator = testing.allocator });
+    defer parsed_data.deinit();
+
+    const response: Response = parsed_data.parsed_value;
+    const s3_objects: []sm.s3.Object = response.contents.?;
+
+    try testing.expectEqual(2, s3_objects.len);
+    try testing.expectEqualStrings(s3_objects[0].key.?, "file1.txt");
+    try testing.expectEqualStrings(s3_objects[1].key.?, "file2.jpg");
+    try testing.expectEqual(s3_objects[0].size.?, 1024);
+    try testing.expectEqual(s3_objects[1].size.?, 2048);
 }

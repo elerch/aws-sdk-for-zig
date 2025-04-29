@@ -25,6 +25,7 @@ pub const Element = struct {
     tag: []const u8,
     attributes: AttributeList,
     children: ContentList,
+    next_sibling: ?*Element = null,
 
     fn init(tag: []const u8, alloc: Allocator) Element {
         return .{
@@ -347,7 +348,7 @@ fn parseDocument(ctx: *ParseContext, backing_allocator: Allocator) !Document {
     _ = ctx.eatWs();
     try trySkipComments(ctx, allocator);
 
-    doc.root = (try tryParseElement(ctx, allocator)) orelse return error.InvalidDocument;
+    doc.root = (try tryParseElement(ctx, allocator, null)) orelse return error.InvalidDocument;
     _ = ctx.eatWs();
     try trySkipComments(ctx, allocator);
 
@@ -415,12 +416,12 @@ fn tryParseCharData(ctx: *ParseContext, alloc: Allocator) !?[]const u8 {
     return try dupeAndUnescape(alloc, ctx.source[begin..end]);
 }
 
-fn parseContent(ctx: *ParseContext, alloc: Allocator) ParseError!Content {
+fn parseContent(ctx: *ParseContext, alloc: Allocator, parent: ?*Element) ParseError!Content {
     if (try tryParseCharData(ctx, alloc)) |cd| {
         return Content{ .CharData = cd };
     } else if (try tryParseComment(ctx, alloc)) |comment| {
         return Content{ .Comment = comment };
-    } else if (try tryParseElement(ctx, alloc)) |elem| {
+    } else if (try tryParseElement(ctx, alloc, parent)) |elem| {
         return Content{ .Element = elem };
     } else {
         return error.UnexpectedCharacter;
@@ -440,7 +441,7 @@ fn tryParseAttr(ctx: *ParseContext, alloc: Allocator) !?*Attribute {
     return attr;
 }
 
-fn tryParseElement(ctx: *ParseContext, alloc: Allocator) !?*Element {
+fn tryParseElement(ctx: *ParseContext, alloc: Allocator, parent: ?*Element) !?*Element {
     const start = ctx.offset;
     if (!ctx.eat('<')) return null;
     const tag = parseNameNoDupe(ctx) catch {
@@ -469,7 +470,7 @@ fn tryParseElement(ctx: *ParseContext, alloc: Allocator) !?*Element {
             break;
         }
 
-        const content = try parseContent(ctx, alloc);
+        const content = try parseContent(ctx, alloc, element);
         try element.children.append(content);
     }
 
@@ -480,6 +481,23 @@ fn tryParseElement(ctx: *ParseContext, alloc: Allocator) !?*Element {
 
     _ = ctx.eatWs();
     try ctx.expect('>');
+
+    if (parent) |p| {
+        var last_element: ?*Element = null;
+
+        for (0..p.children.items.len) |i| {
+            const child = p.children.items[p.children.items.len - i - 1];
+            if (child == .Element) {
+                last_element = child.Element;
+                break;
+            }
+        }
+
+        if (last_element) |lc| {
+            lc.next_sibling = element;
+        }
+    }
+
     return element;
 }
 
@@ -490,13 +508,13 @@ test "tryParseElement" {
 
     {
         var ctx = ParseContext.init("<= a='b'/>");
-        try testing.expectEqual(@as(?*Element, null), try tryParseElement(&ctx, alloc));
+        try testing.expectEqual(@as(?*Element, null), try tryParseElement(&ctx, alloc, null));
         try testing.expectEqual(@as(?u8, '<'), ctx.peek());
     }
 
     {
         var ctx = ParseContext.init("<python size='15' color = \"green\"/>");
-        const elem = try tryParseElement(&ctx, alloc);
+        const elem = try tryParseElement(&ctx, alloc, null);
         try testing.expectEqualSlices(u8, elem.?.tag, "python");
 
         const size_attr = elem.?.attributes.items[0];
@@ -510,14 +528,14 @@ test "tryParseElement" {
 
     {
         var ctx = ParseContext.init("<python>test</python>");
-        const elem = try tryParseElement(&ctx, alloc);
+        const elem = try tryParseElement(&ctx, alloc, null);
         try testing.expectEqualSlices(u8, elem.?.tag, "python");
         try testing.expectEqualSlices(u8, elem.?.children.items[0].CharData, "test");
     }
 
     {
         var ctx = ParseContext.init("<a>b<c/>d<e/>f<!--g--></a>");
-        const elem = try tryParseElement(&ctx, alloc);
+        const elem = try tryParseElement(&ctx, alloc, null);
         try testing.expectEqualSlices(u8, elem.?.tag, "a");
         try testing.expectEqualSlices(u8, elem.?.children.items[0].CharData, "b");
         try testing.expectEqualSlices(u8, elem.?.children.items[1].Element.tag, "c");
