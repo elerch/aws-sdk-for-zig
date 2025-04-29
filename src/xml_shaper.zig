@@ -111,7 +111,6 @@ fn detectArrayStyle(comptime T: type, element: *xml.Element, options: ParseOptio
     const field_names = comptime blk: {
         var result: [std.meta.fieldNames(T).len]struct {
             []const u8,
-            void,
         } = undefined;
 
         for (std.meta.fieldNames(T), 0..) |field_name, i| {
@@ -120,7 +119,7 @@ fn detectArrayStyle(comptime T: type, element: *xml.Element, options: ParseOptio
             else
                 field_name;
 
-            result[i] = .{ key, {} };
+            result[i] = .{key};
         }
 
         break :blk std.StaticStringMap(void).initComptime(result);
