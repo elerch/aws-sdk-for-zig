@@ -109,26 +109,29 @@ fn detectArrayStyle(comptime T: type, element: *xml.Element, options: ParseOptio
 
     // does the element have child elements that match our expected struct?
     const field_names = comptime blk: {
-        var result: [std.meta.fieldNames(T).len][]const u8 = undefined;
+        var result: [std.meta.fieldNames(T).len]struct {
+            []const u8,
+            void,
+        } = undefined;
 
         for (std.meta.fieldNames(T), 0..) |field_name, i| {
-            result[i] = if (@hasDecl(T, "fieldNameFor"))
+            const key = if (@hasDecl(T, "fieldNameFor"))
                 T.fieldNameFor(undefined, field_name)
             else
                 field_name;
+
+            result[i] = .{ key, {} };
         }
 
-        break :blk result;
+        break :blk std.StaticStringMap(void).initComptime(result);
     };
 
     var matching_fields: usize = 0;
     var element_iterator = element.elements();
 
     while (element_iterator.next()) |el| {
-        for (field_names) |field_name| {
-            if (std.mem.eql(u8, field_name, el.tag)) {
-                matching_fields += 1;
-            }
+        if (field_names.has(el.tag)) {
+            matching_fields += 1;
         }
     }
 
