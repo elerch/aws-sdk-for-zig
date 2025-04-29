@@ -7,6 +7,7 @@
         "build.zig.zon",
         "src",
         "codegen",
+        "lib",
         "README.md",
         "LICENSE",
     },
@@ -19,6 +20,16 @@
         .models = .{
             .url = "https://github.com/aws/aws-sdk-go-v2/archive/58cf6509525a12d64fd826da883bfdbacbd2f00e.tar.gz",
             .hash = "122017a2f3081ce83c23e0c832feb1b8b4176d507b6077f522855dc774bcf83ee315",
+        },
+        .zeit = .{
+            .url = "git+https://github.com/rockorager/zeit#fb6557ad4bd0cd0f0f728ae978061d7fe992c528",
+            .hash = "zeit-0.6.0-5I6bk29nAgDhK6AVMtXMWhkKTYgUncrWjnlI_8X9DPSd",
+        },
+        .date = .{
+            .path = "lib/date",
+        },
+        .json = .{
+            .path = "lib/json",
         },
     },
 }

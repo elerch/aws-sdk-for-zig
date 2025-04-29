@@ -14,8 +14,116 @@ const testing = std.testing;
 const mem = std.mem;
 const maxInt = std.math.maxInt;
 
-// pub const WriteStream = @import("json/write_stream.zig").WriteStream;
-// pub const writeStream = @import("json/write_stream.zig").writeStream;
+pub fn serializeMap(map: anytype, key: []const u8, options: anytype, out_stream: anytype) !bool {
+    if (@typeInfo(@TypeOf(map)) == .optional) {
+        if (map == null)
+            return false
+        else
+            return serializeMapInternal(map.?, key, options, out_stream);
+    }
+    return serializeMapInternal(map, key, options, out_stream);
+}
+
+fn serializeMapInternal(map: anytype, key: []const u8, options: anytype, out_stream: anytype) !bool {
+    if (map.len == 0) {
+        var child_options = options;
+        if (child_options.whitespace) |*child_ws|
+            child_ws.indent_level += 1;
+
+        try out_stream.writeByte('"');
+        try out_stream.writeAll(key);
+        _ = try out_stream.write("\":");
+        if (options.whitespace) |ws| {
+            if (ws.separator) {
+                try out_stream.writeByte(' ');
+            }
+        }
+        try out_stream.writeByte('{');
+        try out_stream.writeByte('}');
+        return true;
+    }
+    // TODO: Map might be [][]struct{key, value} rather than []struct{key, value}
+    var child_options = options;
+    if (child_options.whitespace) |*child_ws|
+        child_ws.indent_level += 1;
+
+    try out_stream.writeByte('"');
+    try out_stream.writeAll(key);
+    _ = try out_stream.write("\":");
+    if (options.whitespace) |ws| {
+        if (ws.separator) {
+            try out_stream.writeByte(' ');
+        }
+    }
+    try out_stream.writeByte('{');
+    if (options.whitespace) |_|
+        try out_stream.writeByte('\n');
+    for (map, 0..) |tag, i| {
+        if (tag.key == null or tag.value == null) continue;
+        // TODO: Deal with escaping and general "json.stringify" the values...
+        if (child_options.whitespace) |ws|
+            try ws.outputIndent(out_stream);
+        try out_stream.writeByte('"');
+        try jsonEscape(tag.key.?, child_options, out_stream);
+        _ = try out_stream.write("\":");
+        if (child_options.whitespace) |ws| {
+            if (ws.separator) {
+                try out_stream.writeByte(' ');
+            }
+        }
+        try out_stream.writeByte('"');
+        try jsonEscape(tag.value.?, child_options, out_stream);
+        try out_stream.writeByte('"');
+        if (i < map.len - 1) {
+            try out_stream.writeByte(',');
+        }
+        if (child_options.whitespace) |_|
+            try out_stream.writeByte('\n');
+    }
+    if (options.whitespace) |ws|
+        try ws.outputIndent(out_stream);
+    try out_stream.writeByte('}');
+    return true;
+}
+// code within jsonEscape lifted from json.zig in stdlib
+fn jsonEscape(value: []const u8, options: anytype, out_stream: anytype) !void {
+    var i: usize = 0;
+    while (i < value.len) : (i += 1) {
+        switch (value[i]) {
+            // normal ascii character
+            0x20...0x21, 0x23...0x2E, 0x30...0x5B, 0x5D...0x7F => |c| try out_stream.writeByte(c),
+            // only 2 characters that *must* be escaped
+            '\\' => try out_stream.writeAll("\\\\"),
+            '\"' => try out_stream.writeAll("\\\""),
+            // solidus is optional to escape
+            '/' => {
+                if (options.string.String.escape_solidus) {
+                    try out_stream.writeAll("\\/");
+                } else {
+                    try out_stream.writeByte('/');
+                }
+            },
+            // control characters with short escapes
+            // TODO: option to switch between unicode and 'short' forms?
+            0x8 => try out_stream.writeAll("\\b"),
+            0xC => try out_stream.writeAll("\\f"),
+            '\n' => try out_stream.writeAll("\\n"),
+            '\r' => try out_stream.writeAll("\\r"),
+            '\t' => try out_stream.writeAll("\\t"),
+            else => {
+                const ulen = std.unicode.utf8ByteSequenceLength(value[i]) catch unreachable;
+                // control characters (only things left with 1 byte length) should always be printed as unicode escapes
+                if (ulen == 1 or options.string.String.escape_unicode) {
+                    const codepoint = std.unicode.utf8Decode(value[i .. i + ulen]) catch unreachable;
+                    try outputUnicodeEscape(codepoint, out_stream);
+                } else {
+                    try out_stream.writeAll(value[i .. i + ulen]);
+                }
+                i += ulen - 1;
+            },
+        }
+    }
+}
 
 const StringEscapes = union(enum) {
     None,
@@ -1316,8 +1424,8 @@ pub const Value = union(enum) {
     }
 
     pub fn dump(self: Value) void {
-        var held = std.debug.getStderrMutex().acquire();
-        defer held.release();
+        std.debug.lockStdErr();
+        defer std.debug.unlockStdErr();
 
         const stderr = std.io.getStdErr().writer();
         stringify(self, StringifyOptions{ .whitespace = null }, stderr) catch return;
@@ -1597,12 +1705,22 @@ fn parseInternal(comptime T: type, token: Token, tokens: *TokenStream, options: 
         .@"enum" => |enumInfo| {
             switch (token) {
                 .Number => |numberToken| {
-                    if (!numberToken.is_integer) return error.UnexpectedToken;
+                    if (!numberToken.is_integer) {
+                        // probably is in scientific notation
+                        const n = try std.fmt.parseFloat(f128, numberToken.slice(tokens.slice, tokens.i - 1));
+                        return try std.meta.intToEnum(T, @as(i128, @intFromFloat(n)));
+                    }
+
                     const n = try std.fmt.parseInt(enumInfo.tag_type, numberToken.slice(tokens.slice, tokens.i - 1), 10);
                     return try std.meta.intToEnum(T, n);
                 },
                 .String => |stringToken| {
                     const source_slice = stringToken.slice(tokens.slice, tokens.i - 1);
+
+                    if (std.meta.hasFn(T, "parse")) {
+                        return try T.parse(source_slice);
+                    }
+
                     switch (stringToken.escapes) {
                         .None => return std.meta.stringToEnum(T, source_slice) orelse return error.InvalidEnumTag,
                         .Some => {
