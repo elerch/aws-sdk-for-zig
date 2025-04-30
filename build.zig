@@ -50,10 +50,7 @@ pub fn build(b: *Builder) !void {
         .target = target,
         .optimize = optimize,
     });
-    mod_exe.addImport("smithy", dep_mods.get("smithy").?);
-    mod_exe.addImport("zeit", dep_mods.get("zeit").?);
-    mod_exe.addImport("json", dep_mods.get("json").?);
-    mod_exe.addImport("date", dep_mods.get("date").?);
+    configure(mod_exe, dep_mods, true);
 
     const exe = b.addExecutable(.{
         .name = "demo",
@@ -78,9 +75,7 @@ pub fn build(b: *Builder) !void {
         .target = b.graph.host,
         .optimize = if (b.verbose) .Debug else .ReleaseSafe,
     });
-    cg_mod.addImport("smithy", dep_mods.get("smithy").?);
-    cg_mod.addImport("date", dep_mods.get("date").?);
-    cg_mod.addImport("json", dep_mods.get("json").?);
+    configure(cg_mod, dep_mods, false);
 
     const cg_exe = b.addExecutable(.{
         .name = "codegen",
@@ -125,10 +120,7 @@ pub fn build(b: *Builder) !void {
         .target = target,
         .optimize = optimize,
     });
-    service_manifest_module.addImport("smithy", dep_mods.get("smithy").?);
-    service_manifest_module.addImport("date", dep_mods.get("date").?);
-    service_manifest_module.addImport("json", dep_mods.get("json").?);
-    service_manifest_module.addImport("zeit", dep_mods.get("zeit").?);
+    configure(service_manifest_module, dep_mods, true);
 
     mod_exe.addImport("service_manifest", service_manifest_module);
 
@@ -138,19 +130,14 @@ pub fn build(b: *Builder) !void {
         .target = target,
         .optimize = optimize,
     });
-    mod_aws.addImport("smithy", dep_mods.get("smithy").?);
     mod_aws.addImport("service_manifest", service_manifest_module);
-    mod_aws.addImport("date", dep_mods.get("date").?);
-    mod_aws.addImport("json", dep_mods.get("json").?);
-    mod_aws.addImport("zeit", dep_mods.get("zeit").?);
+    configure(mod_aws, dep_mods, true);
 
     // Expose module to others
     const mod_aws_signing = b.addModule("aws-signing", .{
         .root_source_file = b.path("src/aws_signing.zig"),
     });
-    mod_aws_signing.addImport("date", dep_mods.get("date").?);
-    mod_aws_signing.addImport("smithy", dep_mods.get("smithy").?);
-    mod_aws_signing.addImport("json", dep_mods.get("json").?);
+    configure(mod_aws_signing, dep_mods, false);
 
     // Similar to creating the run step earlier, this exposes a `test` step to
     // the `zig build --help` menu, providing a way for the user to request
@@ -179,11 +166,8 @@ pub fn build(b: *Builder) !void {
             .target = b.resolveTargetQuery(t),
             .optimize = optimize,
         });
-        mod_unit_tests.addImport("smithy", dep_mods.get("smithy").?);
         mod_unit_tests.addImport("service_manifest", service_manifest_module);
-        mod_unit_tests.addImport("date", dep_mods.get("date").?);
-        mod_unit_tests.addImport("zeit", dep_mods.get("zeit").?);
-        mod_unit_tests.addImport("json", dep_mods.get("json").?);
+        configure(mod_unit_tests, dep_mods, true);
 
         // Creates a step for unit testing. This only builds the test executable
         // but does not run it.
@@ -225,6 +209,13 @@ pub fn build(b: *Builder) !void {
     } else {
         b.installArtifact(exe);
     }
+}
+
+fn configure(compile: *std.Build.Module, modules: std.StringHashMap(*std.Build.Module), include_time: bool) void {
+    compile.addImport("smithy", modules.get("smithy").?);
+    compile.addImport("date", modules.get("date").?);
+    compile.addImport("json", modules.get("json").?);
+    if (include_time) compile.addImport("zeit", modules.get("zeit").?);
 }
 
 fn getDependencyModules(b: *std.Build, args: anytype) !std.StringHashMap(*std.Build.Module) {
