@@ -1,7 +1,7 @@
 const std = @import("std");
 const smithy = @import("smithy");
-const snake = @import("snake.zig");
 const Hasher = @import("Hasher.zig");
+const case = @import("case");
 
 var verbose = false;
 
@@ -479,9 +479,10 @@ fn constantName(allocator: std.mem.Allocator, id: []const u8) ![]const u8 {
     // snake turns this into dev_ops, which is a little weird
     if (std.mem.eql(u8, id, "DevOps Guru")) return try std.fmt.allocPrint(allocator, "devops_guru", .{});
     if (std.mem.eql(u8, id, "FSx")) return try std.fmt.allocPrint(allocator, "fsx", .{});
+    if (std.mem.eql(u8, id, "ETag")) return try std.fmt.allocPrint(allocator, "e_tag", .{});
 
     // Not a special case - just snake it
-    return try snake.fromPascalCase(allocator, id);
+    return try case.allocTo(allocator, .snake, id);
 }
 
 const FileGenerationState = struct {
@@ -503,7 +504,7 @@ fn outputIndent(state: GenerationState, writer: anytype) !void {
     try writer.writeByteNTimes(' ', n_chars);
 }
 fn generateOperation(allocator: std.mem.Allocator, operation: smithy.ShapeInfo, file_state: FileGenerationState, writer: anytype) !void {
-    const snake_case_name = try snake.fromPascalCase(allocator, operation.name);
+    const snake_case_name = try constantName(allocator, operation.name);
     defer allocator.free(snake_case_name);
 
     var type_stack = std.ArrayList(*const smithy.ShapeInfo).init(allocator);
@@ -822,7 +823,7 @@ fn generateComplexTypeFor(shape_id: []const u8, members: []smithy.TypeMember, ty
     var payload: ?[]const u8 = null;
     for (members) |member| {
         // This is our mapping
-        const snake_case_member = try snake.fromPascalCase(state.allocator, member.name);
+        const snake_case_member = try constantName(state.allocator, member.name);
         // So it looks like some services have duplicate names?! Check out "httpMethod"
         // in API Gateway. Not sure what we're supposed to do there. Checking the go
         // sdk, they move this particular duplicate to 'http_method' - not sure yet

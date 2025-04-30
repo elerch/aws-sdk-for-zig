@@ -215,6 +215,7 @@ fn configure(compile: *std.Build.Module, modules: std.StringHashMap(*std.Build.M
     compile.addImport("smithy", modules.get("smithy").?);
     compile.addImport("date", modules.get("date").?);
     compile.addImport("json", modules.get("json").?);
+    compile.addImport("case", modules.get("case").?);
     if (include_time) compile.addImport("zeit", modules.get("zeit").?);
 }
 
@@ -229,6 +230,10 @@ fn getDependencyModules(b: *std.Build, args: anytype) !std.StringHashMap(*std.Bu
     const dep_zeit = b.dependency("zeit", args);
     const mod_zeit = dep_zeit.module("zeit");
     try result.putNoClobber("zeit", mod_zeit);
+
+    const dep_case = b.dependency("case", args);
+    const mod_case = dep_case.module("case");
+    try result.putNoClobber("case", mod_case);
     // End External dependencies
 
     // Private modules/dependencies
