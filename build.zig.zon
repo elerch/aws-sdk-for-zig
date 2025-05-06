@@ -18,8 +18,8 @@
             .hash = "smithy-1.0.0-uAyBgS_MAgC4qgc9QaEy5Y5Nf7kv32buQZBYugqNQsAn",
         },
         .models = .{
-            .url = "https://github.com/aws/aws-sdk-go-v2/archive/58cf6509525a12d64fd826da883bfdbacbd2f00e.tar.gz",
-            .hash = "122017a2f3081ce83c23e0c832feb1b8b4176d507b6077f522855dc774bcf83ee315",
+            .url = "https://github.com/aws/aws-sdk-go-v2/archive/refs/tags/release-2024-07-10.2.tar.gz",
+            .hash = "N-V-__8AAEFQJyFGcNzUbbuTqDw7A0TJV6GvkqfFYl45SvCE",
         },
         .zeit = .{
             .url = "git+https://github.com/rockorager/zeit#fb6557ad4bd0cd0f0f728ae978061d7fe992c528",
