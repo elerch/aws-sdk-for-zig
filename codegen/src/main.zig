@@ -373,7 +373,7 @@ fn generateServices(allocator: std.mem.Allocator, comptime _: []const u8, file: 
     };
     for (services.items) |service| {
         var sdk_id: []const u8 = undefined;
-        const version: []const u8 = service.shape.service.version;
+        const version: ?[]const u8 = service.shape.service.version;
         const name: []const u8 = service.name;
         var arn_namespace: ?[]const u8 = undefined;
         var sigv4_name: ?[]const u8 = null;
@@ -404,7 +404,10 @@ fn generateServices(allocator: std.mem.Allocator, comptime _: []const u8, file: 
         const constant_name = try constantName(allocator, sdk_id);
         try constant_names.append(constant_name);
         try writer.print("const Self = @This();\n", .{});
-        try writer.print("pub const version: []const u8 = \"{s}\";\n", .{version});
+        if (version) |v|
+            try writer.print("pub const version: ?[]const u8 = \"{s}\";\n", .{v})
+        else
+            try writer.print("pub const version: ?[]const u8 = null;\n", .{});
         try writer.print("pub const sdk_id: []const u8 = \"{s}\";\n", .{sdk_id});
         if (arn_namespace) |a| {
             try writer.print("pub const arn_namespace: ?[]const u8 = \"{s}\";\n", .{a});
@@ -415,7 +418,10 @@ fn generateServices(allocator: std.mem.Allocator, comptime _: []const u8, file: 
         // TODO: This really should just be ".whatevs". We're fully qualifying here, which isn't typical
         try writer.print("pub const aws_protocol: smithy.AwsProtocol = {};\n\n", .{aws_protocol});
         _ = try writer.write("pub const service_metadata: struct {\n");
-        try writer.print("    version: []const u8 = \"{s}\",\n", .{version});
+        if (version) |v|
+            try writer.print("    version: ?[]const u8 = \"{s}\",\n", .{v})
+        else
+            try writer.print("    version: ?[]const u8 = null,\n", .{});
         try writer.print("    sdk_id: []const u8 = \"{s}\",\n", .{sdk_id});
         if (arn_namespace) |a| {
             try writer.print("    arn_namespace: ?[]const u8 = \"{s}\",\n", .{a});

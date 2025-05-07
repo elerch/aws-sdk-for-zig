@@ -39,7 +39,7 @@ fn serviceCount(desired_services: anytype) usize {
 pub const services = service_list;
 
 test "services includes sts" {
-    try expectEqualStrings("2011-06-15", services.sts.version);
+    try expectEqualStrings("2011-06-15", services.sts.version.?);
 }
 test "sts includes get_caller_identity" {
     try expectEqualStrings("GetCallerIdentity", services.sts.get_caller_identity.action_name);
@@ -47,9 +47,9 @@ test "sts includes get_caller_identity" {
 test "can get service and action name from request" {
     // get request object. This call doesn't have parameters
     const metadata = services.sts.get_caller_identity.Request.metaInfo();
-    try expectEqualStrings("2011-06-15", metadata.service_metadata.version);
+    try expectEqualStrings("2011-06-15", metadata.service_metadata.version.?);
 }
 test "can filter services" {
     const filtered_services = Services(.{ .sts, .wafv2 }){};
-    try expectEqualStrings("2011-06-15", filtered_services.sts.version);
+    try expectEqualStrings("2011-06-15", filtered_services.sts.version.?);
 }

@@ -157,7 +157,7 @@ pub fn Request(comptime request_action: anytype) type {
             // every codegenned request object includes a metaInfo function to get
             // pointers to service and action
 
-            log.debug("call: prefix {s}, sigv4 {s}, version {s}, action {s}", .{
+            log.debug("call: prefix {s}, sigv4 {s}, version {?s}, action {s}", .{
                 Self.service_meta.endpoint_prefix,
                 Self.service_meta.sigv4_name,
                 Self.service_meta.version,
@@ -274,8 +274,8 @@ pub fn Request(comptime request_action: anytype) type {
                             const attrs = try std.fmt.allocPrint(
                                 options.client.allocator,
                                 "xmlns=\"http://{s}.amazonaws.com/doc/{s}/\"",
-                                .{ sm.endpoint_prefix, sm.version },
-                            );
+                                .{ sm.endpoint_prefix, sm.version.? },
+                            ); // Version required for the protocol, we should panic if it is not present
                             defer options.client.allocator.free(attrs); // once serialized, the value should be copied over
 
                             // Need to serialize this
@@ -366,7 +366,7 @@ pub fn Request(comptime request_action: anytype) type {
             else // EC2
                 try std.fmt.allocPrint(options.client.allocator, "?Action={s}&Version={s}", .{
                     action.action_name,
-                    Self.service_meta.version,
+                    Self.service_meta.version.?, // Version required for the protocol, we should panic if it is not present
                 });
 
             defer if (Self.service_meta.aws_protocol != .query) {
@@ -379,7 +379,7 @@ pub fn Request(comptime request_action: anytype) type {
             const body =
                 try std.fmt.allocPrint(options.client.allocator, "Action={s}&Version={s}{s}{s}", .{
                     action.action_name,
-                    Self.service_meta.version,
+                    Self.service_meta.version.?, // Version required for the protocol, we should panic if it is not present
                     continuation,
                     buffer.items,
                 });
