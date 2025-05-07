@@ -970,5 +970,6 @@ fn avoidReserved(snake_name: []const u8) []const u8 {
     if (std.mem.eql(u8, snake_name, "export")) return "@\"export\"";
     if (std.mem.eql(u8, snake_name, "union")) return "@\"union\"";
     if (std.mem.eql(u8, snake_name, "enum")) return "@\"enum\"";
+    if (std.mem.eql(u8, snake_name, "inline")) return "@\"inline\"";
     return snake_name;
 }
