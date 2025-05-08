@@ -80,6 +80,7 @@ pub fn main() anyerror!void {
     if (args.len == 0)
         _ = try generateServices(allocator, ";", std.io.getStdIn(), stdout);
 }
+
 const OutputManifest = struct {
     model_dir_hash_digest: [Hasher.hex_multihash_len]u8,
     output_dir_hash_digest: [Hasher.hex_multihash_len]u8,
@@ -168,12 +169,13 @@ fn calculateDigests(models_dir: std.fs.Dir, output_dir: std.fs.Dir, thread_pool:
 fn processFile(file_name: []const u8, output_dir: std.fs.Dir, manifest: anytype) !void {
     // The fixed buffer for output will be 2MB, which is twice as large as the size of the EC2
     // (the largest) model. We'll then flush all this at one go at the end.
-    var buffer = [_]u8{0} ** (1024 * 1024 * 2);
+    var buffer = std.mem.zeroes([1024 * 1024 * 2]u8);
     var output_stream = std.io.FixedBufferStream([]u8){
         .buffer = &buffer,
         .pos = 0,
     };
-    var writer = output_stream.writer();
+    var counting_writer = std.io.countingWriter(output_stream.writer());
+    var writer = counting_writer.writer();
 
     // It's probably best to create our own allocator here so we can deint at the end and
     // toss all allocations related to the services in this file
@@ -221,13 +223,24 @@ fn processFile(file_name: []const u8, output_dir: std.fs.Dir, manifest: anytype)
         allocator.free(output_file_name);
         output_file_name = new_output_file_name;
     }
+
+    const formatted = try zigFmt(allocator, @ptrCast(buffer[0..counting_writer.bytes_written]));
+
     // Dump our buffer out to disk
     var file = try output_dir.createFile(output_file_name, .{ .truncate = true });
     defer file.close();
-    try file.writeAll(output_stream.getWritten());
+    try file.writeAll(formatted);
+
     for (service_names) |name| {
         try manifest.print("pub const {s} = @import(\"{s}\");\n", .{ name, std.fs.path.basename(output_file_name) });
     }
+}
+
+fn zigFmt(allocator: std.mem.Allocator, buffer: [:0]const u8) ![]const u8 {
+    var tree = try std.zig.Ast.parse(allocator, buffer, .zig);
+    defer tree.deinit(allocator);
+
+    return try tree.render(allocator);
 }
 
 fn generateServicesForFilePath(
