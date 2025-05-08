@@ -1,7 +1,7 @@
 const std = @import("std");
 const smithy = @import("smithy");
-const snake = @import("snake.zig");
 const Hasher = @import("Hasher.zig");
+const case = @import("case");
 
 var verbose = false;
 
@@ -80,6 +80,7 @@ pub fn main() anyerror!void {
     if (args.len == 0)
         _ = try generateServices(allocator, ";", std.io.getStdIn(), stdout);
 }
+
 const OutputManifest = struct {
     model_dir_hash_digest: [Hasher.hex_multihash_len]u8,
     output_dir_hash_digest: [Hasher.hex_multihash_len]u8,
@@ -168,12 +169,13 @@ fn calculateDigests(models_dir: std.fs.Dir, output_dir: std.fs.Dir, thread_pool:
 fn processFile(file_name: []const u8, output_dir: std.fs.Dir, manifest: anytype) !void {
     // The fixed buffer for output will be 2MB, which is twice as large as the size of the EC2
     // (the largest) model. We'll then flush all this at one go at the end.
-    var buffer = [_]u8{0} ** (1024 * 1024 * 2);
+    var buffer = std.mem.zeroes([1024 * 1024 * 2]u8);
     var output_stream = std.io.FixedBufferStream([]u8){
         .buffer = &buffer,
         .pos = 0,
     };
-    var writer = output_stream.writer();
+    var counting_writer = std.io.countingWriter(output_stream.writer());
+    var writer = counting_writer.writer();
 
     // It's probably best to create our own allocator here so we can deint at the end and
     // toss all allocations related to the services in this file
@@ -221,13 +223,24 @@ fn processFile(file_name: []const u8, output_dir: std.fs.Dir, manifest: anytype)
         allocator.free(output_file_name);
         output_file_name = new_output_file_name;
     }
+
+    const formatted = try zigFmt(allocator, @ptrCast(buffer[0..counting_writer.bytes_written]));
+
     // Dump our buffer out to disk
     var file = try output_dir.createFile(output_file_name, .{ .truncate = true });
     defer file.close();
-    try file.writeAll(output_stream.getWritten());
+    try file.writeAll(formatted);
+
     for (service_names) |name| {
         try manifest.print("pub const {s} = @import(\"{s}\");\n", .{ name, std.fs.path.basename(output_file_name) });
     }
+}
+
+fn zigFmt(allocator: std.mem.Allocator, buffer: [:0]const u8) ![]const u8 {
+    var tree = try std.zig.Ast.parse(allocator, buffer, .zig);
+    defer tree.deinit(allocator);
+
+    return try tree.render(allocator);
 }
 
 fn generateServicesForFilePath(
@@ -479,9 +492,10 @@ fn constantName(allocator: std.mem.Allocator, id: []const u8) ![]const u8 {
     // snake turns this into dev_ops, which is a little weird
     if (std.mem.eql(u8, id, "DevOps Guru")) return try std.fmt.allocPrint(allocator, "devops_guru", .{});
     if (std.mem.eql(u8, id, "FSx")) return try std.fmt.allocPrint(allocator, "fsx", .{});
+    if (std.mem.eql(u8, id, "ETag")) return try std.fmt.allocPrint(allocator, "e_tag", .{});
 
     // Not a special case - just snake it
-    return try snake.fromPascalCase(allocator, id);
+    return try case.allocTo(allocator, .snake, id);
 }
 
 const FileGenerationState = struct {
@@ -503,7 +517,7 @@ fn outputIndent(state: GenerationState, writer: anytype) !void {
     try writer.writeByteNTimes(' ', n_chars);
 }
 fn generateOperation(allocator: std.mem.Allocator, operation: smithy.ShapeInfo, file_state: FileGenerationState, writer: anytype) !void {
-    const snake_case_name = try snake.fromPascalCase(allocator, operation.name);
+    const snake_case_name = try constantName(allocator, operation.name);
     defer allocator.free(snake_case_name);
 
     var type_stack = std.ArrayList(*const smithy.ShapeInfo).init(allocator);
@@ -518,6 +532,35 @@ fn generateOperation(allocator: std.mem.Allocator, operation: smithy.ShapeInfo, 
     child_state.indent_level += 1;
     // indent should start at 4 spaces here
     const operation_name = avoidReserved(snake_case_name);
+
+    // Request type
+    _ = try writer.print("pub const {s}Request = ", .{operation.name});
+    if (operation.shape.operation.input == null or
+        (try shapeInfoForId(operation.shape.operation.input.?, state)).shape == .unit)
+    {
+        _ = try writer.write("struct {\n");
+        try generateMetadataFunction(operation_name, state, writer);
+    } else if (operation.shape.operation.input) |member| {
+        if (try generateTypeFor(member, writer, state, false)) unreachable; // we expect only structs here
+        _ = try writer.write("\n");
+        try generateMetadataFunction(operation_name, state, writer);
+    }
+    _ = try writer.write(";\n\n");
+
+    // Response type
+    _ = try writer.print("pub const {s}Response = ", .{operation.name});
+    if (operation.shape.operation.output == null or
+        (try shapeInfoForId(operation.shape.operation.output.?, state)).shape == .unit)
+    {
+        _ = try writer.write("struct {\n");
+        try generateMetadataFunction(operation_name, state, writer);
+    } else if (operation.shape.operation.output) |member| {
+        if (try generateTypeFor(member, writer, state, false)) unreachable; // we expect only structs here
+        _ = try writer.write("\n");
+        try generateMetadataFunction(operation_name, state, writer);
+    }
+    _ = try writer.write(";\n\n");
+
     try writer.print("pub const {s}: struct ", .{operation_name});
     _ = try writer.write("{\n");
     for (operation.shape.operation.traits) |trait| {
@@ -538,28 +581,10 @@ fn generateOperation(allocator: std.mem.Allocator, operation: smithy.ShapeInfo, 
     try outputIndent(state, writer);
     try writer.print("action_name: []const u8 = \"{s}\",\n", .{operation.name});
     try outputIndent(state, writer);
-    _ = try writer.write("Request: type = ");
-    if (operation.shape.operation.input == null or
-        (try shapeInfoForId(operation.shape.operation.input.?, state)).shape == .unit)
-    {
-        _ = try writer.write("struct {\n");
-        try generateMetadataFunction(operation_name, state, writer);
-    } else if (operation.shape.operation.input) |member| {
-        if (try generateTypeFor(member, writer, state, false)) unreachable; // we expect only structs here
-        _ = try writer.write("\n");
-        try generateMetadataFunction(operation_name, state, writer);
-    }
-    _ = try writer.write(",\n");
+    _ = try writer.print("Request: type = {s}Request,\n", .{operation.name});
+
     try outputIndent(state, writer);
-    _ = try writer.write("Response: type = ");
-    if (operation.shape.operation.output == null or
-        (try shapeInfoForId(operation.shape.operation.output.?, state)).shape == .unit)
-    {
-        _ = try writer.write("struct {}"); // we want to maintain consistency with other ops
-    } else if (operation.shape.operation.output) |member| {
-        if (try generateTypeFor(member, writer, state, true)) unreachable; // we expect only structs here
-    }
-    _ = try writer.write(",\n");
+    _ = try writer.print("Response: type = {s}Response,\n", .{operation.name});
 
     if (operation.shape.operation.errors) |errors| {
         try outputIndent(state, writer);
@@ -811,7 +836,7 @@ fn generateComplexTypeFor(shape_id: []const u8, members: []smithy.TypeMember, ty
     var payload: ?[]const u8 = null;
     for (members) |member| {
         // This is our mapping
-        const snake_case_member = try snake.fromPascalCase(state.allocator, member.name);
+        const snake_case_member = try constantName(state.allocator, member.name);
         // So it looks like some services have duplicate names?! Check out "httpMethod"
         // in API Gateway. Not sure what we're supposed to do there. Checking the go
         // sdk, they move this particular duplicate to 'http_method' - not sure yet

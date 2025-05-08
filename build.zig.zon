@@ -31,5 +31,9 @@
         .json = .{
             .path = "lib/json",
         },
+        .case = .{
+            .url = "git+https://github.com/travisstaloch/case.git#610caade88ca54d2745f115114b08e73e2c6fe02",
+            .hash = "N-V-__8AAIfIAAC_RzCtghVVBVdqUzB8AaaGIyvK2WWz38bC",
+        },
     },
 }
