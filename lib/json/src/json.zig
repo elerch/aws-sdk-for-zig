@@ -14,35 +14,15 @@ const testing = std.testing;
 const mem = std.mem;
 const maxInt = std.math.maxInt;
 
-pub fn serializeMap(map: anytype, key: []const u8, options: anytype, out_stream: anytype) !bool {
+pub fn serializeMap(map: anytype, key: []const u8, options: anytype, out_stream: anytype) !void {
     if (@typeInfo(@TypeOf(map)) == .optional) {
-        if (map == null)
-            return false
-        else
-            return serializeMapInternal(map.?, key, options, out_stream);
+        if (map) |m| serializeMapInternal(m, key, options, out_stream);
+    } else {
+        serializeMapInternal(map, key, options, out_stream);
     }
-    return serializeMapInternal(map, key, options, out_stream);
 }
 
-fn serializeMapInternal(map: anytype, key: []const u8, options: anytype, out_stream: anytype) !bool {
-    if (map.len == 0) {
-        var child_options = options;
-        if (child_options.whitespace) |*child_ws|
-            child_ws.indent_level += 1;
-
-        try out_stream.writeByte('"');
-        try out_stream.writeAll(key);
-        _ = try out_stream.write("\":");
-        if (options.whitespace) |ws| {
-            if (ws.separator) {
-                try out_stream.writeByte(' ');
-            }
-        }
-        try out_stream.writeByte('{');
-        try out_stream.writeByte('}');
-        return true;
-    }
-    // TODO: Map might be [][]struct{key, value} rather than []struct{key, value}
+fn serializeMapKey(key: []const u8, options: anytype, out_stream: anytype) !void {
     var child_options = options;
     if (child_options.whitespace) |*child_ws|
         child_ws.indent_level += 1;
@@ -55,36 +35,52 @@ fn serializeMapInternal(map: anytype, key: []const u8, options: anytype, out_str
             try out_stream.writeByte(' ');
         }
     }
+}
+
+pub fn serializeMapAsObject(map: anytype, options: anytype, out_stream: anytype) !void {
+    if (map.len == 0) {
+        try out_stream.writeByte('{');
+        try out_stream.writeByte('}');
+    }
+
+    // TODO: Map might be [][]struct{key, value} rather than []struct{key, value}
+
     try out_stream.writeByte('{');
     if (options.whitespace) |_|
         try out_stream.writeByte('\n');
     for (map, 0..) |tag, i| {
         if (tag.key == null or tag.value == null) continue;
         // TODO: Deal with escaping and general "json.stringify" the values...
-        if (child_options.whitespace) |ws|
+        if (options.whitespace) |ws|
             try ws.outputIndent(out_stream);
         try out_stream.writeByte('"');
-        try jsonEscape(tag.key.?, child_options, out_stream);
+        try jsonEscape(tag.key.?, options, out_stream);
         _ = try out_stream.write("\":");
-        if (child_options.whitespace) |ws| {
+        if (options.whitespace) |ws| {
             if (ws.separator) {
                 try out_stream.writeByte(' ');
             }
         }
         try out_stream.writeByte('"');
-        try jsonEscape(tag.value.?, child_options, out_stream);
+        try jsonEscape(tag.value.?, options, out_stream);
         try out_stream.writeByte('"');
         if (i < map.len - 1) {
             try out_stream.writeByte(',');
         }
-        if (child_options.whitespace) |_|
+        if (options.whitespace) |_|
             try out_stream.writeByte('\n');
     }
     if (options.whitespace) |ws|
         try ws.outputIndent(out_stream);
     try out_stream.writeByte('}');
-    return true;
 }
+
+fn serializeMapInternal(map: anytype, key: []const u8, options: anytype, out_stream: anytype) !bool {
+    var child_options = options;
+    try serializeMapKey(key, &child_options, out_stream);
+    return try serializeMapAsObject(map, child_options, out_stream);
+}
+
 // code within jsonEscape lifted from json.zig in stdlib
 fn jsonEscape(value: []const u8, options: anytype, out_stream: anytype) !void {
     var i: usize = 0;

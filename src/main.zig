@@ -192,7 +192,7 @@ pub fn main() anyerror!void {
                         const func = fns[0];
                         const arn = func.function_arn.?;
                         // This is a bit ugly. Maybe a helper function in the library would help?
-                        var tags = try std.ArrayList(@typeInfo(try typeForField(services.lambda.tag_resource.Request, "tags")).pointer.child).initCapacity(allocator, 1);
+                        var tags = try std.ArrayList(aws.services.lambda.TagKeyValue).initCapacity(allocator, 1);
                         defer tags.deinit();
                         tags.appendAssumeCapacity(.{ .key = "Foo", .value = "Bar" });
                         const req = services.lambda.tag_resource.Request{ .resource = arn, .tags = tags.items };
