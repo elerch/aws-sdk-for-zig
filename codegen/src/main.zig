@@ -625,6 +625,7 @@ fn generateMetadataFunction(operation_name: []const u8, state: GenerationState, 
     try outputIndent(state, writer);
     try writer.writeByte('}');
 }
+
 fn getErrorName(err_name: []const u8) []const u8 {
     if (endsWith("Exception", err_name))
         return err_name[0 .. err_name.len - "Exception".len];
@@ -800,6 +801,8 @@ fn generateTypeFor(shape_id: []const u8, writer: anytype, state: GenerationState
 
 fn generateMapTypeFor(map: anytype, writer: anytype, state: GenerationState) anyerror!void {
     _ = try writer.write("struct {\n");
+
+    try writer.writeAll("pub const is_map_type = true;\n\n");
 
     var child_state = state;
     child_state.indent_level += 1;

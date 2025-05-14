@@ -41,44 +41,50 @@ pub fn serializeMapAsObject(map: anytype, options: anytype, out_stream: anytype)
     if (map.len == 0) {
         try out_stream.writeByte('{');
         try out_stream.writeByte('}');
+        return;
     }
 
     // TODO: Map might be [][]struct{key, value} rather than []struct{key, value}
+    var child_options = options;
+    if (child_options.whitespace) |*whitespace| {
+        whitespace.indent_level += 1;
+    }
 
     try out_stream.writeByte('{');
     if (options.whitespace) |_|
         try out_stream.writeByte('\n');
+
     for (map, 0..) |tag, i| {
         if (tag.key == null or tag.value == null) continue;
         // TODO: Deal with escaping and general "json.stringify" the values...
-        if (options.whitespace) |ws|
+        if (child_options.whitespace) |ws|
             try ws.outputIndent(out_stream);
         try out_stream.writeByte('"');
-        try jsonEscape(tag.key.?, options, out_stream);
+        try jsonEscape(tag.key.?, child_options, out_stream);
         _ = try out_stream.write("\":");
-        if (options.whitespace) |ws| {
+        if (child_options.whitespace) |ws| {
             if (ws.separator) {
                 try out_stream.writeByte(' ');
             }
         }
         try out_stream.writeByte('"');
-        try jsonEscape(tag.value.?, options, out_stream);
+        try jsonEscape(tag.value.?, child_options, out_stream);
         try out_stream.writeByte('"');
         if (i < map.len - 1) {
             try out_stream.writeByte(',');
         }
-        if (options.whitespace) |_|
+        if (child_options.whitespace) |_|
             try out_stream.writeByte('\n');
     }
+
     if (options.whitespace) |ws|
         try ws.outputIndent(out_stream);
     try out_stream.writeByte('}');
 }
 
 fn serializeMapInternal(map: anytype, key: []const u8, options: anytype, out_stream: anytype) !bool {
-    var child_options = options;
-    try serializeMapKey(key, &child_options, out_stream);
-    return try serializeMapAsObject(map, child_options, out_stream);
+    try serializeMapKey(key, options, out_stream);
+    return try serializeMapAsObject(map, options, out_stream);
 }
 
 // code within jsonEscape lifted from json.zig in stdlib
@@ -2979,17 +2985,17 @@ pub fn stringify(
             if (child_options.whitespace) |*child_whitespace| {
                 child_whitespace.indent_level += 1;
             }
-            inline for (S.fields) |Field| {
+            inline for (S.fields) |field| {
                 // don't include void fields
-                if (Field.type == void) continue;
+                if (field.type == void) continue;
 
                 var output_this_field = true;
-                if (!options.emit_null and @typeInfo(Field.type) == .optional and @field(value, Field.name) == null) output_this_field = false;
+                if (!options.emit_null and @typeInfo(field.type) == .optional and @field(value, field.name) == null) output_this_field = false;
 
                 const final_name = if (comptime std.meta.hasFn(T, "fieldNameFor"))
-                    value.fieldNameFor(Field.name)
+                    value.fieldNameFor(field.name)
                 else
-                    Field.name;
+                    field.name;
                 if (options.exclude_fields) |exclude_fields| {
                     for (exclude_fields) |exclude_field| {
                         if (std.mem.eql(u8, final_name, exclude_field)) {
@@ -3009,7 +3015,7 @@ pub fn stringify(
                 }
                 var field_written = false;
                 if (comptime std.meta.hasFn(T, "jsonStringifyField")) {
-                    if (output_this_field) field_written = try value.jsonStringifyField(Field.name, child_options, out_stream);
+                    if (output_this_field) field_written = try value.jsonStringifyField(field.name, child_options, out_stream);
                 }
 
                 if (!field_written) {
@@ -3022,7 +3028,9 @@ pub fn stringify(
                             if (output_this_field) try out_stream.writeByte(' ');
                         }
                     }
-                    if (output_this_field) try stringify(@field(value, Field.name), child_options, out_stream);
+                    if (output_this_field) {
+                        try stringify(@field(value, field.name), child_options, out_stream);
+                    }
                 }
             }
             if (field_output) {
@@ -3090,11 +3098,17 @@ pub fn stringify(
                     return;
                 }
 
-                try out_stream.writeByte('[');
+                if (@typeInfo(ptr_info.child) == .@"struct" and @hasDecl(ptr_info.child, "is_map_type")) {
+                    try serializeMapAsObject(value, options, out_stream);
+                    return;
+                }
+
                 var child_options = options;
                 if (child_options.whitespace) |*whitespace| {
                     whitespace.indent_level += 1;
                 }
+
+                try out_stream.writeByte('[');
                 for (value, 0..) |x, i| {
                     if (i != 0) {
                         try out_stream.writeByte(',');
