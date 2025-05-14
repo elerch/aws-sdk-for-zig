@@ -1389,7 +1389,7 @@ test "custom serialization for map objects" {
     defer tags.deinit();
     tags.appendAssumeCapacity(.{ .key = "Foo", .value = "Bar" });
     tags.appendAssumeCapacity(.{ .key = "Baz", .value = "Qux" });
-    const req = services.lambda.tag_resource.Request{ .resource = "hello", .tags = tags.items };
+    const req = services.lambda.TagResourceRequest{ .resource = "hello", .tags = tags.items };
     try json.stringify(req, .{ .whitespace = .{} }, buffer.writer());
     try std.testing.expectEqualStrings(
         \\{
