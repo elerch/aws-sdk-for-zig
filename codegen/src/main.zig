@@ -643,6 +643,8 @@ fn getTypeName(allocator: std.mem.Allocator, shape: smithy.ShapeInfo) ![]const u
     const type_name = avoidReserved(shape.name);
 
     switch (shape.shape) {
+        // maps are named like "Tags"
+        // this removes the trailing s and adds "KeyValue" suffix
         .map => {
             const map_type_name = avoidReserved(shape.name);
             return try std.fmt.allocPrint(allocator, "{s}KeyValue", .{map_type_name[0 .. map_type_name.len - 1]});
