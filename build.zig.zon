@@ -22,7 +22,7 @@
             .hash = "N-V-__8AAKWdeiawujEcrfukQbb8lLAiQIRT0uG5gCcm4b7W",
         },
         .zeit = .{
-            .url = "https://github.com/deevus/zeit/archive/refs/heads/iso8601-basic.tar.gz",
+            .url = "git+https://github.com/rockorager/zeit#f86d568b89a5922f084dae524a1eaf709855cd5e",
             .hash = "zeit-0.6.0-5I6bkzt5AgC1_BCuSzXkV0JHeF4Mhti1Z_jFC7E_nmD2",
         },
         .date = .{
