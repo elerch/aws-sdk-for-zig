@@ -69,49 +69,8 @@ const IsoParsingState = enum { Start, Year, Month, Day, Hour, Minute, Second, Mi
 /// Converts a string to a timestamp value. May not handle dates before the
 /// epoch
 pub fn parseIso8601ToDateTime(data: []const u8) !DateTime {
-    // Basic format YYYYMMDDThhmmss
-    if (data.len == "YYYYMMDDThhmmss".len and data[8] == 'T')
-        return try parseIso8601BasicFormatToDateTime(data);
-    if (data.len == "YYYYMMDDThhmmssZ".len and data[8] == 'T')
-        return try parseIso8601BasicFormatToDateTime(data);
-
-    var start: usize = 0;
-    var state = IsoParsingState.Start;
-    // Anything not explicitly set by our string would be 0
-    var rc = DateTime{ .year = 0, .month = 0, .day = 0, .hour = 0, .minute = 0, .second = 0 };
-    var zulu_time = false;
-    for (data, 0..) |ch, i| {
-        switch (ch) {
-            '0', '1', '2', '3', '4', '5', '6', '7', '8', '9' => {
-                if (state == .Start) state = .Year;
-            },
-            '?', '~', '%' => {
-                // These characters all specify the type of time (approximate, etc)
-                // and we will ignore
-            },
-            '.', '-', ':', 'T' => {
-                // State transition
-
-                // We're going to coerce and this might not go well, but we
-                // want the compiler to create checks, so we'll turn on
-                // runtime safety for this block, forcing checks in ReleaseSafe
-                // ReleaseFast modes.
-                const next_state = try endIsoState(state, &rc, data[start..i]);
-                state = next_state;
-                start = i + 1;
-            },
-            'Z' => zulu_time = true,
-            else => {
-                log.err("Invalid character: {c}", .{ch});
-                return error.InvalidCharacter;
-            },
-        }
-    }
-    if (!zulu_time) return error.LocalTimeNotSupported;
-    // We know we have a Z at the end of this, so let's grab the last bit
-    // of the string, minus the 'Z', and fly, eagles, fly!
-    _ = try endIsoState(state, &rc, data[start .. data.len - 1]);
-    return rc;
+    const ins = try zeit.instant(.{ .source = .{ .iso8601 = data } });
+    return DateTime.fromInstant(ins);
 }
 
 fn parseIso8601BasicFormatToDateTime(data: []const u8) !DateTime {
