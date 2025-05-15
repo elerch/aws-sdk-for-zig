@@ -1,7 +1,3 @@
-// From https://gist.github.com/WoodyAtHome/3ef50b17f0fa2860ac52b97af12f8d15
-// Translated from German. We don't need any local time for this use case, and conversion
-// really requires the TZ DB.
-
 const std = @import("std");
 const log = std.log.scoped(.date);
 const zeit = @import("zeit");
