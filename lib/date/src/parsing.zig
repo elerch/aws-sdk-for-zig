@@ -73,48 +73,6 @@ pub fn parseIso8601ToDateTime(data: []const u8) !DateTime {
     return DateTime.fromInstant(ins);
 }
 
-fn parseIso8601BasicFormatToDateTime(data: []const u8) !DateTime {
-    return DateTime{
-        .year = try std.fmt.parseUnsigned(u16, data[0..4], 10),
-        .month = try std.fmt.parseUnsigned(u8, data[4..6], 10),
-        .day = try std.fmt.parseUnsigned(u8, data[6..8], 10),
-        .hour = try std.fmt.parseUnsigned(u8, data[9..11], 10),
-        .minute = try std.fmt.parseUnsigned(u8, data[11..13], 10),
-        .second = try std.fmt.parseUnsigned(u8, data[13..15], 10),
-    };
-}
-
-fn endIsoState(current_state: IsoParsingState, date: *DateTime, prev_data: []const u8) !IsoParsingState {
-    var next_state: IsoParsingState = undefined;
-    log.debug("endIsoState. Current state '{}', data: {s}", .{ current_state, prev_data });
-
-    // Using two switches is slightly less efficient, but more readable
-    switch (current_state) {
-        .Start, .End => return error.IllegalStateTransition,
-        .Year => next_state = .Month,
-        .Month => next_state = .Day,
-        .Day => next_state = .Hour,
-        .Hour => next_state = .Minute,
-        .Minute => next_state = .Second,
-        .Second => next_state = .Millisecond,
-        .Millisecond => next_state = .End,
-    }
-
-    // TODO: This won't handle signed, which Iso supports. For now, let's fail
-    // explictly
-    switch (current_state) {
-        .Year => date.year = try std.fmt.parseUnsigned(u16, prev_data, 10),
-        .Month => date.month = try std.fmt.parseUnsigned(u8, prev_data, 10),
-        .Day => date.day = try std.fmt.parseUnsigned(u8, prev_data, 10),
-        .Hour => date.hour = try std.fmt.parseUnsigned(u8, prev_data, 10),
-        .Minute => date.minute = try std.fmt.parseUnsigned(u8, prev_data, 10),
-        .Second => date.second = try std.fmt.parseUnsigned(u8, prev_data, 10),
-        .Millisecond => {}, // We'll throw that away - our granularity is 1 second
-        .Start, .End => return error.InvalidState,
-    }
-    return next_state;
-}
-
 pub fn dateTimeToTimestamp(datetime: DateTime) !zeit.Seconds {
     return (try datetime.instant()).unixTimestamp();
 }
