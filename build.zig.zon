@@ -22,8 +22,8 @@
             .hash = "N-V-__8AAKWdeiawujEcrfukQbb8lLAiQIRT0uG5gCcm4b7W",
         },
         .zeit = .{
-            .url = "git+https://github.com/rockorager/zeit#fb6557ad4bd0cd0f0f728ae978061d7fe992c528",
-            .hash = "zeit-0.6.0-5I6bk29nAgDhK6AVMtXMWhkKTYgUncrWjnlI_8X9DPSd",
+            .url = "https://github.com/deevus/zeit/archive/refs/heads/iso8601-basic.tar.gz",
+            .hash = "zeit-0.6.0-5I6bkzt5AgC1_BCuSzXkV0JHeF4Mhti1Z_jFC7E_nmD2",
         },
         .date = .{
             .path = "lib/date",
