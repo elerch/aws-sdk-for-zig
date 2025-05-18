@@ -1,7 +1,3 @@
-// From https://gist.github.com/WoodyAtHome/3ef50b17f0fa2860ac52b97af12f8d15
-// Translated from German. We don't need any local time for this use case, and conversion
-// really requires the TZ DB.
-
 const std = @import("std");
 const log = std.log.scoped(.date);
 const zeit = @import("zeit");
@@ -69,91 +65,8 @@ const IsoParsingState = enum { Start, Year, Month, Day, Hour, Minute, Second, Mi
 /// Converts a string to a timestamp value. May not handle dates before the
 /// epoch
 pub fn parseIso8601ToDateTime(data: []const u8) !DateTime {
-    // Basic format YYYYMMDDThhmmss
-    if (data.len == "YYYYMMDDThhmmss".len and data[8] == 'T')
-        return try parseIso8601BasicFormatToDateTime(data);
-    if (data.len == "YYYYMMDDThhmmssZ".len and data[8] == 'T')
-        return try parseIso8601BasicFormatToDateTime(data);
-
-    var start: usize = 0;
-    var state = IsoParsingState.Start;
-    // Anything not explicitly set by our string would be 0
-    var rc = DateTime{ .year = 0, .month = 0, .day = 0, .hour = 0, .minute = 0, .second = 0 };
-    var zulu_time = false;
-    for (data, 0..) |ch, i| {
-        switch (ch) {
-            '0', '1', '2', '3', '4', '5', '6', '7', '8', '9' => {
-                if (state == .Start) state = .Year;
-            },
-            '?', '~', '%' => {
-                // These characters all specify the type of time (approximate, etc)
-                // and we will ignore
-            },
-            '.', '-', ':', 'T' => {
-                // State transition
-
-                // We're going to coerce and this might not go well, but we
-                // want the compiler to create checks, so we'll turn on
-                // runtime safety for this block, forcing checks in ReleaseSafe
-                // ReleaseFast modes.
-                const next_state = try endIsoState(state, &rc, data[start..i]);
-                state = next_state;
-                start = i + 1;
-            },
-            'Z' => zulu_time = true,
-            else => {
-                log.err("Invalid character: {c}", .{ch});
-                return error.InvalidCharacter;
-            },
-        }
-    }
-    if (!zulu_time) return error.LocalTimeNotSupported;
-    // We know we have a Z at the end of this, so let's grab the last bit
-    // of the string, minus the 'Z', and fly, eagles, fly!
-    _ = try endIsoState(state, &rc, data[start .. data.len - 1]);
-    return rc;
-}
-
-fn parseIso8601BasicFormatToDateTime(data: []const u8) !DateTime {
-    return DateTime{
-        .year = try std.fmt.parseUnsigned(u16, data[0..4], 10),
-        .month = try std.fmt.parseUnsigned(u8, data[4..6], 10),
-        .day = try std.fmt.parseUnsigned(u8, data[6..8], 10),
-        .hour = try std.fmt.parseUnsigned(u8, data[9..11], 10),
-        .minute = try std.fmt.parseUnsigned(u8, data[11..13], 10),
-        .second = try std.fmt.parseUnsigned(u8, data[13..15], 10),
-    };
-}
-
-fn endIsoState(current_state: IsoParsingState, date: *DateTime, prev_data: []const u8) !IsoParsingState {
-    var next_state: IsoParsingState = undefined;
-    log.debug("endIsoState. Current state '{}', data: {s}", .{ current_state, prev_data });
-
-    // Using two switches is slightly less efficient, but more readable
-    switch (current_state) {
-        .Start, .End => return error.IllegalStateTransition,
-        .Year => next_state = .Month,
-        .Month => next_state = .Day,
-        .Day => next_state = .Hour,
-        .Hour => next_state = .Minute,
-        .Minute => next_state = .Second,
-        .Second => next_state = .Millisecond,
-        .Millisecond => next_state = .End,
-    }
-
-    // TODO: This won't handle signed, which Iso supports. For now, let's fail
-    // explictly
-    switch (current_state) {
-        .Year => date.year = try std.fmt.parseUnsigned(u16, prev_data, 10),
-        .Month => date.month = try std.fmt.parseUnsigned(u8, prev_data, 10),
-        .Day => date.day = try std.fmt.parseUnsigned(u8, prev_data, 10),
-        .Hour => date.hour = try std.fmt.parseUnsigned(u8, prev_data, 10),
-        .Minute => date.minute = try std.fmt.parseUnsigned(u8, prev_data, 10),
-        .Second => date.second = try std.fmt.parseUnsigned(u8, prev_data, 10),
-        .Millisecond => {}, // We'll throw that away - our granularity is 1 second
-        .Start, .End => return error.InvalidState,
-    }
-    return next_state;
+    const ins = try zeit.instant(.{ .source = .{ .iso8601 = data } });
+    return DateTime.fromInstant(ins);
 }
 
 pub fn dateTimeToTimestamp(datetime: DateTime) !zeit.Seconds {
