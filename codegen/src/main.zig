@@ -192,27 +192,21 @@ fn processFile(file_name: []const u8, output_dir: std.fs.Dir, manifest: anytype)
     _ = try writer.write("\n");
     _ = try writer.write("const serializeMap = json.serializeMap;\n");
     _ = try writer.write("\n");
+
     if (verbose) std.log.info("Processing file: {s}", .{file_name});
+
     const service_names = generateServicesForFilePath(allocator, ";", file_name, writer) catch |err| {
         std.log.err("Error processing file: {s}", .{file_name});
         return err;
     };
-    defer {
-        for (service_names) |name| allocator.free(name);
-        allocator.free(service_names);
+
+    var output_file_name: []const u8 = try std.mem.join(allocator, "-", service_names);
+
+    if (output_file_name.len == 0) {
+        const ext = std.fs.path.extension(file_name);
+        output_file_name = file_name[0 .. file_name.len - ext.len];
     }
-    var output_file_name = try std.fmt.allocPrint(allocator, "", .{});
-    defer allocator.free(output_file_name);
-    for (service_names) |name| {
-        const seperator = if (output_file_name.len > 0) "-" else "";
-        const new_output_file_name = try std.fmt.allocPrint(
-            allocator,
-            "{s}{s}{s}",
-            .{ output_file_name, seperator, name },
-        );
-        allocator.free(output_file_name);
-        output_file_name = new_output_file_name;
-    }
+
     {
         // append .zig on to the file name
         const new_output_file_name = try std.fmt.allocPrint(
