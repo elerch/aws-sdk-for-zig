@@ -92,8 +92,12 @@ pub fn build(b: *Builder) !void {
     ));
     cg_cmd.addArg("--output");
     const cg_output_dir = cg_cmd.addOutputDirectoryArg("src/models");
-    if (b.verbose)
+    if (b.verbose) {
         cg_cmd.addArg("--verbose");
+    }
+    if (!no_bin) {
+        b.installArtifact(cg_exe);
+    }
     // cg_cmd.step.dependOn(&fetch_step.step);
     // TODO: this should use zig_exe from std.Build
     // codegen should store a hash in a comment
