@@ -20,7 +20,7 @@ jobs:
         with:
           ref: zig-0.13
       - name: Setup Zig
-        uses: https://github.com/mlugg/setup-zig@v1.2.1
+        uses: https://github.com/mlugg/setup-zig@v2.0.1
         with:
           version: 0.13.0
       - name: Restore Zig caches
