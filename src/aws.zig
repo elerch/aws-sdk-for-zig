@@ -232,8 +232,6 @@ pub fn Request(comptime request_action: anytype) type {
             // We don't know if we need a body...guessing here, this should cover most
             var buffer = std.ArrayList(u8).init(options.client.allocator);
             defer buffer.deinit();
-            var nameAllocator = ArenaAllocator.init(options.client.allocator);
-            defer nameAllocator.deinit();
             if (Self.service_meta.aws_protocol == .rest_json_1) {
                 if (std.mem.eql(u8, "PUT", aws_request.method) or std.mem.eql(u8, "POST", aws_request.method)) {
                     try json.stringify(request, .{ .whitespace = .{}, .emit_null = false, .exclude_fields = al.items }, buffer.writer());
@@ -328,9 +326,6 @@ pub fn Request(comptime request_action: anytype) type {
             //       smithy spec, "A null value MAY be provided or omitted
             //       for a boxed member with no observable difference." But we're
             //       seeing a lot of differences here between spec and reality
-            //
-            var nameAllocator = ArenaAllocator.init(options.client.allocator);
-            defer nameAllocator.deinit();
             try json.stringify(request, .{ .whitespace = .{} }, buffer.writer());
 
             var content_type: []const u8 = undefined;
@@ -1532,8 +1527,6 @@ test "basic json request serialization" {
     //       for a boxed member with no observable difference." But we're
     //       seeing a lot of differences here between spec and reality
     //
-    var nameAllocator = ArenaAllocator.init(allocator);
-    defer nameAllocator.deinit();
     try json.stringify(request, .{ .whitespace = .{} }, buffer.writer());
     try std.testing.expectEqualStrings(
         \\{
@@ -2589,4 +2582,24 @@ test "test server timeout works" {
     std.log.debug("harness started", .{});
     test_harness.stop();
     std.log.debug("test complete", .{});
+}
+
+test "toJson" {
+    const request = services.media_convert.PutPolicyRequest{
+        .policy = .{
+            .http_inputs = "foo",
+            .https_inputs = "bar",
+            .s3_inputs = "baz",
+        },
+    };
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const request_json_value = try request.toJson(arena.allocator());
+
+    const request_json = try std.json.stringifyAlloc(std.testing.allocator, request_json_value, .{});
+    defer std.testing.allocator.free(request_json);
+
+    std.debug.print("{s}\n", .{request_json});
 }

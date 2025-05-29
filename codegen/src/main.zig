@@ -531,6 +531,27 @@ const GenerationState = struct {
     // we will need some sort of "type decls needed" for recursive structures
     allocator: std.mem.Allocator,
     indent_level: u64,
+
+    fn indent(self: @This()) GenerationState {
+        var new_state = self.clone();
+        new_state.indent_level += 1;
+        return new_state;
+    }
+
+    fn deindent(self: @This()) GenerationState {
+        var new_state = self.clone();
+        new_state.indent_level = @max(0, new_state.indent_level - 1);
+        return new_state;
+    }
+
+    fn clone(self: @This()) GenerationState {
+        return GenerationState{
+            .type_stack = self.type_stack,
+            .file_state = self.file_state,
+            .allocator = self.allocator,
+            .indent_level = self.indent_level,
+        };
+    }
 };
 
 fn outputIndent(state: GenerationState, writer: anytype) !void {
@@ -600,23 +621,37 @@ fn generateOperation(allocator: std.mem.Allocator, operation: smithy.ShapeInfo, 
             .request, .apiRequest => "input",
             .response, .apiResponse => "output",
         };
-        const operation_field = @field(operation.shape.operation, operation_field_name);
+        const maybe_shape_id = @field(operation.shape.operation, operation_field_name);
 
-        if (operation_field == null or
-            (try shapeInfoForId(operation_field.?, state)).shape == .unit)
+        const generate_type_options = GenerateTypeOptions{
+            .key_case = type_info.key_case,
+            .end_structure = false,
+        };
+
+        if (maybe_shape_id == null or
+            (try shapeInfoForId(maybe_shape_id.?, state)).shape == .unit)
         {
-            std.debug.print("This happens: {s} {s}\n", .{ operation.name, operation_field.? });
             _ = try writer.write("struct {\n");
-            try generateMetadataFunction(operation_name, state, writer);
-        } else if (operation_field) |member| {
-            if (try generateTypeFor(member, writer, state, .{
-                .end_structure = false,
-                .key_case = type_info.key_case,
-            })) unreachable; // we expect only structs here
+        } else if (maybe_shape_id) |shape_id| {
+            if (try generateTypeFor(shape_id, writer, state, generate_type_options)) unreachable; // we expect only structs here
             _ = try writer.write("\n");
-            try generateMetadataFunction(operation_name, state, writer);
+
+            switch (type_info.type) {
+                .request => {
+                    var new_state = state.clone();
+                    new_state.indent_level = 0;
+
+                    try generateToJsonFunction(shape_id, writer.any(), new_state, generate_type_options.keyCase(.pascal));
+
+                    try writer.writeAll("\n");
+                },
+                else => {},
+            }
         }
-        _ = try writer.write(";\n\n");
+
+        try generateMetadataFunction(operation_name, state, writer, generate_type_options);
+
+        _ = try writer.write("};\n\n");
     }
 
     try writer.print("pub const {s}: struct ", .{operation_name});
@@ -658,7 +693,7 @@ fn generateOperation(allocator: std.mem.Allocator, operation: smithy.ShapeInfo, 
     _ = try writer.write("} = .{};\n");
 }
 
-fn generateMetadataFunction(operation_name: []const u8, state: GenerationState, writer: anytype) !void {
+fn generateMetadataFunction(operation_name: []const u8, state: GenerationState, writer: anytype, options: GenerateTypeOptions) !void {
     // TODO: Shove these lines in here, and also the else portion
     // pub fn metaInfo(self: @This()) struct { service: @TypeOf(sts), action: @TypeOf(sts.get_caller_identity) } {
     //     return .{ .service = sts, .action = sts.get_caller_identity };
@@ -679,7 +714,348 @@ fn generateMetadataFunction(operation_name: []const u8, state: GenerationState, 
     try outputIndent(child_state, writer);
     _ = try writer.write("}\n");
     try outputIndent(state, writer);
-    try writer.writeByte('}');
+
+    if (options.end_structure) {
+        try writer.writeByte('}');
+    }
+}
+
+const Shape = @FieldType(smithy.ShapeInfo, "shape");
+
+const JsonMember = struct {
+    field_name: []const u8,
+    json_key: []const u8,
+    target: []const u8,
+    shape: Shape,
+};
+
+fn getJsonMembers(allocator: std.mem.Allocator, shape: Shape, state: GenerationState) !std.ArrayListUnmanaged(JsonMember) {
+    var json_members = std.ArrayListUnmanaged(JsonMember){};
+
+    for (shape.structure.members) |member| {
+        var found_name_trait = false;
+
+        for (member.traits) |trait| {
+            if (found_name_trait) {
+                break;
+            }
+
+            switch (trait) {
+                .json_name => |key| {
+                    found_name_trait = true;
+                    try json_members.append(allocator, .{
+                        .field_name = try constantName(allocator, member.name, .snake),
+                        .json_key = key,
+                        .target = member.target,
+                        .shape = (try shapeInfoForId(member.target, state)).shape,
+                    });
+                },
+                else => {},
+            }
+        }
+    }
+
+    return json_members;
+}
+
+fn generateToJsonFunction(shape_id: []const u8, writer: std.io.AnyWriter, state: GenerationState, comptime options: GenerateTypeOptions) !void {
+    _ = options;
+    const allocator = state.allocator;
+
+    const shape_info = try shapeInfoForId(shape_id, state);
+    const shape = shape_info.shape;
+
+    var json_members = try getJsonMembers(allocator, shape, state);
+    defer json_members.deinit(allocator);
+
+    if (json_members.items.len > 0) {
+        try writer.writeAll("/// Allocator should be from an Arena\n");
+        try writer.writeAll("pub fn toJson(self: @This(), allocator: std.mem.Allocator) !std.json.Value {\n");
+        try writer.writeAll("var object_map = std.json.ObjectMap.init(allocator);\n");
+
+        for (json_members.items) |member| {
+            const member_value = try getMemberValueBlock(allocator, "self", member);
+            defer allocator.free(member_value);
+
+            try writer.print("try object_map.put(\"{s}\", ", .{member.json_key});
+            try memberToJson(
+                member.target,
+                member.field_name,
+                member_value,
+                state.indent(),
+                writer,
+            );
+            try writer.writeAll(");\n");
+        }
+
+        try writer.writeAll("return .{ .object = object_map, };\n");
+        try writer.writeAll("}\n");
+    }
+}
+
+fn getShapeTraits(shape: Shape) []smithy.Trait {
+    return switch (shape) {
+        .@"enum" => |s| s.traits,
+        .bigDecimal,
+        .bigInteger,
+        .blob,
+        .boolean,
+        .byte,
+        .document,
+        .double,
+        .float,
+        .integer,
+        .long,
+        .member,
+        .short,
+        .string,
+        .timestamp,
+        .unit,
+        => |s| s.traits,
+        .list => |s| s.traits,
+        .map => |s| s.traits,
+        .set => |s| s.traits,
+        .structure => |s| s.traits,
+        .uniontype => |s| s.traits,
+        else => std.debug.panic("Unexpected shape type: {}", .{shape}),
+    };
+}
+
+fn shapeIsLeaf(shape: Shape) bool {
+    return switch (shape) {
+        .@"enum",
+        .bigDecimal,
+        .bigInteger,
+        .blob,
+        .boolean,
+        .byte,
+        .document,
+        .double,
+        .float,
+        .integer,
+        .long,
+        .short,
+        .string,
+        .timestamp,
+        => true,
+        else => false,
+    };
+}
+
+fn shapeIsOptional(shape: Shape) bool {
+    const traits = getShapeTraits(shape);
+
+    for (traits) |t| {
+        if (t == .required) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+fn getShapeJsonValueType(shape: Shape) []const u8 {
+    return switch (shape) {
+        .string, .@"enum", .blob, .document, .timestamp => ".string",
+        .boolean => ".bool",
+        .integer, .bigInteger, .short, .long => ".integer",
+        .float, .double, .bigDecimal => ".float",
+        else => std.debug.panic("Unexpected shape: {}", .{shape}),
+    };
+}
+
+fn getMemberValueBlock(allocator: std.mem.Allocator, source: []const u8, member: JsonMember) ![]const u8 {
+    const member_value = try std.fmt.allocPrint(allocator, "@field({s}, \"{s}\")", .{ source, member.field_name });
+    defer allocator.free(member_value);
+
+    const member_value_name = try case.allocTo(allocator, .snake, member_value);
+    defer allocator.free(member_value_name);
+
+    var output_block = std.ArrayListUnmanaged(u8){};
+    var writer = output_block.writer(allocator);
+
+    if (shapeIsLeaf(member.shape)) {
+        const json_value_type = getShapeJsonValueType(member.shape);
+
+        if (shapeIsOptional(member.shape)) {
+            try writer.print("if ({s}) |{s}|", .{ member_value, member_value_name });
+            try writer.writeAll(".{");
+            try writer.writeAll(json_value_type);
+            try writer.print(" = {s}", .{member_value_name});
+            try writer.writeAll("} else .{ .null = undefined }");
+        } else {
+            try writer.writeAll(".{");
+            try writer.writeAll(json_value_type);
+            try writer.print(" = {s}", .{member_value});
+            try writer.writeAll("}");
+        }
+    } else {
+        try writer.writeAll(member_value);
+    }
+
+    return output_block.toOwnedSlice(allocator);
+}
+
+fn memberToJson(shape_id: []const u8, name: []const u8, value: []const u8, state: GenerationState, writer: std.io.AnyWriter) !void {
+    const shape_info = try shapeInfoForId(shape_id, state);
+    const shape = shape_info.shape;
+    const allocator = state.allocator;
+
+    switch (shape) {
+        .structure => {
+            const structure_name = try std.fmt.allocPrint(state.allocator, "{s}_structure_{d}", .{ name, state.indent_level });
+            defer state.allocator.free(structure_name);
+
+            const blk_name = try std.fmt.allocPrint(state.allocator, "{s}_blk", .{structure_name});
+            defer state.allocator.free(blk_name);
+
+            var json_members = try getJsonMembers(state.allocator, shape, state);
+            defer json_members.deinit(state.allocator);
+
+            try writer.writeAll(blk_name);
+            try writer.writeAll(": {\n");
+
+            if (json_members.items.len > 0) {
+                try writer.print("var {s} = std.json.ObjectMap.init(allocator);\n", .{structure_name});
+
+                for (json_members.items) |member| {
+                    const member_value = try getMemberValueBlock(allocator, value, member);
+                    defer allocator.free(member_value);
+
+                    try writer.print("try {s}.put(\"{s}\", ", .{ structure_name, member.json_key });
+                    try memberToJson(
+                        member.target,
+                        member.field_name,
+                        member_value,
+                        state.indent(),
+                        writer,
+                    );
+                    try writer.writeAll(");\n");
+                }
+
+                try writer.print("break :{s} ", .{blk_name});
+                try writer.writeAll(".{ .object = ");
+                try writer.writeAll(structure_name);
+                try writer.writeAll("};");
+            } else {
+                try writer.print("break :{s} ", .{blk_name});
+                try writer.writeAll(".{ .null = undefined };");
+            }
+
+            try writer.writeAll("},\n");
+        },
+        .uniontype => std.debug.panic("Uniontype not implemented", .{}),
+        .timestamp => {
+            try writer.writeAll("try std.json.Value.jsonParse(allocator, ");
+            try writer.writeAll(value);
+            try writer.writeAll(", .{})");
+        },
+        .list => |l| {
+            const list_name = try std.fmt.allocPrint(state.allocator, "{s}_list_{d}", .{ name, state.indent_level });
+            defer state.allocator.free(list_name);
+
+            const list_value_name = try std.fmt.allocPrint(allocator, "{s}_value", .{list_name});
+            defer allocator.free(list_value_name);
+
+            const blk_name = try std.fmt.allocPrint(state.allocator, "{s}_blk", .{list_name});
+            defer state.allocator.free(blk_name);
+
+            try writer.writeAll(blk_name);
+            try writer.writeAll(": {\n");
+            {
+                try writer.print("var {s} = std.json.Array.init(allocator);\n", .{list_name});
+
+                try writer.print("for ({s}) |{s}|", .{ value, list_value_name });
+                try writer.writeAll("{\n");
+                try writer.print("try {s}.append(", .{list_name});
+                try memberToJson(l.member_target, "value", list_value_name, state, writer);
+                try writer.writeAll(");");
+                try writer.writeAll("}\n");
+
+                try writer.print("break :{s} {s};", .{ blk_name, list_name });
+            }
+            try writer.writeAll("},\n");
+        },
+        .set => std.debug.panic("Set not implemented", .{}),
+        .map => {
+            const map_name = try std.fmt.allocPrint(state.allocator, "{s}_object_map_{d}", .{ name, state.indent_level });
+            defer state.allocator.free(map_name);
+
+            const blk_name = try std.fmt.allocPrint(state.allocator, "{s}_blk", .{map_name});
+            defer state.allocator.free(blk_name);
+
+            try writer.writeAll(blk_name);
+            try writer.writeAll(": {\n");
+            {
+                try writer.print("var {s} = std.json.ObjectMap.init(allocator);\n", .{map_name});
+
+                try writer.print("for ({s}) |kvp|", .{value});
+                try writer.writeAll("{\n");
+                try writer.print("try {s}.put(kvp.key, kvp.value);\n", .{map_name});
+                try writer.writeAll("}\n");
+
+                try writer.print("break :{s} {s};", .{ blk_name, map_name });
+            }
+            try writer.writeAll("},\n");
+        },
+        .string => {
+            try writer.writeAll("\n// string\n");
+            try writer.writeAll(value);
+        },
+        .@"enum" => {
+            try writer.writeAll("\n// enum\n");
+            try writer.writeAll(value);
+        },
+        .document => {
+            try writer.writeAll("\n// document\n");
+            try writer.writeAll(value);
+        },
+        .blob => {
+            try writer.writeAll("\n// blob\n");
+            try writer.writeAll(value);
+        },
+        .boolean => {
+            try writer.writeAll("\n// boolean\n");
+            try writer.writeAll(value);
+        },
+        .float => {
+            try writer.writeAll("\n// float\n");
+            try writer.writeAll(value);
+        },
+        .integer => {
+            try writer.writeAll("\n// integer\n");
+            try writer.writeAll(value);
+        },
+        .long => {
+            try writer.writeAll("\n// long\n");
+            try writer.writeAll(value);
+        },
+        .double => {
+            try writer.writeAll("\n// double\n");
+            try writer.writeAll(value);
+        },
+        .bigDecimal => {
+            try writer.writeAll("\n// bigDecimal\n");
+            try writer.writeAll(value);
+        },
+        .bigInteger => {
+            try writer.writeAll("\n// bigInteger\n");
+            try writer.writeAll(value);
+        },
+        .unit => {
+            try writer.writeAll("\n// unit\n");
+            try writer.writeAll(value);
+        },
+        .byte => {
+            try writer.writeAll("\n// byte\n");
+            try writer.writeAll(value);
+        },
+        .short => {
+            try writer.writeAll("\n// short\n");
+            try writer.writeAll(value);
+        },
+        else => std.debug.panic("Unexpected shape type: {}", .{shape}),
+    }
 }
 
 fn getErrorName(err_name: []const u8) []const u8 {
@@ -762,6 +1138,13 @@ const GenerateTypeOptions = struct {
             .key_case = self.key_case,
         };
     }
+
+    pub fn keyCase(self: @This(), value: case.Case) GenerateTypeOptions {
+        return .{
+            .end_structure = self.end_structure,
+            .key_case = value,
+        };
+    }
 };
 
 /// return type is anyerror!void as this is a recursive function, so the compiler cannot properly infer error types
@@ -833,23 +1216,20 @@ fn generateTypeFor(shape_id: []const u8, writer: anytype, state: GenerationState
         },
         // Document is unstructured data, so bag of bytes it is
         // https://smithy.io/2.0/spec/simple-types.html#document
-        .document => |s| try generateSimpleTypeFor(s, "[]const u8", writer),
-        .string => |s| try generateSimpleTypeFor(s, "[]const u8", writer),
+        .string, .@"enum", .document, .blob => try generateSimpleTypeFor({}, "[]const u8", writer),
         .unit => |s| try generateSimpleTypeFor(s, "struct {}", writer), // Would be better as void, but doing so creates inconsistency we don't want clients to have to deal with
-        .@"enum" => |s| try generateSimpleTypeFor(s, "[]const u8", writer), // This should be closer to uniontype, but the generated code will look ugly, and Smithy 2.0 requires that enums are open (clients accept unspecified values). So string is the best analog
         .integer => |s| try generateSimpleTypeFor(s, "i64", writer),
-        .list => {
+        .list => |s| {
             _ = try writer.write("[]");
             // The serializer will have to deal with the idea we might be an array
-            return try generateTypeFor(shape.list.member_target, writer, state, options.endStructure(true));
+            return try generateTypeFor(s.member_target, writer, state, options.endStructure(true));
         },
-        .set => {
+        .set => |s| {
             _ = try writer.write("[]");
             // The serializer will have to deal with the idea we might be an array
-            return try generateTypeFor(shape.set.member_target, writer, state, options.endStructure(true));
+            return try generateTypeFor(s.member_target, writer, state, options.endStructure(true));
         },
         .timestamp => |s| try generateSimpleTypeFor(s, "date.Timestamp", writer),
-        .blob => |s| try generateSimpleTypeFor(s, "[]const u8", writer),
         .boolean => |s| try generateSimpleTypeFor(s, "bool", writer),
         .double => |s| try generateSimpleTypeFor(s, "f64", writer),
         .float => |s| try generateSimpleTypeFor(s, "f32", writer),
