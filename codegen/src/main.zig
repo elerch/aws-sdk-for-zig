@@ -844,10 +844,10 @@ fn shapeIsLeaf(shape: Shape) bool {
     };
 }
 
-fn shapeIsOptional(member: smithy.TypeMember) bool {
+fn shapeIsOptional(traits: []smithy.Trait) bool {
     var optional = true;
 
-    for (member.traits) |t| {
+    for (traits) |t| {
         if (t == .required) {
             optional = false;
             break;
@@ -880,14 +880,14 @@ fn getMemberValueBlock(allocator: std.mem.Allocator, source: []const u8, member:
     if (shapeIsLeaf(member.shape_info.shape)) {
         const json_value_type = getShapeJsonValueType(member.shape_info.shape);
 
-        if (shapeIsOptional(member.type_member)) {
+        if (shapeIsOptional(member.type_member.traits)) {
             try writer.print("if ({s}) |{s}|", .{ member_value, member_value_name });
-            try writer.writeAll(".{");
+            try writer.writeAll("std.json.Value{");
             try writer.writeAll(json_value_type);
             try writer.print(" = {s}", .{member_value_name});
             try writer.writeAll("} else .{ .null = undefined }");
         } else {
-            try writer.writeAll(".{");
+            try writer.writeAll("std.json.Value{");
             try writer.writeAll(json_value_type);
             try writer.print(" = {s}", .{member_value});
             try writer.writeAll("}");
@@ -980,9 +980,33 @@ fn memberToJson(shape_id: []const u8, name: []const u8, value: []const u8, state
             try writer.writeAll("},\n");
         },
         .set => std.debug.panic("Set not implemented", .{}),
-        .map => {
+        .map => |m| {
             const map_name = try std.fmt.allocPrint(state.allocator, "{s}_object_map_{d}", .{ name, state.indent_level });
             defer state.allocator.free(map_name);
+
+            const map_value_capture = try std.fmt.allocPrint(allocator, "{s}_kvp", .{map_name});
+            defer allocator.free(map_value_capture);
+
+            const map_value_capture_key = try std.fmt.allocPrint(allocator, "{s}.key", .{map_value_capture});
+            defer allocator.free(map_value_capture_key);
+
+            const value_name = try std.fmt.allocPrint(allocator, "{s}_value", .{map_value_capture});
+            defer allocator.free(value_name);
+
+            const map_value_block = try getMemberValueBlock(allocator, map_value_capture, .{
+                .field_name = "value",
+                .json_key = undefined,
+                .shape_info = try shapeInfoForId(m.value, state),
+                .target = m.value,
+                .type_member = .{
+                    .name = undefined,
+                    .target = undefined,
+                    .traits = @constCast(&[_]smithy.Trait{
+                        smithy.Trait{ .required = .{} },
+                    }),
+                },
+            });
+            defer allocator.free(map_value_block);
 
             const blk_name = try std.fmt.allocPrint(state.allocator, "{s}_blk", .{map_name});
             defer state.allocator.free(blk_name);
@@ -992,12 +1016,20 @@ fn memberToJson(shape_id: []const u8, name: []const u8, value: []const u8, state
             {
                 try writer.print("var {s} = std.json.ObjectMap.init(allocator);\n", .{map_name});
 
-                try writer.print("for ({s}) |kvp|", .{value});
+                try writer.print("for ({s}) |{s}|", .{ value, map_value_capture });
                 try writer.writeAll("{\n");
-                try writer.print("try {s}.put(kvp.key, kvp.value);\n", .{map_name});
+                try writer.print("const {s} = {s};\n", .{ value_name, map_value_block });
+                try writer.print("try {s}.put(\n", .{map_name});
+                try memberToJson(m.key, "key", map_value_capture_key, state.indent(), writer);
+                try writer.writeAll(", ");
+                try memberToJson(m.value, "value", value_name, state.indent(), writer);
+                try writer.writeAll(");\n");
                 try writer.writeAll("}\n");
 
-                try writer.print("break :{s} {s};", .{ blk_name, map_name });
+                try writer.print("break :{s}", .{blk_name});
+                try writer.writeAll(".{ .object = ");
+                try writer.writeAll(map_name);
+                try writer.writeAll("};\n");
             }
             try writer.writeAll("},\n");
         },
@@ -1270,19 +1302,12 @@ fn generateMapTypeFor(map: anytype, writer: anytype, state: GenerationState, com
     child_state.indent_level += 1;
 
     _ = try writer.write("key: ");
-    try writeOptional(map.traits, writer, null);
-
     _ = try generateTypeFor(map.key, writer, child_state, options.endStructure(true));
-
-    try writeOptional(map.traits, writer, " = null");
     _ = try writer.write(",\n");
 
     _ = try writer.write("value: ");
-    try writeOptional(map.traits, writer, null);
-
     _ = try generateTypeFor(map.value, writer, child_state, options.endStructure(true));
 
-    try writeOptional(map.traits, writer, " = null");
     _ = try writer.write(",\n");
     _ = try writer.write("}");
 }

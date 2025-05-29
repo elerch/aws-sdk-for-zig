@@ -2643,5 +2643,5 @@ test "toJson: map" {
     const request_json = try std.json.stringifyAlloc(std.testing.allocator, request_json_value, .{});
     defer std.testing.allocator.free(request_json);
 
-    try testing.expectEqualStrings("{\"arn\":\"1234\"}", request_json);
+    try testing.expectEqualStrings("{\"arn\":\"1234\",\"tags\":{\"foo\":\"bar\"}}", request_json);
 }

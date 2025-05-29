@@ -55,12 +55,11 @@ pub fn serializeMapAsObject(map: anytype, options: anytype, out_stream: anytype)
         try out_stream.writeByte('\n');
 
     for (map, 0..) |tag, i| {
-        if (tag.key == null or tag.value == null) continue;
         // TODO: Deal with escaping and general "json.stringify" the values...
         if (child_options.whitespace) |ws|
             try ws.outputIndent(out_stream);
         try out_stream.writeByte('"');
-        try jsonEscape(tag.key.?, child_options, out_stream);
+        try jsonEscape(tag.key, child_options, out_stream);
         _ = try out_stream.write("\":");
         if (child_options.whitespace) |ws| {
             if (ws.separator) {
@@ -68,7 +67,7 @@ pub fn serializeMapAsObject(map: anytype, options: anytype, out_stream: anytype)
             }
         }
         try out_stream.writeByte('"');
-        try jsonEscape(tag.value.?, child_options, out_stream);
+        try jsonEscape(tag.value, child_options, out_stream);
         try out_stream.writeByte('"');
         if (i < map.len - 1) {
             try out_stream.writeByte(',');
