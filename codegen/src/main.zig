@@ -98,7 +98,7 @@ fn processDirectories(models_dir: std.fs.Dir, output_dir: std.fs.Dir, parent_pro
     try thread_pool.init(.{ .allocator = allocator });
     defer thread_pool.deinit();
 
-    var calculated_manifest = try calculateDigests(models_dir, output_dir, &thread_pool);
+    const count, var calculated_manifest = try calculateDigests(models_dir, output_dir, &thread_pool);
     const output_stored_manifest = output_dir.readFileAlloc(allocator, "output_manifest.json", std.math.maxInt(usize)) catch null;
     if (output_stored_manifest) |o| {
         // we have a stored manifest. Parse it and compare to our calculations
@@ -119,7 +119,7 @@ fn processDirectories(models_dir: std.fs.Dir, output_dir: std.fs.Dir, parent_pro
     const manifest = manifest_file.writer();
     var mi = models_dir.iterate();
 
-    const generating_models_progress = parent_progress.start("generating models", 400);
+    const generating_models_progress = parent_progress.start("generating models", count);
     defer generating_models_progress.end();
 
     while (try mi.next()) |e| {
@@ -130,7 +130,7 @@ fn processDirectories(models_dir: std.fs.Dir, output_dir: std.fs.Dir, parent_pro
     }
     // re-calculate so we can store the manifest
     model_digest = calculated_manifest.model_dir_hash_digest;
-    calculated_manifest = try calculateDigests(models_dir, output_dir, &thread_pool);
+    _, calculated_manifest = try calculateDigests(models_dir, output_dir, &thread_pool);
     try output_dir.writeFile(.{ .sub_path = "output_manifest.json", .data = try std.json.stringifyAlloc(
         allocator,
         calculated_manifest,
@@ -139,13 +139,18 @@ fn processDirectories(models_dir: std.fs.Dir, output_dir: std.fs.Dir, parent_pro
 }
 
 var model_digest: ?[Hasher.hex_multihash_len]u8 = null;
-fn calculateDigests(models_dir: std.fs.Dir, output_dir: std.fs.Dir, thread_pool: *std.Thread.Pool) !OutputManifest {
+fn calculateDigests(models_dir: std.fs.Dir, output_dir: std.fs.Dir, thread_pool: *std.Thread.Pool) !struct { usize, OutputManifest } {
+    const Include = struct {
+        threadlocal var count: usize = 0;
+        pub fn include(entry: std.fs.Dir.Walker.Entry) bool {
+            const included = std.mem.endsWith(u8, entry.basename, ".json");
+            if (included) count += 1;
+            return included;
+        }
+    };
+
     const model_hash = if (model_digest) |m| m[0..Hasher.digest_len].* else try Hasher.computeDirectoryHash(thread_pool, models_dir, @constCast(&Hasher.ComputeDirectoryOptions{
-        .isIncluded = struct {
-            pub fn include(entry: std.fs.Dir.Walker.Entry) bool {
-                return std.mem.endsWith(u8, entry.basename, ".json");
-            }
-        }.include,
+        .isIncluded = Include.include,
         .isExcluded = struct {
             pub fn exclude(entry: std.fs.Dir.Walker.Entry) bool {
                 _ = entry;
@@ -172,8 +177,10 @@ fn calculateDigests(models_dir: std.fs.Dir, output_dir: std.fs.Dir, thread_pool:
     }));
     if (verbose) std.log.info("Output directory hash: {s}", .{Hasher.hexDigest(output_hash)});
     return .{
-        .model_dir_hash_digest = model_digest orelse Hasher.hexDigest(model_hash),
-        .output_dir_hash_digest = Hasher.hexDigest(output_hash),
+        Include.count, .{
+            .model_dir_hash_digest = model_digest orelse Hasher.hexDigest(model_hash),
+            .output_dir_hash_digest = Hasher.hexDigest(output_hash),
+        },
     };
 }
 fn processFile(file_name: []const u8, output_dir: std.fs.Dir, manifest: anytype) !void {
