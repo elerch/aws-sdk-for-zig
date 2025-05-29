@@ -726,7 +726,8 @@ const JsonMember = struct {
     field_name: []const u8,
     json_key: []const u8,
     target: []const u8,
-    shape: Shape,
+    type_member: smithy.TypeMember,
+    shape_info: smithy.ShapeInfo,
 };
 
 fn getJsonMembers(allocator: std.mem.Allocator, shape: Shape, state: GenerationState) !std.ArrayListUnmanaged(JsonMember) {
@@ -747,7 +748,8 @@ fn getJsonMembers(allocator: std.mem.Allocator, shape: Shape, state: GenerationS
                         .field_name = try constantName(allocator, member.name, .snake),
                         .json_key = key,
                         .target = member.target,
-                        .shape = (try shapeInfoForId(member.target, state)).shape,
+                        .type_member = member,
+                        .shape_info = try shapeInfoForId(member.target, state),
                     });
                 },
                 else => {},
@@ -842,16 +844,17 @@ fn shapeIsLeaf(shape: Shape) bool {
     };
 }
 
-fn shapeIsOptional(shape: Shape) bool {
-    const traits = getShapeTraits(shape);
+fn shapeIsOptional(member: smithy.TypeMember) bool {
+    var optional = true;
 
-    for (traits) |t| {
+    for (member.traits) |t| {
         if (t == .required) {
-            return false;
+            optional = false;
+            break;
         }
     }
 
-    return true;
+    return optional;
 }
 
 fn getShapeJsonValueType(shape: Shape) []const u8 {
@@ -874,10 +877,10 @@ fn getMemberValueBlock(allocator: std.mem.Allocator, source: []const u8, member:
     var output_block = std.ArrayListUnmanaged(u8){};
     var writer = output_block.writer(allocator);
 
-    if (shapeIsLeaf(member.shape)) {
-        const json_value_type = getShapeJsonValueType(member.shape);
+    if (shapeIsLeaf(member.shape_info.shape)) {
+        const json_value_type = getShapeJsonValueType(member.shape_info.shape);
 
-        if (shapeIsOptional(member.shape)) {
+        if (shapeIsOptional(member.type_member)) {
             try writer.print("if ({s}) |{s}|", .{ member_value, member_value_name });
             try writer.writeAll(".{");
             try writer.writeAll(json_value_type);

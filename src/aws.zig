@@ -2584,7 +2584,9 @@ test "test server timeout works" {
     std.log.debug("test complete", .{});
 }
 
-test "toJson" {
+const testing = std.testing;
+
+test "toJson: structure + enums" {
     const request = services.media_convert.PutPolicyRequest{
         .policy = .{
             .http_inputs = "foo",
@@ -2593,7 +2595,7 @@ test "toJson" {
         },
     };
 
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
 
     const request_json_value = try request.toJson(arena.allocator());
@@ -2601,5 +2603,45 @@ test "toJson" {
     const request_json = try std.json.stringifyAlloc(std.testing.allocator, request_json_value, .{});
     defer std.testing.allocator.free(request_json);
 
-    std.debug.print("{s}\n", .{request_json});
+    try testing.expectEqualStrings("{\"policy\":{\"httpInputs\":\"foo\",\"httpsInputs\":\"bar\",\"s3Inputs\":\"baz\"}}", request_json);
+}
+
+test "toJson: strings" {
+    const request = services.media_convert.AssociateCertificateRequest{
+        .arn = "1234",
+    };
+
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+
+    const request_json_value = try request.toJson(arena.allocator());
+
+    const request_json = try std.json.stringifyAlloc(std.testing.allocator, request_json_value, .{});
+    defer std.testing.allocator.free(request_json);
+
+    try testing.expectEqualStrings("{\"arn\":\"1234\"}", request_json);
+}
+
+test "toJson: map" {
+    var tags = [_]services.media_convert.MapOfStringKeyValue{
+        .{
+            .key = "foo",
+            .value = "bar",
+        },
+    };
+
+    const request = services.media_convert.TagResourceRequest{
+        .arn = "1234",
+        .tags = &tags,
+    };
+
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+
+    const request_json_value = try request.toJson(arena.allocator());
+
+    const request_json = try std.json.stringifyAlloc(std.testing.allocator, request_json_value, .{});
+    defer std.testing.allocator.free(request_json);
+
+    try testing.expectEqualStrings("{\"arn\":\"1234\"}", request_json);
 }
