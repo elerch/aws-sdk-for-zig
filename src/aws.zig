@@ -2645,3 +2645,25 @@ test "toJson: map" {
 
     try testing.expectEqualStrings("{\"arn\":\"1234\",\"tags\":{\"foo\":\"bar\"}}", request_json);
 }
+
+test "jsonStringify" {
+    var tags = [_]services.media_convert.MapOfStringKeyValue{
+        .{
+            .key = "foo",
+            .value = "bar",
+        },
+    };
+
+    const request = services.media_convert.TagResourceRequest{
+        .arn = "1234",
+        .tags = &tags,
+    };
+
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+
+    const request_json = try std.json.stringifyAlloc(std.testing.allocator, request, .{});
+    defer std.testing.allocator.free(request_json);
+
+    try testing.expectEqualStrings("{\"arn\":\"1234\",\"tags\":{\"foo\":\"bar\"}}", request_json);
+}

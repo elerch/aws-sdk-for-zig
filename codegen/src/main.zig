@@ -791,6 +791,14 @@ fn generateToJsonFunction(shape_id: []const u8, writer: std.io.AnyWriter, state:
         }
 
         try writer.writeAll("return .{ .object = object_map, };\n");
+        try writer.writeAll("}\n\n");
+
+        // json stringify function
+        try writer.writeAll("pub fn jsonStringify(self: @This(), jw: anytype) !void {\n");
+        try writer.writeAll("var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);\n");
+        try writer.writeAll("defer arena.deinit();\n");
+        try writer.writeAll("const json_value = try self.toJson(arena.allocator());\n");
+        try writer.writeAll("try jw.write(json_value);\n");
         try writer.writeAll("}\n");
     }
 }
