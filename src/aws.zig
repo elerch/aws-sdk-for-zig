@@ -234,7 +234,7 @@ pub fn Request(comptime request_action: anytype) type {
             defer buffer.deinit();
             if (Self.service_meta.aws_protocol == .rest_json_1) {
                 if (std.mem.eql(u8, "PUT", aws_request.method) or std.mem.eql(u8, "POST", aws_request.method)) {
-                    try json.stringify(request, .{ .whitespace = .{}, .emit_null = false, .exclude_fields = al.items }, buffer.writer());
+                    try std.json.stringify(request, .{ .whitespace = .indent_4 }, buffer.writer());
                 }
             }
             aws_request.body = buffer.items;
@@ -326,7 +326,7 @@ pub fn Request(comptime request_action: anytype) type {
             //       smithy spec, "A null value MAY be provided or omitted
             //       for a boxed member with no observable difference." But we're
             //       seeing a lot of differences here between spec and reality
-            try json.stringify(request, .{ .whitespace = .{} }, buffer.writer());
+            try std.json.stringify(request, .{ .whitespace = .indent_4 }, buffer.writer());
 
             var content_type: []const u8 = undefined;
             switch (Self.service_meta.aws_protocol) {
@@ -1149,9 +1149,9 @@ fn buildPath(
                         defer encoded_buffer.deinit();
                         const replacement_writer = replacement_buffer.writer();
                         // std.mem.replacementSize
-                        try json.stringify(
+                        try std.json.stringify(
                             @field(request, field.name),
-                            .{},
+                            .{ .whitespace = .indent_4 },
                             replacement_writer,
                         );
                         const trimmed_replacement_val = std.mem.trim(u8, replacement_buffer.items, "\"");
@@ -1266,7 +1266,7 @@ fn addBasicQueryArg(prefix: []const u8, key: []const u8, value: anytype, writer:
     _ = try writer.write("=");
     var encoding_writer = uriEncodingWriter(writer);
     var ignoring_writer = ignoringWriter(encoding_writer.writer(), '"');
-    try json.stringify(value, .{}, ignoring_writer.writer());
+    try std.json.stringify(value, .{}, ignoring_writer.writer());
     return true;
 }
 pub fn uriEncodingWriter(child_stream: anytype) UriEncodingWriter(@TypeOf(child_stream)) {
@@ -1385,7 +1385,7 @@ test "custom serialization for map objects" {
     tags.appendAssumeCapacity(.{ .key = "Foo", .value = "Bar" });
     tags.appendAssumeCapacity(.{ .key = "Baz", .value = "Qux" });
     const req = services.lambda.TagResourceRequest{ .resource = "hello", .tags = tags.items };
-    try json.stringify(req, .{ .whitespace = .{} }, buffer.writer());
+    try std.json.stringify(req, .{ .whitespace = .indent_4 }, buffer.writer());
     try std.testing.expectEqualStrings(
         \\{
         \\    "Resource": "hello",
@@ -1413,7 +1413,7 @@ test "proper serialization for kms" {
         .dry_run = false,
         .grant_tokens = &[_][]const u8{},
     };
-    try json.stringify(req, .{ .whitespace = .{} }, buffer.writer());
+    try std.json.stringify(req, .{ .whitespace = .indent_4 }, buffer.writer());
     try std.testing.expectEqualStrings(
         \\{
         \\    "KeyId": "42",
@@ -1436,7 +1436,7 @@ test "proper serialization for kms" {
         .dry_run = false,
         .grant_tokens = &[_][]const u8{},
     };
-    try json.stringify(req_null, .{ .whitespace = .{} }, buffer_null.writer());
+    try std.json.stringify(req_null, .{ .whitespace = .indent_4 }, buffer_null.writer());
     try std.testing.expectEqualStrings(
         \\{
         \\    "KeyId": "42",
@@ -1527,7 +1527,7 @@ test "basic json request serialization" {
     //       for a boxed member with no observable difference." But we're
     //       seeing a lot of differences here between spec and reality
     //
-    try json.stringify(request, .{ .whitespace = .{} }, buffer.writer());
+    try std.json.stringify(request, .{ .whitespace = .indent_4 }, buffer.writer());
     try std.testing.expectEqualStrings(
         \\{
         \\    "ExclusiveStartTableName": null,
@@ -2018,7 +2018,7 @@ test "json_1_0_query_with_input: dynamodb listTables runtime" {
     });
     defer test_harness.deinit();
     const options = try test_harness.start();
-    const dynamo_db = (Services(.{.dynamo_db}){}).dynamo_db;
+    const dynamo_db = services.dynamo_db;
     const call = try test_harness.client.call(dynamo_db.list_tables.Request{
         .limit = 1,
     }, options);

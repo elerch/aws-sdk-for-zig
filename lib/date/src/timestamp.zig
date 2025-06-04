@@ -10,18 +10,20 @@ pub const DateFormat = enum {
 pub const Timestamp = enum(zeit.Nanoseconds) {
     _,
 
-    pub fn jsonStringify(value: Timestamp, options: json.StringifyOptions, out_stream: anytype) !void {
-        _ = options;
-
-        const instant = try zeit.instant(.{
+    pub fn jsonStringify(value: Timestamp, jw: anytype) !void {
+        const instant = zeit.instant(.{
             .source = .{
                 .unix_nano = @intFromEnum(value),
             },
-        });
+        }) catch std.debug.panic("Failed to parse timestamp to instant: {d}", .{value});
 
-        try out_stream.writeAll("\"");
-        try instant.time().gofmt(out_stream, "Mon, 02 Jan 2006 15:04:05 GMT");
-        try out_stream.writeAll("\"");
+        const fmt = "Mon, 02 Jan 2006 15:04:05 GMT";
+        var buf = std.mem.zeroes([fmt.len]u8);
+
+        var fbs = std.io.fixedBufferStream(&buf);
+        instant.time().gofmt(fbs.writer(), fmt) catch std.debug.panic("Failed to format instant: {d}", .{instant.timestamp});
+
+        try jw.write(&buf);
     }
 
     pub fn parse(val: []const u8) !Timestamp {
