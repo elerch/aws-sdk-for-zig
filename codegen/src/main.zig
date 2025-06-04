@@ -1653,34 +1653,6 @@ fn generateComplexTypeFor(shape_id: []const u8, members: []smithy.TypeMember, ty
     _ = try writer.write("return @field(mappings, field_name);\n");
     try outputIndent(child_state, writer);
     _ = try writer.write("}\n");
-    try writeStringify(child_state, map_fields.items, writer);
-}
-
-fn writeStringify(state: GenerationState, fields: [][]const u8, writer: anytype) !void {
-    if (fields.len > 0) {
-        // pub fn jsonStringifyField(self: @This(), comptime field_name: []const u8, options: anytype, out_stream: anytype) !bool {
-        //     if (std.mem.eql(u8, "tags", field_name))
-        //         return try serializeMap(self.tags, self.jsonFieldNameFor("tags"), options, out_stream);
-        //     return false;
-        // }
-        var child_state = state;
-        child_state.indent_level += 1;
-        try writer.writeByte('\n');
-        try outputIndent(state, writer);
-        _ = try writer.write("pub fn jsonStringifyField(self: @This(), comptime field_name: []const u8, options: anytype, out_stream: anytype) !bool {\n");
-        var return_state = child_state;
-        return_state.indent_level += 1;
-        for (fields) |field| {
-            try outputIndent(child_state, writer);
-            try writer.print("if (std.mem.eql(u8, \"{s}\", field_name))\n", .{field});
-            try outputIndent(return_state, writer);
-            try writer.print("return try serializeMap(self.{s}, self.fieldNameFor(\"{s}\"), options, out_stream);\n", .{ field, field });
-        }
-        try outputIndent(child_state, writer);
-        _ = try writer.write("return false;\n");
-        try outputIndent(state, writer);
-        _ = try writer.write("}\n");
-    }
 }
 
 fn writeMappings(state: GenerationState, @"pub": []const u8, mapping_name: []const u8, mappings: anytype, force_output: bool, writer: anytype) !void {
