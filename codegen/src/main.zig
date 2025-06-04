@@ -853,7 +853,7 @@ fn generateToJsonFunction(shape_id: []const u8, writer: std.io.AnyWriter, state:
                 defer allocator.free(member_value);
 
                 try writer.print("try object_map.put(\"{s}\", ", .{member.json_key});
-                try memberToJson(
+                try writeMemberJson(
                     .{
                         .shape_id = member.target,
                         .field_name = member.field_name,
@@ -999,7 +999,7 @@ fn getMemberValueBlock(allocator: std.mem.Allocator, source: []const u8, member:
     return output_block.toOwnedSlice(allocator);
 }
 
-const MemberToJsonParams = struct {
+const WriteMemberJsonParams = struct {
     shape_id: []const u8,
     field_name: []const u8,
     field_value: []const u8,
@@ -1007,7 +1007,62 @@ const MemberToJsonParams = struct {
     member: smithy.TypeMember,
 };
 
-fn memberToJson(params: MemberToJsonParams, writer: std.io.AnyWriter) !void {
+fn writeStructureMemberJson(params: WriteMemberJsonParams, writer: std.io.AnyWriter) !void {
+    const shape_type = "structure";
+    const allocator = params.state.allocator;
+    const state = params.state;
+
+    const shape_info = try shapeInfoForId(params.shape_id, state.file_state.shapes);
+    const shape = shape_info.shape;
+
+    const structure_name = try std.fmt.allocPrint(params.state.allocator, "{s}_{s}_{d}", .{ params.field_name, shape_type, state.indent_level });
+    defer params.state.allocator.free(structure_name);
+
+    try writer.print("\n// start {s}: {s}\n", .{ shape_type, structure_name });
+    defer writer.print("// end {s}: {s}\n", .{ shape_type, structure_name }) catch std.debug.panic("Unreachable", .{});
+
+    const blk_name = try std.fmt.allocPrint(allocator, "{s}_blk", .{structure_name});
+    defer allocator.free(blk_name);
+
+    if (try getJsonMembers(allocator, shape, state)) |json_members| {
+        try writer.writeAll(blk_name);
+        try writer.writeAll(": {\n");
+
+        if (json_members.items.len > 0) {
+            try writer.print("var {s} = std.json.ObjectMap.init(allocator);\n", .{structure_name});
+
+            for (json_members.items) |member| {
+                const member_value = try getMemberValueBlock(allocator, params.field_value, member);
+                defer allocator.free(member_value);
+
+                try writer.print("try {s}.put(\"{s}\", ", .{ structure_name, member.json_key });
+                try writeMemberJson(
+                    .{
+                        .shape_id = member.target,
+                        .field_name = member.field_name,
+                        .field_value = member_value,
+                        .state = state.indent(),
+                        .member = member.type_member,
+                    },
+                    writer,
+                );
+                try writer.writeAll(");\n");
+            }
+
+            try writer.print("break :{s} ", .{blk_name});
+            try writer.writeAll(".{ .object = ");
+            try writer.writeAll(structure_name);
+            try writer.writeAll("};");
+        } else {
+            try writer.print("break :{s} ", .{blk_name});
+            try writer.writeAll(".null;");
+        }
+
+        try writer.writeAll("}\n");
+    }
+}
+
+fn writeMemberJson(params: WriteMemberJsonParams, writer: std.io.AnyWriter) anyerror!void {
     const shape_id = params.shape_id;
     const state = params.state;
     const value = params.field_value;
@@ -1026,55 +1081,7 @@ fn memberToJson(params: MemberToJsonParams, writer: std.io.AnyWriter) !void {
     defer state.popFromTypeStack();
 
     switch (shape) {
-        .structure, .uniontype => {
-            const shape_type = "structure";
-
-            const structure_name = try std.fmt.allocPrint(state.allocator, "{s}_{s}_{d}", .{ name, shape_type, state.indent_level });
-            defer state.allocator.free(structure_name);
-
-            try writer.print("\n// start {s}: {s}\n", .{ shape_type, structure_name });
-            defer writer.print("// end {s}: {s}\n", .{ shape_type, structure_name }) catch std.debug.panic("Unreachable", .{});
-
-            const blk_name = try std.fmt.allocPrint(state.allocator, "{s}_blk", .{structure_name});
-            defer state.allocator.free(blk_name);
-
-            if (try getJsonMembers(state.allocator, shape, state)) |json_members| {
-                try writer.writeAll(blk_name);
-                try writer.writeAll(": {\n");
-
-                if (json_members.items.len > 0) {
-                    try writer.print("var {s} = std.json.ObjectMap.init(allocator);\n", .{structure_name});
-
-                    for (json_members.items) |member| {
-                        const member_value = try getMemberValueBlock(allocator, value, member);
-                        defer allocator.free(member_value);
-
-                        try writer.print("try {s}.put(\"{s}\", ", .{ structure_name, member.json_key });
-                        try memberToJson(
-                            .{
-                                .shape_id = member.target,
-                                .field_name = member.field_name,
-                                .field_value = member_value,
-                                .state = state.indent(),
-                                .member = member.type_member,
-                            },
-                            writer,
-                        );
-                        try writer.writeAll(");\n");
-                    }
-
-                    try writer.print("break :{s} ", .{blk_name});
-                    try writer.writeAll(".{ .object = ");
-                    try writer.writeAll(structure_name);
-                    try writer.writeAll("};");
-                } else {
-                    try writer.print("break :{s} ", .{blk_name});
-                    try writer.writeAll(".null;");
-                }
-
-                try writer.writeAll("}\n");
-            }
-        },
+        .structure, .uniontype => try writeStructureMemberJson(params, writer),
         .timestamp => {
             try writer.writeAll("try std.json.Value.jsonParse(allocator, ");
             try writer.writeAll(value);
@@ -1216,7 +1223,7 @@ fn memberToJson(params: MemberToJsonParams, writer: std.io.AnyWriter) !void {
                 try writer.print("for ({s}) |{s}|", .{ map_value, map_value_capture });
                 try writer.writeAll("{\n");
                 try writer.print("const {s}: std.json.Value = ", .{value_name});
-                try memberToJson(.{
+                try writeMemberJson(.{
                     .shape_id = m.value,
                     .field_name = "value",
                     .field_value = map_value_block,
@@ -1225,7 +1232,7 @@ fn memberToJson(params: MemberToJsonParams, writer: std.io.AnyWriter) !void {
                 }, writer);
                 try writer.writeAll(";\n");
                 try writer.print("try {s}.put(\n", .{map_name});
-                try memberToJson(.{
+                try writeMemberJson(.{
                     .shape_id = m.key,
                     .field_name = "key",
                     .field_value = map_value_capture_key,
@@ -1233,7 +1240,7 @@ fn memberToJson(params: MemberToJsonParams, writer: std.io.AnyWriter) !void {
                     .member = key_member,
                 }, writer);
                 try writer.writeAll(", ");
-                try memberToJson(.{
+                try writeMemberJson(.{
                     .shape_id = m.value,
                     .field_name = "value",
                     .field_value = value_name,
