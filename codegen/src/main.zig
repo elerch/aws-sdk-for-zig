@@ -1019,13 +1019,6 @@ fn writeStructureMemberJson(params: WriteMemberJsonParams, writer: std.io.AnyWri
     }
 }
 
-fn writeTimestampJson(params: WriteMemberJsonParams, writer: std.io.AnyWriter) anyerror!void {
-    try writer.writeAll("\n// timestamp\n");
-    try writer.writeAll("try jw.write(");
-    try writer.writeAll(params.field_value);
-    try writer.writeAll(");\n");
-}
-
 fn writeListJson(list: ListShape, params: WriteMemberJsonParams, writer: std.io.AnyWriter) anyerror!void {
     const state = params.state;
     const allocator = state.allocator;
@@ -1039,14 +1032,8 @@ fn writeListJson(list: ListShape, params: WriteMemberJsonParams, writer: std.io.
     const list_each_value = try std.fmt.allocPrint(allocator, "{s}_value", .{list_name});
     defer allocator.free(list_each_value);
 
-    const list_value_name_local = try std.fmt.allocPrint(allocator, "{s}_local", .{list_each_value});
-    defer allocator.free(list_value_name_local);
-
-    const blk_name = try std.fmt.allocPrint(state.allocator, "{s}_blk", .{list_name});
-    defer state.allocator.free(blk_name);
-
-    const list_capture = try std.fmt.allocPrint(state.allocator, "{s}_capture", .{list_name});
-    defer state.allocator.free(list_capture);
+    const list_capture = try std.fmt.allocPrint(allocator, "{s}_capture", .{list_name});
+    defer allocator.free(list_capture);
 
     {
         const list_is_optional = shapeIsOptional(list.traits);
@@ -1091,8 +1078,8 @@ fn writeMapJson(map: MapShape, params: WriteMemberJsonParams, writer: std.io.Any
     const value = params.field_value;
     const allocator = state.allocator;
 
-    const map_name = try std.fmt.allocPrint(state.allocator, "{s}_object_map_{d}", .{ name, state.indent_level });
-    defer state.allocator.free(map_name);
+    const map_name = try std.fmt.allocPrint(allocator, "{s}_object_map_{d}", .{ name, state.indent_level });
+    defer allocator.free(map_name);
 
     try writer.print("\n// start map: {s}\n", .{map_name});
     defer writer.print("// end map: {s}\n", .{map_name}) catch std.debug.panic("Unreachable", .{});
@@ -1106,9 +1093,6 @@ fn writeMapJson(map: MapShape, params: WriteMemberJsonParams, writer: std.io.Any
     const map_capture_value = try std.fmt.allocPrint(allocator, "{s}.value", .{map_value_capture});
     defer allocator.free(map_capture_value);
 
-    const value_name = try std.fmt.allocPrint(allocator, "{s}_value", .{map_value_capture});
-    defer allocator.free(value_name);
-
     const value_shape_info = try shapeInfoForId(map.value, state.file_state.shapes);
 
     const value_member = smithy.TypeMember{
@@ -1116,18 +1100,6 @@ fn writeMapJson(map: MapShape, params: WriteMemberJsonParams, writer: std.io.Any
         .target = map.value,
         .traits = getShapeTraits(value_shape_info.shape),
     };
-
-    const map_value_block = try getMemberValueJson(allocator, map_value_capture, .{
-        .field_name = "value",
-        .json_key = undefined,
-        .shape_info = try shapeInfoForId(map.value, state.file_state.shapes),
-        .target = map.value,
-        .type_member = value_member,
-    });
-    defer allocator.free(map_value_block);
-
-    const blk_name = try std.fmt.allocPrint(state.allocator, "{s}_blk", .{map_name});
-    defer state.allocator.free(blk_name);
 
     const map_capture = try std.fmt.allocPrint(state.allocator, "{s}_capture", .{map_name});
 
@@ -1196,9 +1168,9 @@ fn writeMemberJson(params: WriteMemberJsonParams, writer: std.io.AnyWriter) anye
 
     switch (shape) {
         .structure, .uniontype => try writeStructureMemberJson(params, writer),
-        .timestamp => try writeTimestampJson(params, writer),
         .list => |l| try writeListJson(l, params, writer),
         .map => |m| try writeMapJson(m, params, writer),
+        .timestamp => try writeScalarJson("timestamp", params, writer),
         .string => try writeScalarJson("string", params, writer),
         .@"enum" => try writeScalarJson("enum", params, writer),
         .document => try writeScalarJson("document", params, writer),
