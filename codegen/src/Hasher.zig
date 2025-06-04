@@ -20,7 +20,6 @@ const multihash_len = 1 + 1 + Hash.digest_length;
 pub const hex_multihash_len = 2 * multihash_len;
 pub const digest_len = Hash.digest_length;
 
-const MultiHashHexDigest = [hex_multihash_len]u8;
 const MultihashFunction = enum(u16) {
     identity = 0x00,
     sha1 = 0x11,
@@ -70,7 +69,7 @@ pub fn hex64(x: u64) [16]u8 {
     var result: [16]u8 = undefined;
     var i: usize = 0;
     while (i < 8) : (i += 1) {
-        const byte = @as(u8, @truncate(x >> @as(u6, @intCast(8 * i))));
+        const byte: u8 = @truncate(x >> @as(u6, @intCast(8 * i)));
         result[i * 2 + 0] = hex_charset[byte >> 4];
         result[i * 2 + 1] = hex_charset[byte & 15];
     }

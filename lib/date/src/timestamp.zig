@@ -1,6 +1,5 @@
 const std = @import("std");
 const zeit = @import("zeit");
-const json = @import("json");
 
 pub const DateFormat = enum {
     rfc1123,

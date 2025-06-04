@@ -1,6 +1,5 @@
 //! This module provides base data structures for aws http requests
 const std = @import("std");
-const log = std.log.scoped(.aws_base);
 pub const Request = struct {
     path: []const u8 = "/",
     query: []const u8 = "",

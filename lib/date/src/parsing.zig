@@ -61,7 +61,6 @@ pub fn parseIso8601ToTimestamp(data: []const u8) !i64 {
     return try dateTimeToTimestamp(try parseIso8601ToDateTime(data));
 }
 
-const IsoParsingState = enum { Start, Year, Month, Day, Hour, Minute, Second, Millisecond, End };
 /// Converts a string to a timestamp value. May not handle dates before the
 /// epoch
 pub fn parseIso8601ToDateTime(data: []const u8) !DateTime {

@@ -8,7 +8,7 @@ pub fn snakeToCamel(allocator: std.mem.Allocator, name: []const u8) ![]u8 {
     var rc = try allocator.alloc(u8, name.len);
     while (utf8_name.nextCodepoint()) |cp| {
         if (cp > 0xff) return error.UnicodeNotSupported;
-        const ascii_char = @as(u8, @truncate(cp));
+        const ascii_char: u8 = @truncate(cp);
         if (ascii_char != '_') {
             if (previous_ascii == '_' and ascii_char >= 'a' and ascii_char <= 'z') {
                 const uppercase_char = ascii_char - ('a' - 'A');

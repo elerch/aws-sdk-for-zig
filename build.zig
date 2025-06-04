@@ -1,5 +1,4 @@
 const std = @import("std");
-const builtin = @import("builtin");
 const Builder = @import("std").Build;
 
 const models_subdir = "codegen/sdk-codegen/aws-models/"; // note will probably not work on windows
