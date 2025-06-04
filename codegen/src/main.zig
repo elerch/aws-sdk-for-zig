@@ -1010,6 +1010,9 @@ fn writeStructureJson(params: WriteMemberJsonParams, writer: std.io.AnyWriter) !
             try writer.writeAll("try jw.beginObject();\n");
             try writer.writeAll("{\n");
 
+            // this is a workaround in case a child structure doesn't have any fields
+            // and therefore doesn't use the structure variable so we capture it here.
+            // the compiler should optimize this away
             try writer.print("const unused_capture_{s} = {s};\n", .{ structure_name, object_value });
             try writer.print("_ = unused_capture_{s};\n", .{structure_name});
 
