@@ -1280,7 +1280,6 @@ fn writeMemberJson(params: WriteMemberJsonParams, writer: std.io.AnyWriter) anye
         .structure, .uniontype => try writeStructureMemberJson(params, writer),
         .timestamp => try writeTimestampJson(params, writer),
         .list => |l| try writeListJson(l, params, writer),
-        .set => std.debug.panic("Set not implemented", .{}),
         .map => |m| try writeMapJson(m, params, writer),
         .string => try writeScalarJson("string", params, writer),
         .@"enum" => try writeScalarJson("enum", params, writer),
