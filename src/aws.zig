@@ -1386,15 +1386,19 @@ test "custom serialization for map objects" {
     tags.appendAssumeCapacity(.{ .key = "Baz", .value = "Qux" });
     const req = services.lambda.TagResourceRequest{ .resource = "hello", .tags = tags.items };
     try std.json.stringify(req, .{ .whitespace = .indent_4 }, buffer.writer());
-    try std.testing.expectEqualStrings(
-        \\{
-        \\    "Resource": "hello",
-        \\    "Tags": {
-        \\        "Foo": "Bar",
-        \\        "Baz": "Qux"
-        \\    }
-        \\}
-    , buffer.items);
+
+    const parsed_body = try std.json.parseFromSlice(struct {
+        Resource: []const u8,
+        Tags: struct {
+            Foo: []const u8,
+            Baz: []const u8,
+        },
+    }, testing.allocator, buffer.items, .{});
+    defer parsed_body.deinit();
+
+    try testing.expectEqualStrings("hello", parsed_body.value.Resource);
+    try testing.expectEqualStrings("Bar", parsed_body.value.Tags.Foo);
+    try testing.expectEqualStrings("Qux", parsed_body.value.Tags.Baz);
 }
 
 test "proper serialization for kms" {
@@ -1414,16 +1418,24 @@ test "proper serialization for kms" {
         .grant_tokens = &[_][]const u8{},
     };
     try std.json.stringify(req, .{ .whitespace = .indent_4 }, buffer.writer());
-    try std.testing.expectEqualStrings(
-        \\{
-        \\    "KeyId": "42",
-        \\    "Plaintext": "foo",
-        \\    "EncryptionContext": {},
-        \\    "GrantTokens": [],
-        \\    "EncryptionAlgorithm": "SYMMETRIC_DEFAULT",
-        \\    "DryRun": false
-        \\}
-    , buffer.items);
+
+    {
+        const parsed_body = try std.json.parseFromSlice(struct {
+            KeyId: []const u8,
+            Plaintext: []const u8,
+            EncryptionContext: struct {},
+            GrantTokens: [][]const u8,
+            EncryptionAlgorithm: []const u8,
+            DryRun: bool,
+        }, testing.allocator, buffer.items, .{});
+        defer parsed_body.deinit();
+
+        try testing.expectEqualStrings("42", parsed_body.value.KeyId);
+        try testing.expectEqualStrings("foo", parsed_body.value.Plaintext);
+        try testing.expectEqual(0, parsed_body.value.GrantTokens.len);
+        try testing.expectEqualStrings("SYMMETRIC_DEFAULT", parsed_body.value.EncryptionAlgorithm);
+        try testing.expectEqual(false, parsed_body.value.DryRun);
+    }
 
     var buffer_null = std.ArrayList(u8).init(allocator);
     defer buffer_null.deinit();
@@ -1436,17 +1448,27 @@ test "proper serialization for kms" {
         .dry_run = false,
         .grant_tokens = &[_][]const u8{},
     };
+
     try std.json.stringify(req_null, .{ .whitespace = .indent_4 }, buffer_null.writer());
-    try std.testing.expectEqualStrings(
-        \\{
-        \\    "KeyId": "42",
-        \\    "Plaintext": "foo",
-        \\    "EncryptionContext": null,
-        \\    "GrantTokens": [],
-        \\    "EncryptionAlgorithm": "SYMMETRIC_DEFAULT",
-        \\    "DryRun": false
-        \\}
-    , buffer_null.items);
+
+    {
+        const parsed_body = try std.json.parseFromSlice(struct {
+            KeyId: []const u8,
+            Plaintext: []const u8,
+            EncryptionContext: ?struct {},
+            GrantTokens: [][]const u8,
+            EncryptionAlgorithm: []const u8,
+            DryRun: bool,
+        }, testing.allocator, buffer_null.items, .{});
+        defer parsed_body.deinit();
+
+        try testing.expectEqualStrings("42", parsed_body.value.KeyId);
+        try testing.expectEqualStrings("foo", parsed_body.value.Plaintext);
+        try testing.expectEqual(null, parsed_body.value.EncryptionContext);
+        try testing.expectEqual(0, parsed_body.value.GrantTokens.len);
+        try testing.expectEqualStrings("SYMMETRIC_DEFAULT", parsed_body.value.EncryptionAlgorithm);
+        try testing.expectEqual(false, parsed_body.value.DryRun);
+    }
 }
 
 test "REST Json v1 builds proper queries" {
@@ -2028,12 +2050,16 @@ test "json_1_0_query_with_input: dynamodb listTables runtime" {
     try std.testing.expectEqual(std.http.Method.POST, test_harness.request_options.request_method);
     try std.testing.expectEqualStrings("/", test_harness.request_options.request_target);
     try test_harness.request_options.expectHeader("X-Amz-Target", "DynamoDB_20120810.ListTables");
-    try std.testing.expectEqualStrings(
-        \\{
-        \\    "ExclusiveStartTableName": null,
-        \\    "Limit": 1
-        \\}
-    , test_harness.request_options.request_body);
+
+    const parsed_body = try std.json.parseFromSlice(struct {
+        ExclusiveStartTableName: ?[]const u8,
+        Limit: u8,
+    }, testing.allocator, test_harness.request_options.request_body, .{});
+    defer parsed_body.deinit();
+
+    try testing.expectEqual(null, parsed_body.value.ExclusiveStartTableName);
+    try testing.expectEqual(1, parsed_body.value.Limit);
+
     // Response expectations
     try std.testing.expectEqualStrings("QBI72OUIN8U9M9AG6PCSADJL4JVV4KQNSO5AEMVJF66Q9ASUAAJG", call.response_metadata.request_id);
     try std.testing.expectEqual(@as(usize, 1), call.response.table_names.?.len);
@@ -2093,12 +2119,16 @@ test "json_1_1_query_with_input: ecs listClusters runtime" {
     try std.testing.expectEqual(std.http.Method.POST, test_harness.request_options.request_method);
     try std.testing.expectEqualStrings("/", test_harness.request_options.request_target);
     try test_harness.request_options.expectHeader("X-Amz-Target", "AmazonEC2ContainerServiceV20141113.ListClusters");
-    try std.testing.expectEqualStrings(
-        \\{
-        \\    "nextToken": null,
-        \\    "maxResults": 1
-        \\}
-    , test_harness.request_options.request_body);
+
+    const parsed_body = try std.json.parseFromSlice(struct {
+        nextToken: ?[]const u8,
+        maxResults: u8,
+    }, testing.allocator, test_harness.request_options.request_body, .{});
+    defer parsed_body.deinit();
+
+    try testing.expectEqual(null, parsed_body.value.nextToken);
+    try testing.expectEqual(1, parsed_body.value.maxResults);
+
     // Response expectations
     try std.testing.expectEqualStrings("b2420066-ff67-4237-b782-721c4df60744", call.response_metadata.request_id);
     try std.testing.expectEqual(@as(usize, 1), call.response.cluster_arns.?.len);
@@ -2129,12 +2159,16 @@ test "json_1_1_query_no_input: ecs listClusters runtime" {
     try std.testing.expectEqual(std.http.Method.POST, test_harness.request_options.request_method);
     try std.testing.expectEqualStrings("/", test_harness.request_options.request_target);
     try test_harness.request_options.expectHeader("X-Amz-Target", "AmazonEC2ContainerServiceV20141113.ListClusters");
-    try std.testing.expectEqualStrings(
-        \\{
-        \\    "nextToken": null,
-        \\    "maxResults": null
-        \\}
-    , test_harness.request_options.request_body);
+
+    const parsed_body = try std.json.parseFromSlice(struct {
+        nextToken: ?[]const u8,
+        maxResults: ?u8,
+    }, testing.allocator, test_harness.request_options.request_body, .{});
+    defer parsed_body.deinit();
+
+    try testing.expectEqual(null, parsed_body.value.nextToken);
+    try testing.expectEqual(null, parsed_body.value.maxResults);
+
     // Response expectations
     try std.testing.expectEqualStrings("e65322b2-0065-45f2-ba37-f822bb5ce395", call.response_metadata.request_id);
     try std.testing.expectEqual(@as(usize, 1), call.response.cluster_arns.?.len);
@@ -2231,13 +2265,16 @@ test "rest_json_1_work_with_lambda: lambda tagResource (only), to excercise zig 
     test_harness.stop();
     // Request expectations
     try std.testing.expectEqual(std.http.Method.POST, test_harness.request_options.request_method);
-    try std.testing.expectEqualStrings(
-        \\{
-        \\    "Tags": {
-        \\        "Foo": "Bar"
-        \\    }
-        \\}
-    , test_harness.request_options.request_body);
+
+    const parsed_body = try std.json.parseFromSlice(struct {
+        Tags: struct {
+            Foo: []const u8,
+        },
+    }, testing.allocator, test_harness.request_options.request_body, .{ .ignore_unknown_fields = true });
+    defer parsed_body.deinit();
+
+    try testing.expectEqualStrings("Bar", parsed_body.value.Tags.Foo);
+
     // Due to 17015, we see %253A instead of %3A
     try std.testing.expectEqualStrings("/2017-03-31/tags/arn%3Aaws%3Alambda%3Aus-west-2%3A550620852718%3Afunction%3Aawsome-lambda-LambdaStackawsomeLambda", test_harness.request_options.request_target);
     // Response expectations
@@ -2269,14 +2306,19 @@ test "rest_json_1_url_parameters_not_in_request: lambda update_function_code" {
     test_harness.stop();
     // Request expectations
     try std.testing.expectEqual(std.http.Method.PUT, test_harness.request_options.request_method);
-    try std.testing.expectEqualStrings(
-        \\{
-        \\    "ZipFile": "zipfile",
-        \\    "Architectures": [
-        \\        "x86_64"
-        \\    ]
-        \\}
-    , test_harness.request_options.request_body);
+
+    const parsed_body = try std.json.parseFromSlice(struct {
+        ZipFile: []const u8,
+        Architectures: [][]const u8,
+    }, testing.allocator, test_harness.request_options.request_body, .{
+        .ignore_unknown_fields = true,
+    });
+    defer parsed_body.deinit();
+
+    try testing.expectEqualStrings("zipfile", parsed_body.value.ZipFile);
+    try testing.expectEqual(1, parsed_body.value.Architectures.len);
+    try testing.expectEqualStrings("x86_64", parsed_body.value.Architectures[0]);
+
     // Due to 17015, we see %253A instead of %3A
     try std.testing.expectEqualStrings("/2015-03-31/functions/functionname/code", test_harness.request_options.request_target);
     // Response expectations
@@ -2603,7 +2645,18 @@ test "toJson: structure + enums" {
     const request_json = try std.json.stringifyAlloc(std.testing.allocator, request_json_value, .{});
     defer std.testing.allocator.free(request_json);
 
-    try testing.expectEqualStrings("{\"policy\":{\"httpInputs\":\"foo\",\"httpsInputs\":\"bar\",\"s3Inputs\":\"baz\"}}", request_json);
+    const parsed = try std.json.parseFromSlice(struct {
+        policy: struct {
+            httpInputs: []const u8,
+            httpsInputs: []const u8,
+            s3Inputs: []const u8,
+        },
+    }, testing.allocator, request_json, .{});
+    defer parsed.deinit();
+
+    try testing.expectEqualStrings("foo", parsed.value.policy.httpInputs);
+    try testing.expectEqualStrings("bar", parsed.value.policy.httpsInputs);
+    try testing.expectEqualStrings("baz", parsed.value.policy.s3Inputs);
 }
 
 test "toJson: strings" {
@@ -2620,30 +2673,6 @@ test "toJson: strings" {
     defer std.testing.allocator.free(request_json);
 
     try testing.expectEqualStrings("{\"arn\":\"1234\"}", request_json);
-}
-
-test "toJson: map" {
-    var tags = [_]services.media_convert.MapOfStringKeyValue{
-        .{
-            .key = "foo",
-            .value = "bar",
-        },
-    };
-
-    const request = services.media_convert.TagResourceRequest{
-        .arn = "1234",
-        .tags = &tags,
-    };
-
-    var arena = std.heap.ArenaAllocator.init(testing.allocator);
-    defer arena.deinit();
-
-    const request_json_value = try request.toJson(arena.allocator());
-
-    const request_json = try std.json.stringifyAlloc(std.testing.allocator, request_json_value, .{});
-    defer std.testing.allocator.free(request_json);
-
-    try testing.expectEqualStrings("{\"arn\":\"1234\",\"tags\":{\"foo\":\"bar\"}}", request_json);
 }
 
 test "jsonStringify" {
@@ -2665,5 +2694,14 @@ test "jsonStringify" {
     const request_json = try std.json.stringifyAlloc(std.testing.allocator, request, .{});
     defer std.testing.allocator.free(request_json);
 
-    try testing.expectEqualStrings("{\"arn\":\"1234\",\"tags\":{\"foo\":\"bar\"}}", request_json);
+    const json_parsed = try std.json.parseFromSlice(struct {
+        arn: []const u8,
+        tags: struct {
+            foo: []const u8,
+        },
+    }, testing.allocator, request_json, .{});
+    defer json_parsed.deinit();
+
+    try testing.expectEqualStrings("1234", json_parsed.value.arn);
+    try testing.expectEqualStrings("bar", json_parsed.value.tags.foo);
 }

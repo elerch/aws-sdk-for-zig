@@ -820,7 +820,7 @@ fn getJsonMembers(allocator: std.mem.Allocator, shape: Shape, state: GenerationS
                 break :blk trait.json_name;
             }
 
-            break :blk try constantName(allocator, member.name, .camel);
+            break :blk member.name;
         };
 
         try json_members.append(allocator, .{
@@ -1069,7 +1069,7 @@ fn memberToJson(params: MemberToJsonParams, writer: std.io.AnyWriter) !void {
                     try writer.writeAll("};");
                 } else {
                     try writer.print("break :{s} ", .{blk_name});
-                    try writer.writeAll(".{ .null = undefined };");
+                    try writer.writeAll(".null;");
                 }
 
                 try writer.writeAll("}\n");
@@ -1164,16 +1164,20 @@ fn memberToJson(params: MemberToJsonParams, writer: std.io.AnyWriter) !void {
             const value_name = try std.fmt.allocPrint(allocator, "{s}_value", .{map_value_capture});
             defer allocator.free(value_name);
 
+            const value_shape_info = try shapeInfoForId(m.value, state.file_state.shapes);
+
+            const value_member = smithy.TypeMember{
+                .name = "value",
+                .target = m.value,
+                .traits = getShapeTraits(value_shape_info.shape),
+            };
+
             const map_value_block = try getMemberValueBlock(allocator, map_value_capture, .{
                 .field_name = "value",
                 .json_key = undefined,
                 .shape_info = try shapeInfoForId(m.value, state.file_state.shapes),
                 .target = m.value,
-                .type_member = .{
-                    .name = undefined,
-                    .target = undefined,
-                    .traits = @constCast(&[_]smithy.Trait{.required}),
-                },
+                .type_member = value_member,
             });
             defer allocator.free(map_value_block);
 
@@ -1189,11 +1193,6 @@ fn memberToJson(params: MemberToJsonParams, writer: std.io.AnyWriter) !void {
                 const key_member = smithy.TypeMember{
                     .name = "key",
                     .target = m.key,
-                    .traits = @constCast(&[_]smithy.Trait{.required}),
-                };
-                const value_member = smithy.TypeMember{
-                    .name = "value",
-                    .target = m.value,
                     .traits = @constCast(&[_]smithy.Trait{.required}),
                 };
 
@@ -1216,7 +1215,7 @@ fn memberToJson(params: MemberToJsonParams, writer: std.io.AnyWriter) !void {
                 // start loop
                 try writer.print("for ({s}) |{s}|", .{ map_value, map_value_capture });
                 try writer.writeAll("{\n");
-                try writer.print("const {s} = ", .{value_name});
+                try writer.print("const {s}: std.json.Value = ", .{value_name});
                 try memberToJson(.{
                     .shape_id = m.value,
                     .field_name = "value",
@@ -1515,7 +1514,11 @@ fn generateMapTypeFor(map: anytype, writer: anytype, state: GenerationState, com
     _ = try generateTypeFor(map.key, writer, child_state, options.endStructure(true));
     _ = try writer.write(",\n");
 
+    const value_shape_info = try shapeInfoForId(map.value, state.file_state.shapes);
+    const value_traits = getShapeTraits(value_shape_info.shape);
+
     _ = try writer.write("value: ");
+    try writeOptional(value_traits, writer, null);
     _ = try generateTypeFor(map.value, writer, child_state, options.endStructure(true));
 
     _ = try writer.write(",\n");
@@ -1703,10 +1706,6 @@ fn writeMappings(state: GenerationState, @"pub": []const u8, mapping_name: []con
 fn writeOptional(traits: ?[]smithy.Trait, writer: anytype, value: ?[]const u8) !void {
     if (traits) |ts| if (hasTrait(.required, ts)) return;
     try writer.writeAll(value orelse "?");
-}
-fn camelCase(allocator: std.mem.Allocator, name: []const u8) ![]const u8 {
-    const first_letter = name[0] + ('a' - 'A');
-    return try std.fmt.allocPrint(allocator, "{c}{s}", .{ first_letter, name[1..] });
 }
 fn avoidReserved(name: []const u8) []const u8 {
     if (std.mem.eql(u8, name, "error")) return "@\"error\"";
