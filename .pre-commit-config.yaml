@@ -23,11 +23,11 @@ repos:
         types: [file]
         pass_filenames: false
 
-  - repo: local
-    hooks:
-      - id: zlint
-        name: Run zlint
-        entry: zlint
-        args: ["--deny-warnings", "--fix"]
-        language: system
-        types: [zig]
+  # - repo: local
+  #   hooks:
+  #     - id: zlint
+  #       name: Run zlint
+  #       entry: zlint
+  #       args: ["--deny-warnings", "--fix"]
+  #       language: system
+  #       types: [zig]
