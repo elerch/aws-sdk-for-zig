@@ -851,7 +851,7 @@ fn generateToJsonFunction(shape_id: []const u8, writer: std.io.AnyWriter, state:
             try writer.writeAll("var object_map = std.json.ObjectMap.init(allocator);\n");
 
             for (json_members.items) |member| {
-                const member_value = try getMemberValueBlock(allocator, "self", member);
+                const member_value = try getMemberValueJson(allocator, "self", member);
                 defer allocator.free(member_value);
 
                 try writer.print("try object_map.put(\"{s}\", ", .{member.json_key});
@@ -983,7 +983,7 @@ fn writeMemberValue(
     }
 }
 
-fn getMemberValueBlock(allocator: std.mem.Allocator, source: []const u8, member: JsonMember) ![]const u8 {
+fn getMemberValueJson(allocator: std.mem.Allocator, source: []const u8, member: JsonMember) ![]const u8 {
     const member_value = try std.fmt.allocPrint(allocator, "@field({s}, \"{s}\")", .{ source, member.field_name });
     defer allocator.free(member_value);
 
@@ -1034,7 +1034,7 @@ fn writeStructureMemberJson(params: WriteMemberJsonParams, writer: std.io.AnyWri
             try writer.print("var {s} = std.json.ObjectMap.init(allocator);\n", .{structure_name});
 
             for (json_members.items) |member| {
-                const member_value = try getMemberValueBlock(allocator, params.field_value, member);
+                const member_value = try getMemberValueJson(allocator, params.field_value, member);
                 defer allocator.free(member_value);
 
                 try writer.print("try {s}.put(\"{s}\", ", .{ structure_name, member.json_key });
@@ -1170,7 +1170,7 @@ fn writeMapJson(map: MapShape, params: WriteMemberJsonParams, writer: std.io.Any
         .traits = getShapeTraits(value_shape_info.shape),
     };
 
-    const map_value_block = try getMemberValueBlock(allocator, map_value_capture, .{
+    const map_value_block = try getMemberValueJson(allocator, map_value_capture, .{
         .field_name = "value",
         .json_key = undefined,
         .shape_info = try shapeInfoForId(map.value, state.file_state.shapes),
