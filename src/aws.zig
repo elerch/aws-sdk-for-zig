@@ -2701,3 +2701,32 @@ test "jsonStringify" {
     try testing.expectEqualStrings("1234", json_parsed.value.arn);
     try testing.expectEqualStrings("bar", json_parsed.value.tags.foo);
 }
+
+test "jsonStringify nullable object" {
+    const request = services.lambda.CreateAliasRequest{
+        .function_name = "foo",
+        .function_version = "bar",
+        .name = "baz",
+        .routing_config = services.lambda.AliasRoutingConfiguration{
+            .additional_version_weights = null,
+        },
+    };
+
+    const request_json = try std.json.stringifyAlloc(std.testing.allocator, request, .{});
+    defer std.testing.allocator.free(request_json);
+
+    const json_parsed = try std.json.parseFromSlice(struct {
+        FunctionName: []const u8,
+        FunctionVersion: []const u8,
+        Name: []const u8,
+        RoutingConfig: struct {
+            AdditionalVersionWeights: ?struct {},
+        },
+    }, testing.allocator, request_json, .{ .ignore_unknown_fields = true });
+    defer json_parsed.deinit();
+
+    try testing.expectEqualStrings("foo", json_parsed.value.FunctionName);
+    try testing.expectEqualStrings("bar", json_parsed.value.FunctionVersion);
+    try testing.expectEqualStrings("baz", json_parsed.value.Name);
+    try testing.expectEqual(null, json_parsed.value.RoutingConfig.AdditionalVersionWeights);
+}
