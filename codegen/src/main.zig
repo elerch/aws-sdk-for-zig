@@ -256,6 +256,8 @@ fn processFile(file_name: []const u8, output_dir: std.fs.Dir, manifest: anytype)
 }
 
 fn zigFmt(allocator: std.mem.Allocator, buffer: [:0]const u8) ![]const u8 {
+    // if (true) return buffer;
+
     var tree = try std.zig.Ast.parse(allocator, buffer, .zig);
     defer tree.deinit(allocator);
 
@@ -847,14 +849,15 @@ fn generateToJsonFunction(shape_id: []const u8, writer: std.io.AnyWriter, state:
     if (try getJsonMembers(allocator, shape, state)) |json_members| {
         if (json_members.items.len > 0) {
             try writer.writeAll("/// Allocator should be from an Arena\n");
-            try writer.writeAll("pub fn toJson(self: @This(), allocator: std.mem.Allocator) !std.json.Value {\n");
-            try writer.writeAll("var object_map = std.json.ObjectMap.init(allocator);\n");
+            try writer.writeAll("pub fn toJson(self: @This(), jw: anytype) !void {\n");
+            try writer.writeAll("try jw.beginObject();\n");
+            try writer.writeAll("{\n");
 
             for (json_members.items) |member| {
                 const member_value = try getMemberValueJson(allocator, "self", member);
                 defer allocator.free(member_value);
 
-                try writer.print("try object_map.put(\"{s}\", ", .{member.json_key});
+                try writer.print("try jw.objectField(\"{s}\");\n", .{member.json_key});
                 try writeMemberJson(
                     .{
                         .shape_id = member.target,
@@ -865,18 +868,15 @@ fn generateToJsonFunction(shape_id: []const u8, writer: std.io.AnyWriter, state:
                     },
                     writer,
                 );
-                try writer.writeAll(");\n");
             }
 
-            try writer.writeAll("return .{ .object = object_map, };\n");
+            try writer.writeAll("}\n");
+            try writer.writeAll("try jw.endObject();\n");
             try writer.writeAll("}\n\n");
 
             // json stringify function
             try writer.writeAll("pub fn jsonStringify(self: @This(), jw: anytype) !void {\n");
-            try writer.writeAll("var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);\n");
-            try writer.writeAll("defer arena.deinit();\n");
-            try writer.writeAll("const json_value = try self.toJson(arena.allocator());\n");
-            try writer.writeAll("try jw.write(json_value);\n");
+            try writer.writeAll("try self.toJson(jw);\n");
             try writer.writeAll("}\n");
         }
     }
@@ -954,33 +954,10 @@ fn getShapeJsonValueType(shape: Shape) []const u8 {
 }
 
 fn writeMemberValue(
-    allocator: std.mem.Allocator,
     writer: anytype,
     member_value: []const u8,
-    shape_info: smithy.ShapeInfo,
-    traits: []smithy.Trait,
 ) !void {
-    if (shapeIsLeaf(shape_info.shape)) {
-        const json_value_type = getShapeJsonValueType(shape_info.shape);
-
-        if (shapeIsOptional(traits)) {
-            const member_value_capture = try case.allocTo(allocator, .snake, member_value);
-            defer allocator.free(member_value_capture);
-
-            try writer.print("if ({s}) |{s}|", .{ member_value, member_value_capture });
-            try writer.writeAll("std.json.Value{");
-            try writer.writeAll(json_value_type);
-            try writer.print(" = {s}", .{member_value_capture});
-            try writer.writeAll("} else .{ .null = undefined }");
-        } else {
-            try writer.writeAll("std.json.Value{");
-            try writer.writeAll(json_value_type);
-            try writer.print(" = {s}", .{member_value});
-            try writer.writeAll("}");
-        }
-    } else {
-        try writer.writeAll(member_value);
-    }
+    try writer.writeAll(member_value);
 }
 
 fn getMemberValueJson(allocator: std.mem.Allocator, source: []const u8, member: JsonMember) ![]const u8 {
@@ -991,11 +968,8 @@ fn getMemberValueJson(allocator: std.mem.Allocator, source: []const u8, member: 
     const writer = output_block.writer(allocator);
 
     try writeMemberValue(
-        allocator,
         writer,
         member_value,
-        member.shape_info,
-        member.type_member.traits,
     );
 
     return output_block.toOwnedSlice(allocator);
@@ -1023,21 +997,23 @@ fn writeStructureMemberJson(params: WriteMemberJsonParams, writer: std.io.AnyWri
     try writer.print("\n// start {s}: {s}\n", .{ shape_type, structure_name });
     defer writer.print("// end {s}: {s}\n", .{ shape_type, structure_name }) catch std.debug.panic("Unreachable", .{});
 
-    const blk_name = try std.fmt.allocPrint(allocator, "{s}_blk", .{structure_name});
-    defer allocator.free(blk_name);
+    // const blk_name = try std.fmt.allocPrint(allocator, "{s}_blk", .{structure_name});
+    // defer allocator.free(blk_name);
 
     if (try getJsonMembers(allocator, shape, state)) |json_members| {
-        try writer.writeAll(blk_name);
-        try writer.writeAll(": {\n");
+        // try writer.writeAll(blk_name);
+        // try writer.writeAll(": {\n");
 
         if (json_members.items.len > 0) {
-            try writer.print("var {s} = std.json.ObjectMap.init(allocator);\n", .{structure_name});
+            try writer.writeAll("try jw.beginObject();\n");
+            try writer.writeAll("{\n");
 
             for (json_members.items) |member| {
                 const member_value = try getMemberValueJson(allocator, params.field_value, member);
                 defer allocator.free(member_value);
 
-                try writer.print("try {s}.put(\"{s}\", ", .{ structure_name, member.json_key });
+                // try writer.print("try {s}.put(\"{s}\", ", .{ structure_name, member.json_key });
+                try writer.print("try jw.objectField(\"{s}\");\n", .{member.json_key});
                 try writeMemberJson(
                     .{
                         .shape_id = member.target,
@@ -1048,26 +1024,29 @@ fn writeStructureMemberJson(params: WriteMemberJsonParams, writer: std.io.AnyWri
                     },
                     writer,
                 );
-                try writer.writeAll(");\n");
             }
 
-            try writer.print("break :{s} ", .{blk_name});
-            try writer.writeAll(".{ .object = ");
-            try writer.writeAll(structure_name);
-            try writer.writeAll("};");
+            try writer.writeAll("}\n");
+            try writer.writeAll("try jw.endObject();\n");
+
+            // try writer.print("break :{s} ", .{blk_name});
+            // try writer.writeAll(".{ .object = ");
+            // try writer.writeAll(structure_name);
+            // try writer.writeAll("};");
         } else {
-            try writer.print("break :{s} ", .{blk_name});
-            try writer.writeAll(".null;");
+            // try writer.print("break :{s} ", .{blk_name});
+            // try writer.writeAll(".null;");
         }
 
-        try writer.writeAll("}\n");
+        // try writer.writeAll("}\n");
     }
 }
 
 fn writeTimestampJson(params: WriteMemberJsonParams, writer: std.io.AnyWriter) anyerror!void {
-    try writer.writeAll("try std.json.Value.jsonParse(allocator, ");
+    try writer.writeAll("\n// timestamp\n");
+    try writer.writeAll("try jw.write(");
     try writer.writeAll(params.field_value);
-    try writer.writeAll(", .{})");
+    try writer.writeAll(");\n");
 }
 
 fn writeListJson(list: ListShape, params: WriteMemberJsonParams, writer: std.io.AnyWriter) anyerror!void {
@@ -1092,53 +1071,50 @@ fn writeListJson(list: ListShape, params: WriteMemberJsonParams, writer: std.io.
     const list_capture = try std.fmt.allocPrint(state.allocator, "{s}_capture", .{list_name});
     defer state.allocator.free(list_capture);
 
-    try writer.writeAll(blk_name);
-    try writer.writeAll(": {\n");
+    // try writer.writeAll(blk_name);
+    // try writer.writeAll(": {\n");
     {
-        try writer.print("var {s} = std.json.Array.init(allocator);\n", .{list_name});
-        try writer.print("const {s} = {s};\n", .{ list_value_name_local, params.field_value });
-
+        // try writer.print("var {s} = std.json.Array.init(allocator);\n", .{list_name});
         const list_is_optional = shapeIsOptional(list.traits);
 
-        var list_value = list_value_name_local;
+        var list_value = params.field_value;
 
         if (list_is_optional) {
             list_value = list_capture;
 
             try writer.print("if ({s}) |{s}| ", .{
-                list_value_name_local,
+                params.field_value,
                 list_capture,
             });
             try writer.writeAll("{\n");
         }
 
-        const list_target_shape_info = try shapeInfoForId(list.member_target, state.file_state.shapes);
-
         // start loop
+        try writer.writeAll("try jw.beginArray();\n");
         try writer.print("for ({s}) |{s}|", .{ list_value, list_each_value });
         try writer.writeAll("{\n");
-        try writer.print("try {s}.append(", .{list_name});
+        try writer.writeAll("try jw.write(");
         try writeMemberValue(
-            allocator,
             writer,
             list_each_value,
-            list_target_shape_info,
-            @constCast(&[_]smithy.Trait{.required}),
         );
-        try writer.writeAll(");");
+        try writer.writeAll(");\n");
         try writer.writeAll("}\n");
+        try writer.writeAll("try jw.endArray();\n");
         // end loop
 
         if (list_is_optional) {
+            try writer.writeAll("} else {\n");
+            try writer.writeAll("try jw.write(null);\n");
             try writer.writeAll("}\n");
         }
 
-        try writer.print("break :{s} ", .{blk_name});
-        try writer.writeAll(".{ .array = ");
-        try writer.print(" {s} ", .{list_name});
-        try writer.writeAll("};");
+        // try writer.print("break :{s} ", .{blk_name});
+        // try writer.writeAll(".{ .array = ");
+        // try writer.print(" {s} ", .{list_name});
+        // try writer.writeAll("};");
     }
-    try writer.writeAll("}\n");
+    // try writer.writeAll("}\n");
 }
 
 fn writeMapJson(map: MapShape, params: WriteMemberJsonParams, writer: std.io.AnyWriter) anyerror!void {
@@ -1156,8 +1132,11 @@ fn writeMapJson(map: MapShape, params: WriteMemberJsonParams, writer: std.io.Any
     const map_value_capture = try std.fmt.allocPrint(allocator, "{s}_kvp", .{map_name});
     defer allocator.free(map_value_capture);
 
-    const map_value_capture_key = try std.fmt.allocPrint(allocator, "{s}.key", .{map_value_capture});
-    defer allocator.free(map_value_capture_key);
+    const map_capture_key = try std.fmt.allocPrint(allocator, "{s}.key", .{map_value_capture});
+    defer allocator.free(map_capture_key);
+
+    const map_capture_value = try std.fmt.allocPrint(allocator, "{s}.value", .{map_value_capture});
+    defer allocator.free(map_capture_value);
 
     const value_name = try std.fmt.allocPrint(allocator, "{s}_value", .{map_value_capture});
     defer allocator.free(value_name);
@@ -1184,15 +1163,15 @@ fn writeMapJson(map: MapShape, params: WriteMemberJsonParams, writer: std.io.Any
 
     const map_capture = try std.fmt.allocPrint(state.allocator, "{s}_capture", .{map_name});
 
-    try writer.writeAll(blk_name);
-    try writer.writeAll(": {\n");
+    // try writer.writeAll(blk_name);
+    // try writer.writeAll(": {\n");
     {
         const map_member = params.member;
-        const key_member = smithy.TypeMember{
-            .name = "key",
-            .target = map.key,
-            .traits = @constCast(&[_]smithy.Trait{.required}),
-        };
+        // const key_member = smithy.TypeMember{
+        //     .name = "key",
+        //     .target = map.key,
+        //     .traits = @constCast(&[_]smithy.Trait{.required}),
+        // };
 
         const map_is_optional = !hasTrait(.required, map_member.traits);
 
@@ -1208,68 +1187,78 @@ fn writeMapJson(map: MapShape, params: WriteMemberJsonParams, writer: std.io.Any
             try writer.writeAll("{\n");
         }
 
-        try writer.print("var {s} = std.json.ObjectMap.init(allocator);\n", .{map_name});
+        // try writer.print("var {s} = std.json.ObjectMap.init(allocator);\n", .{map_name});
+        try writer.writeAll("try jw.beginObject();\n");
+        try writer.writeAll("{\n");
 
         // start loop
         try writer.print("for ({s}) |{s}|", .{ map_value, map_value_capture });
         try writer.writeAll("{\n");
-        try writer.print("const {s}: std.json.Value = ", .{value_name});
+        // try writer.print("const {s}: std.json.Value = ", .{value_name});
+        // try writeMemberJson(.{
+        //     .shape_id = map.value,
+        //     .field_name = "value",
+        //     .field_value = map_value_block,
+        //     .state = state,
+        //     .member = value_member,
+        // }, writer);
+        // try writer.writeAll(";\n");
+        // try writer.print("try {s}.put(\n", .{map_name});
+        // try writeMemberJson(.{
+        //     .shape_id = map.key,
+        //     .field_name = "key",
+        //     .field_value = map_value_capture_key,
+        //     .state = state.indent(),
+        //     .member = key_member,
+        // }, writer);
+        // try writer.writeAll(", ");
+        // try writer.writeAll(");\n");
+
+        try writer.print("try jw.objectField({s});\n", .{map_capture_key});
+
         try writeMemberJson(.{
             .shape_id = map.value,
             .field_name = "value",
-            .field_value = map_value_block,
-            .state = state,
-            .member = value_member,
-        }, writer);
-        try writer.writeAll(";\n");
-        try writer.print("try {s}.put(\n", .{map_name});
-        try writeMemberJson(.{
-            .shape_id = map.key,
-            .field_name = "key",
-            .field_value = map_value_capture_key,
-            .state = state.indent(),
-            .member = key_member,
-        }, writer);
-        try writer.writeAll(", ");
-        try writeMemberJson(.{
-            .shape_id = map.value,
-            .field_name = "value",
-            .field_value = value_name,
+            .field_value = map_capture_value,
             .state = state.indent(),
             .member = value_member,
         }, writer);
-        try writer.writeAll(");\n");
+
         try writer.writeAll("}\n");
         // end loop
 
-        try writer.print("break :{s}", .{blk_name});
-        try writer.writeAll(".{ .object = ");
-        try writer.writeAll(map_name);
-        try writer.writeAll("};\n");
+        // try writer.print("break :{s}", .{blk_name});
+        // try writer.writeAll(".{ .object = ");
+        // try writer.writeAll(map_name);
+        // try writer.writeAll("};\n");
+
+        try writer.writeAll("}\n");
+        try writer.writeAll("try jw.endObject();\n");
 
         if (map_is_optional) {
+            try writer.writeAll("} else {\n");
+            try writer.writeAll("try jw.write(null);\n");
             try writer.writeAll("}\n");
-            try writer.print("break :{s} .null;", .{blk_name});
+            // try writer.print("break :{s} .null;", .{blk_name});
         }
     }
-    try writer.writeAll("}\n");
+    // try writer.writeAll("}\n");
 }
 
 fn writeScalarJson(comment: []const u8, params: WriteMemberJsonParams, writer: std.io.AnyWriter) anyerror!void {
-    try writer.print("\n// {s}\n", .{comment});
-    try writer.writeAll(params.field_value);
+    try writer.print("try jw.write({s}); // {s}\n\n", .{ params.field_value, comment });
 }
 
 fn writeMemberJson(params: WriteMemberJsonParams, writer: std.io.AnyWriter) anyerror!void {
     const shape_id = params.shape_id;
     const state = params.state;
-    const value = params.field_value;
+    // const value = params.field_value;
 
     const shape_info = try shapeInfoForId(shape_id, state.file_state.shapes);
     const shape = shape_info.shape;
 
     if (state.getTypeRecurrenceCount(shape_id) > 2) {
-        try writer.writeAll(value);
+        // try writer.writeAll(value);
         return;
     }
 
@@ -1296,6 +1285,7 @@ fn writeMemberJson(params: WriteMemberJsonParams, writer: std.io.AnyWriter) anye
         .byte => try writeScalarJson("byte", params, writer),
         .short => try writeScalarJson("short", params, writer),
         else => std.debug.panic("Unexpected shape type: {}", .{shape}),
+        // else => {},
     }
 }
 

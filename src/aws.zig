@@ -2628,7 +2628,7 @@ test "test server timeout works" {
 
 const testing = std.testing;
 
-test "toJson: structure + enums" {
+test "jsonStringify: structure + enums" {
     const request = services.media_convert.PutPolicyRequest{
         .policy = .{
             .http_inputs = "foo",
@@ -2640,9 +2640,7 @@ test "toJson: structure + enums" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
 
-    const request_json_value = try request.toJson(arena.allocator());
-
-    const request_json = try std.json.stringifyAlloc(std.testing.allocator, request_json_value, .{});
+    const request_json = try std.json.stringifyAlloc(std.testing.allocator, request, .{});
     defer std.testing.allocator.free(request_json);
 
     const parsed = try std.json.parseFromSlice(struct {
@@ -2659,7 +2657,7 @@ test "toJson: structure + enums" {
     try testing.expectEqualStrings("baz", parsed.value.policy.s3Inputs);
 }
 
-test "toJson: strings" {
+test "jsonStringify: strings" {
     const request = services.media_convert.AssociateCertificateRequest{
         .arn = "1234",
     };
@@ -2667,9 +2665,7 @@ test "toJson: strings" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
 
-    const request_json_value = try request.toJson(arena.allocator());
-
-    const request_json = try std.json.stringifyAlloc(std.testing.allocator, request_json_value, .{});
+    const request_json = try std.json.stringifyAlloc(std.testing.allocator, request, .{});
     defer std.testing.allocator.free(request_json);
 
     try testing.expectEqualStrings("{\"arn\":\"1234\"}", request_json);
