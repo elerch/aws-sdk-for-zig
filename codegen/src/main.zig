@@ -6,7 +6,9 @@ const case = @import("case");
 var verbose = false;
 
 const Shape = @FieldType(smithy.ShapeInfo, "shape");
-const Service = @TypeOf((Shape{ .service = undefined }).service);
+const ServiceShape = @TypeOf((Shape{ .service = undefined }).service);
+const ListShape = @TypeOf((Shape{ .list = undefined }).list);
+const MapShape = @TypeOf((Shape{ .map = undefined }).map);
 
 pub fn main() anyerror!void {
     const root_progress_node = std.Progress.start(.{});
@@ -1062,15 +1064,209 @@ fn writeStructureMemberJson(params: WriteMemberJsonParams, writer: std.io.AnyWri
     }
 }
 
+fn writeTimestampJson(params: WriteMemberJsonParams, writer: std.io.AnyWriter) anyerror!void {
+    try writer.writeAll("try std.json.Value.jsonParse(allocator, ");
+    try writer.writeAll(params.field_value);
+    try writer.writeAll(", .{})");
+}
+
+fn writeListJson(list: ListShape, params: WriteMemberJsonParams, writer: std.io.AnyWriter) anyerror!void {
+    const state = params.state;
+    const allocator = state.allocator;
+
+    const list_name = try std.fmt.allocPrint(allocator, "{s}_list_{d}", .{ params.field_name, state.indent_level });
+    defer state.allocator.free(list_name);
+
+    try writer.print("\n// start list: {s}\n", .{list_name});
+    defer writer.print("// end list: {s}\n", .{list_name}) catch std.debug.panic("Unreachable", .{});
+
+    const list_each_value = try std.fmt.allocPrint(allocator, "{s}_value", .{list_name});
+    defer allocator.free(list_each_value);
+
+    const list_value_name_local = try std.fmt.allocPrint(allocator, "{s}_local", .{list_each_value});
+    defer allocator.free(list_value_name_local);
+
+    const blk_name = try std.fmt.allocPrint(state.allocator, "{s}_blk", .{list_name});
+    defer state.allocator.free(blk_name);
+
+    const list_capture = try std.fmt.allocPrint(state.allocator, "{s}_capture", .{list_name});
+    defer state.allocator.free(list_capture);
+
+    try writer.writeAll(blk_name);
+    try writer.writeAll(": {\n");
+    {
+        try writer.print("var {s} = std.json.Array.init(allocator);\n", .{list_name});
+        try writer.print("const {s} = {s};\n", .{ list_value_name_local, params.field_value });
+
+        const list_is_optional = shapeIsOptional(list.traits);
+
+        var list_value = list_value_name_local;
+
+        if (list_is_optional) {
+            list_value = list_capture;
+
+            try writer.print("if ({s}) |{s}| ", .{
+                list_value_name_local,
+                list_capture,
+            });
+            try writer.writeAll("{\n");
+        }
+
+        const list_target_shape_info = try shapeInfoForId(list.member_target, state.file_state.shapes);
+
+        // start loop
+        try writer.print("for ({s}) |{s}|", .{ list_value, list_each_value });
+        try writer.writeAll("{\n");
+        try writer.print("try {s}.append(", .{list_name});
+        try writeMemberValue(
+            allocator,
+            writer,
+            list_each_value,
+            list_target_shape_info,
+            @constCast(&[_]smithy.Trait{.required}),
+        );
+        try writer.writeAll(");");
+        try writer.writeAll("}\n");
+        // end loop
+
+        if (list_is_optional) {
+            try writer.writeAll("}\n");
+        }
+
+        try writer.print("break :{s} ", .{blk_name});
+        try writer.writeAll(".{ .array = ");
+        try writer.print(" {s} ", .{list_name});
+        try writer.writeAll("};");
+    }
+    try writer.writeAll("}\n");
+}
+
+fn writeMapJson(map: MapShape, params: WriteMemberJsonParams, writer: std.io.AnyWriter) anyerror!void {
+    const state = params.state;
+    const name = params.field_name;
+    const value = params.field_value;
+    const allocator = state.allocator;
+
+    const map_name = try std.fmt.allocPrint(state.allocator, "{s}_object_map_{d}", .{ name, state.indent_level });
+    defer state.allocator.free(map_name);
+
+    try writer.print("\n// start map: {s}\n", .{map_name});
+    defer writer.print("// end map: {s}\n", .{map_name}) catch std.debug.panic("Unreachable", .{});
+
+    const map_value_capture = try std.fmt.allocPrint(allocator, "{s}_kvp", .{map_name});
+    defer allocator.free(map_value_capture);
+
+    const map_value_capture_key = try std.fmt.allocPrint(allocator, "{s}.key", .{map_value_capture});
+    defer allocator.free(map_value_capture_key);
+
+    const value_name = try std.fmt.allocPrint(allocator, "{s}_value", .{map_value_capture});
+    defer allocator.free(value_name);
+
+    const value_shape_info = try shapeInfoForId(map.value, state.file_state.shapes);
+
+    const value_member = smithy.TypeMember{
+        .name = "value",
+        .target = map.value,
+        .traits = getShapeTraits(value_shape_info.shape),
+    };
+
+    const map_value_block = try getMemberValueBlock(allocator, map_value_capture, .{
+        .field_name = "value",
+        .json_key = undefined,
+        .shape_info = try shapeInfoForId(map.value, state.file_state.shapes),
+        .target = map.value,
+        .type_member = value_member,
+    });
+    defer allocator.free(map_value_block);
+
+    const blk_name = try std.fmt.allocPrint(state.allocator, "{s}_blk", .{map_name});
+    defer state.allocator.free(blk_name);
+
+    const map_capture = try std.fmt.allocPrint(state.allocator, "{s}_capture", .{map_name});
+
+    try writer.writeAll(blk_name);
+    try writer.writeAll(": {\n");
+    {
+        const map_member = params.member;
+        const key_member = smithy.TypeMember{
+            .name = "key",
+            .target = map.key,
+            .traits = @constCast(&[_]smithy.Trait{.required}),
+        };
+
+        const map_is_optional = !hasTrait(.required, map_member.traits);
+
+        var map_value = value;
+
+        if (map_is_optional) {
+            map_value = map_capture;
+
+            try writer.print("if ({s}) |{s}| ", .{
+                value,
+                map_capture,
+            });
+            try writer.writeAll("{\n");
+        }
+
+        try writer.print("var {s} = std.json.ObjectMap.init(allocator);\n", .{map_name});
+
+        // start loop
+        try writer.print("for ({s}) |{s}|", .{ map_value, map_value_capture });
+        try writer.writeAll("{\n");
+        try writer.print("const {s}: std.json.Value = ", .{value_name});
+        try writeMemberJson(.{
+            .shape_id = map.value,
+            .field_name = "value",
+            .field_value = map_value_block,
+            .state = state,
+            .member = value_member,
+        }, writer);
+        try writer.writeAll(";\n");
+        try writer.print("try {s}.put(\n", .{map_name});
+        try writeMemberJson(.{
+            .shape_id = map.key,
+            .field_name = "key",
+            .field_value = map_value_capture_key,
+            .state = state.indent(),
+            .member = key_member,
+        }, writer);
+        try writer.writeAll(", ");
+        try writeMemberJson(.{
+            .shape_id = map.value,
+            .field_name = "value",
+            .field_value = value_name,
+            .state = state.indent(),
+            .member = value_member,
+        }, writer);
+        try writer.writeAll(");\n");
+        try writer.writeAll("}\n");
+        // end loop
+
+        try writer.print("break :{s}", .{blk_name});
+        try writer.writeAll(".{ .object = ");
+        try writer.writeAll(map_name);
+        try writer.writeAll("};\n");
+
+        if (map_is_optional) {
+            try writer.writeAll("}\n");
+            try writer.print("break :{s} .null;", .{blk_name});
+        }
+    }
+    try writer.writeAll("}\n");
+}
+
+fn writeScalarJson(comment: []const u8, params: WriteMemberJsonParams, writer: std.io.AnyWriter) anyerror!void {
+    try writer.print("\n// {s}\n", .{comment});
+    try writer.writeAll(params.field_value);
+}
+
 fn writeMemberJson(params: WriteMemberJsonParams, writer: std.io.AnyWriter) anyerror!void {
     const shape_id = params.shape_id;
     const state = params.state;
     const value = params.field_value;
-    const name = params.field_name;
 
     const shape_info = try shapeInfoForId(shape_id, state.file_state.shapes);
     const shape = shape_info.shape;
-    const allocator = state.allocator;
 
     if (state.getTypeRecurrenceCount(shape_id) > 2) {
         try writer.writeAll(value);
@@ -1082,243 +1278,24 @@ fn writeMemberJson(params: WriteMemberJsonParams, writer: std.io.AnyWriter) anye
 
     switch (shape) {
         .structure, .uniontype => try writeStructureMemberJson(params, writer),
-        .timestamp => {
-            try writer.writeAll("try std.json.Value.jsonParse(allocator, ");
-            try writer.writeAll(value);
-            try writer.writeAll(", .{})");
-        },
-        .list => |l| {
-            const list_name = try std.fmt.allocPrint(state.allocator, "{s}_list_{d}", .{ name, state.indent_level });
-            defer state.allocator.free(list_name);
-
-            try writer.print("\n// start list: {s}\n", .{list_name});
-            defer writer.print("// end list: {s}\n", .{list_name}) catch std.debug.panic("Unreachable", .{});
-
-            const list_each_value = try std.fmt.allocPrint(allocator, "{s}_value", .{list_name});
-            defer allocator.free(list_each_value);
-
-            const list_value_name_local = try std.fmt.allocPrint(allocator, "{s}_local", .{list_each_value});
-            defer allocator.free(list_value_name_local);
-
-            const blk_name = try std.fmt.allocPrint(state.allocator, "{s}_blk", .{list_name});
-            defer state.allocator.free(blk_name);
-
-            const list_capture = try std.fmt.allocPrint(state.allocator, "{s}_capture", .{list_name});
-            defer state.allocator.free(list_capture);
-
-            try writer.writeAll(blk_name);
-            try writer.writeAll(": {\n");
-            {
-                try writer.print("var {s} = std.json.Array.init(allocator);\n", .{list_name});
-                try writer.print("const {s} = {s};\n", .{ list_value_name_local, value });
-
-                const list_is_optional = shapeIsOptional(l.traits);
-
-                var list_value = list_value_name_local;
-
-                if (list_is_optional) {
-                    list_value = list_capture;
-
-                    try writer.print("if ({s}) |{s}| ", .{
-                        list_value_name_local,
-                        list_capture,
-                    });
-                    try writer.writeAll("{\n");
-                }
-
-                const list_target_shape_info = try shapeInfoForId(l.member_target, state.file_state.shapes);
-
-                // start loop
-                try writer.print("for ({s}) |{s}|", .{ list_value, list_each_value });
-                try writer.writeAll("{\n");
-                try writer.print("try {s}.append(", .{list_name});
-                try writeMemberValue(
-                    allocator,
-                    writer,
-                    list_each_value,
-                    list_target_shape_info,
-                    @constCast(&[_]smithy.Trait{.required}),
-                );
-                try writer.writeAll(");");
-                try writer.writeAll("}\n");
-                // end loop
-
-                if (list_is_optional) {
-                    try writer.writeAll("}\n");
-                }
-
-                try writer.print("break :{s} ", .{blk_name});
-                try writer.writeAll(".{ .array = ");
-                try writer.print(" {s} ", .{list_name});
-                try writer.writeAll("};");
-            }
-            try writer.writeAll("}\n");
-        },
+        .timestamp => try writeTimestampJson(params, writer),
+        .list => |l| try writeListJson(l, params, writer),
         .set => std.debug.panic("Set not implemented", .{}),
-        .map => |m| {
-            const map_name = try std.fmt.allocPrint(state.allocator, "{s}_object_map_{d}", .{ name, state.indent_level });
-            defer state.allocator.free(map_name);
-
-            try writer.print("\n// start map: {s}\n", .{map_name});
-            defer writer.print("// end map: {s}\n", .{map_name}) catch std.debug.panic("Unreachable", .{});
-
-            const map_value_capture = try std.fmt.allocPrint(allocator, "{s}_kvp", .{map_name});
-            defer allocator.free(map_value_capture);
-
-            const map_value_capture_key = try std.fmt.allocPrint(allocator, "{s}.key", .{map_value_capture});
-            defer allocator.free(map_value_capture_key);
-
-            const value_name = try std.fmt.allocPrint(allocator, "{s}_value", .{map_value_capture});
-            defer allocator.free(value_name);
-
-            const value_shape_info = try shapeInfoForId(m.value, state.file_state.shapes);
-
-            const value_member = smithy.TypeMember{
-                .name = "value",
-                .target = m.value,
-                .traits = getShapeTraits(value_shape_info.shape),
-            };
-
-            const map_value_block = try getMemberValueBlock(allocator, map_value_capture, .{
-                .field_name = "value",
-                .json_key = undefined,
-                .shape_info = try shapeInfoForId(m.value, state.file_state.shapes),
-                .target = m.value,
-                .type_member = value_member,
-            });
-            defer allocator.free(map_value_block);
-
-            const blk_name = try std.fmt.allocPrint(state.allocator, "{s}_blk", .{map_name});
-            defer state.allocator.free(blk_name);
-
-            const map_capture = try std.fmt.allocPrint(state.allocator, "{s}_capture", .{map_name});
-
-            try writer.writeAll(blk_name);
-            try writer.writeAll(": {\n");
-            {
-                const map_member = params.member;
-                const key_member = smithy.TypeMember{
-                    .name = "key",
-                    .target = m.key,
-                    .traits = @constCast(&[_]smithy.Trait{.required}),
-                };
-
-                const map_is_optional = !hasTrait(.required, map_member.traits);
-
-                var map_value = value;
-
-                if (map_is_optional) {
-                    map_value = map_capture;
-
-                    try writer.print("if ({s}) |{s}| ", .{
-                        value,
-                        map_capture,
-                    });
-                    try writer.writeAll("{\n");
-                }
-
-                try writer.print("var {s} = std.json.ObjectMap.init(allocator);\n", .{map_name});
-
-                // start loop
-                try writer.print("for ({s}) |{s}|", .{ map_value, map_value_capture });
-                try writer.writeAll("{\n");
-                try writer.print("const {s}: std.json.Value = ", .{value_name});
-                try writeMemberJson(.{
-                    .shape_id = m.value,
-                    .field_name = "value",
-                    .field_value = map_value_block,
-                    .state = state,
-                    .member = value_member,
-                }, writer);
-                try writer.writeAll(";\n");
-                try writer.print("try {s}.put(\n", .{map_name});
-                try writeMemberJson(.{
-                    .shape_id = m.key,
-                    .field_name = "key",
-                    .field_value = map_value_capture_key,
-                    .state = state.indent(),
-                    .member = key_member,
-                }, writer);
-                try writer.writeAll(", ");
-                try writeMemberJson(.{
-                    .shape_id = m.value,
-                    .field_name = "value",
-                    .field_value = value_name,
-                    .state = state.indent(),
-                    .member = value_member,
-                }, writer);
-                try writer.writeAll(");\n");
-                try writer.writeAll("}\n");
-                // end loop
-
-                try writer.print("break :{s}", .{blk_name});
-                try writer.writeAll(".{ .object = ");
-                try writer.writeAll(map_name);
-                try writer.writeAll("};\n");
-
-                if (map_is_optional) {
-                    try writer.writeAll("}\n");
-                    try writer.print("break :{s} .null;", .{blk_name});
-                }
-            }
-            try writer.writeAll("}\n");
-        },
-        .string => {
-            try writer.writeAll("\n// string\n");
-            try writer.writeAll(value);
-        },
-        .@"enum" => {
-            try writer.writeAll("\n// enum\n");
-            try writer.writeAll(value);
-        },
-        .document => {
-            try writer.writeAll("\n// document\n");
-            try writer.writeAll(value);
-        },
-        .blob => {
-            try writer.writeAll("\n// blob\n");
-            try writer.writeAll(value);
-        },
-        .boolean => {
-            try writer.writeAll("\n// boolean\n");
-            try writer.writeAll(value);
-        },
-        .float => {
-            try writer.writeAll("\n// float\n");
-            try writer.writeAll(value);
-        },
-        .integer => {
-            try writer.writeAll("\n// integer\n");
-            try writer.writeAll(value);
-        },
-        .long => {
-            try writer.writeAll("\n// long\n");
-            try writer.writeAll(value);
-        },
-        .double => {
-            try writer.writeAll("\n// double\n");
-            try writer.writeAll(value);
-        },
-        .bigDecimal => {
-            try writer.writeAll("\n// bigDecimal\n");
-            try writer.writeAll(value);
-        },
-        .bigInteger => {
-            try writer.writeAll("\n// bigInteger\n");
-            try writer.writeAll(value);
-        },
-        .unit => {
-            try writer.writeAll("\n// unit\n");
-            try writer.writeAll(value);
-        },
-        .byte => {
-            try writer.writeAll("\n// byte\n");
-            try writer.writeAll(value);
-        },
-        .short => {
-            try writer.writeAll("\n// short\n");
-            try writer.writeAll(value);
-        },
+        .map => |m| try writeMapJson(m, params, writer),
+        .string => try writeScalarJson("string", params, writer),
+        .@"enum" => try writeScalarJson("enum", params, writer),
+        .document => try writeScalarJson("document", params, writer),
+        .blob => try writeScalarJson("blob", params, writer),
+        .boolean => try writeScalarJson("bool", params, writer),
+        .float => try writeScalarJson("float", params, writer),
+        .integer => try writeScalarJson("integer", params, writer),
+        .long => try writeScalarJson("long", params, writer),
+        .double => try writeScalarJson("double", params, writer),
+        .bigDecimal => try writeScalarJson("bigDecimal", params, writer),
+        .bigInteger => try writeScalarJson("bigInteger", params, writer),
+        .unit => try writeScalarJson("unit", params, writer),
+        .byte => try writeScalarJson("byte", params, writer),
+        .short => try writeScalarJson("short", params, writer),
         else => std.debug.panic("Unexpected shape type: {}", .{shape}),
     }
 }
