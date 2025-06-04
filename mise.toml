@@ -1,0 +1,4 @@
+[tools]
+pre-commit = "latest"
+"ubi:DonIsaac/zlint" = "latest"
+zig = "0.14.1"
