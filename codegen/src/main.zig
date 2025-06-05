@@ -263,8 +263,6 @@ fn processFile(file_name: []const u8, output_dir: std.fs.Dir, manifest: anytype)
 }
 
 fn zigFmt(allocator: std.mem.Allocator, buffer: [:0]const u8) ![]const u8 {
-    // if (true) return buffer;
-
     var tree = try std.zig.Ast.parse(allocator, buffer, .zig);
     defer tree.deinit(allocator);
 
