@@ -15,36 +15,14 @@ pub fn getShapeInfo(id: []const u8, shapes: std.StringHashMap(smithy.ShapeInfo))
 
 pub fn getShapeTraits(shape: Shape) []smithy.Trait {
     return switch (shape) {
-        .@"enum" => |s| s.traits,
-        .bigDecimal,
-        .bigInteger,
-        .blob,
-        .boolean,
-        .byte,
-        .document,
-        .double,
-        .float,
-        .integer,
-        .long,
-        .member,
-        .short,
-        .string,
-        .timestamp,
-        .unit,
-        => |s| s.traits,
-        .list => |s| s.traits,
-        .map => |s| s.traits,
-        .set => |s| s.traits,
-        .structure => |s| s.traits,
-        .uniontype => |s| s.traits,
-        else => std.debug.panic("Unexpected shape type: {}", .{shape}),
+        .service, .operation, .resource => std.debug.panic("Unexpected shape type: {}", .{shape}),
+        inline else => |s| s.traits,
     };
 }
 
 pub fn getShapeMembers(shape: Shape) []smithy.TypeMember {
     return switch (shape) {
-        .structure => |s| s.members,
-        .uniontype => |s| s.members,
+        inline .structure, .uniontype => |s| s.members,
         else => std.debug.panic("Unexpected shape type: {}", .{shape}),
     };
 }
