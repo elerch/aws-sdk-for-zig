@@ -385,6 +385,6 @@ fn writeMemberJson(params: WriteMemberJsonParams, writer: std.io.AnyWriter) anye
         .unit => try writeScalarJson("unit", params, writer),
         .byte => try writeScalarJson("byte", params, writer),
         .short => try writeScalarJson("short", params, writer),
-        else => std.debug.panic("Unexpected shape type: {}", .{shape}),
+        .service, .resource, .operation, .member, .set => std.debug.panic("Shape type not supported: {}", .{shape}),
     }
 }
