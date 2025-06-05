@@ -2703,30 +2703,53 @@ test "jsonStringify" {
 }
 
 test "jsonStringify nullable object" {
-    const request = services.lambda.CreateAliasRequest{
-        .function_name = "foo",
-        .function_version = "bar",
-        .name = "baz",
-        .routing_config = services.lambda.AliasRoutingConfiguration{
-            .additional_version_weights = null,
-        },
-    };
+    // structure is not null
+    {
+        const request = services.lambda.CreateAliasRequest{
+            .function_name = "foo",
+            .function_version = "bar",
+            .name = "baz",
+            .routing_config = services.lambda.AliasRoutingConfiguration{
+                .additional_version_weights = null,
+            },
+        };
 
-    const request_json = try std.json.stringifyAlloc(std.testing.allocator, request, .{});
-    defer std.testing.allocator.free(request_json);
+        const request_json = try std.json.stringifyAlloc(std.testing.allocator, request, .{});
+        defer std.testing.allocator.free(request_json);
 
-    const json_parsed = try std.json.parseFromSlice(struct {
-        FunctionName: []const u8,
-        FunctionVersion: []const u8,
-        Name: []const u8,
-        RoutingConfig: struct {
-            AdditionalVersionWeights: ?struct {},
-        },
-    }, testing.allocator, request_json, .{ .ignore_unknown_fields = true });
-    defer json_parsed.deinit();
+        const json_parsed = try std.json.parseFromSlice(struct {
+            FunctionName: []const u8,
+            FunctionVersion: []const u8,
+            Name: []const u8,
+            RoutingConfig: struct {
+                AdditionalVersionWeights: ?struct {},
+            },
+        }, testing.allocator, request_json, .{ .ignore_unknown_fields = true });
+        defer json_parsed.deinit();
 
-    try testing.expectEqualStrings("foo", json_parsed.value.FunctionName);
-    try testing.expectEqualStrings("bar", json_parsed.value.FunctionVersion);
-    try testing.expectEqualStrings("baz", json_parsed.value.Name);
-    try testing.expectEqual(null, json_parsed.value.RoutingConfig.AdditionalVersionWeights);
+        try testing.expectEqualStrings("foo", json_parsed.value.FunctionName);
+        try testing.expectEqualStrings("bar", json_parsed.value.FunctionVersion);
+        try testing.expectEqualStrings("baz", json_parsed.value.Name);
+        try testing.expectEqual(null, json_parsed.value.RoutingConfig.AdditionalVersionWeights);
+    }
+
+    // structure is null
+    {
+        const request = services.kms.DecryptRequest{
+            .key_id = "foo",
+            .ciphertext_blob = "bar",
+        };
+
+        const request_json = try std.json.stringifyAlloc(std.testing.allocator, request, .{});
+        defer std.testing.allocator.free(request_json);
+
+        const json_parsed = try std.json.parseFromSlice(struct {
+            KeyId: []const u8,
+            CiphertextBlob: []const u8,
+        }, testing.allocator, request_json, .{ .ignore_unknown_fields = true });
+        defer json_parsed.deinit();
+
+        try testing.expectEqualStrings("foo", json_parsed.value.KeyId);
+        try testing.expectEqualStrings("bar", json_parsed.value.CiphertextBlob);
+    }
 }

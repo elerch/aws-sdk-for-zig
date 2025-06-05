@@ -213,6 +213,8 @@ fn writeStructureJson(params: WriteMemberJsonParams, writer: std.io.AnyWriter) !
             try writer.writeAll("try jw.endObject();\n");
 
             if (is_optional) {
+                try writer.writeAll("} else {\n");
+                try writer.writeAll("try jw.write(null);\n");
                 try writer.writeAll("}\n");
             }
         }
