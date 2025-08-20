@@ -5,10 +5,6 @@ AWS SDK for Zig
 
 [![Build Status: Zig 0.14.0](https://git.lerch.org/lobo/aws-sdk-for-zig/actions/workflows/build.yaml/badge.svg)](https://git.lerch.org/lobo/aws-sdk-for-zig/actions?workflow=build.yaml&state=closed)
 
-[Last Mach Nominated Zig Version](https://machengine.org/docs/nominated-zig/):
-
-[![Build Status: Mach nominated](https://git.lerch.org/lobo/aws-sdk-for-zig/actions/workflows/zig-mach.yaml/badge.svg)](https://git.lerch.org/lobo/aws-sdk-for-zig/actions?workflow=zig-mach.yaml&state=closed)
-
 [Nightly Zig](https://ziglang.org/download/):
 
 [![Build Status: Zig Nightly](https://git.lerch.org/lobo/aws-sdk-for-zig/actions/workflows/zig-nightly.yaml/badge.svg)](https://git.lerch.org/lobo/aws-sdk-for-zig/actions?workflow=zig-nightly.yaml&state=closed)
@@ -35,18 +31,14 @@ Branches
 --------
 
 * **master**:      This branch tracks the latest released zig version
-* **zig-0.13**:    This branch tracks the previous released zig version (0.13 currently).
+* **zig-0.13**:    This branch tracks the 0.13 released zig version.
                    Support for the previous version is best effort, generally
                    degrading over time. Fixes will generally appear in master, then
                    backported into the previous version.
-* **zig-mach**:    This branch tracks the latest mach nominated version. A separate
-                   branch is necessary as mach nominated is usually, but not always,
-                   more recent than the latest production zig. Support for the mach
-                   version is best effort.
 * **zig-develop**: This branch tracks zig nightly, and is used mainly as a canary
                    for breaking changes that will need to be dealt with when
-                   a new mach nominated version or new zig release appear.
-                   Expect significant delays in any build failures.
+                   a new zig release appears. Expect significant delays in any
+                   build failures (PRs always welcome!).
 
 Other branches/tags exist but are unsupported
 
@@ -100,6 +92,7 @@ TODO List:
 * Implement jitter/exponential backoff
 * Implement timeouts and other TODO's in the code
 * Add option to cache signature keys
+* Add CBOR support
 
 Dependency tree
 ---------------

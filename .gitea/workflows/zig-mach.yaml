@@ -1,8 +1,8 @@
 name: aws-zig mach nominated build
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '0 12 * * *' # noon UTC, 4AM Pacific
+  # schedule:
+  #   - cron: '0 12 * * *' # noon UTC, 4AM Pacific
   push:
     branches:
       - 'zig-mach'
