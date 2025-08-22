@@ -18,11 +18,9 @@ jobs:
       - name: Check out repository code
         uses: actions/checkout@v4
       - name: Setup Zig
-        uses: https://github.com/mlugg/setup-zig@v2.0.1
-        with:
-          version: 0.14.0
-      - name: Restore Zig caches
-        uses: https://github.com/Hanaasagi/zig-action-cache@3954aae427f8b05914e08dfd79f15e1f2e435929
+        uses: https://github.com/mlugg/setup-zig@v2.0.5
+        # We will let setup-zig use minimum_zig_version from build.zig.zon
+        # setup-zig also sets up the zig cache appropriately
       - name: Ulimit
         run: ulimit -a
       - name: Run smoke test

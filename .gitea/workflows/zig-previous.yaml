@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - 'zig-0.13'
+      - 'zig-0.14.x'
 env:
   ACTIONS_RUNTIME_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   ACTIONS_RUNTIME_URL: ${{ env.GITHUB_SERVER_URL }}/api/actions_pipeline/
@@ -18,13 +18,11 @@ jobs:
       - name: Check out repository code
         uses: actions/checkout@v4
         with:
-          ref: zig-0.13
+          ref: zig-0.14.x
       - name: Setup Zig
         uses: https://github.com/mlugg/setup-zig@v2.0.1
         with:
-          version: 0.13.0
-      - name: Restore Zig caches
-        uses: https://github.com/Hanaasagi/zig-action-cache@3954aae427f8b05914e08dfd79f15e1f2e435929
+          version: 0.14.0
       - name: Run smoke test
         run: zig build smoke-test --verbose
       - name: Run full tests
