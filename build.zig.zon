@@ -11,19 +11,20 @@
         "README.md",
         "LICENSE",
     },
+    .minimum_zig_version = "0.15.1",
 
     .dependencies = .{
         .smithy = .{
-            .url = "https://git.lerch.org/lobo/smithy/archive/fd9be1afbfcc60d52896c077d8e9c963bb667bf1.tar.gz",
-            .hash = "smithy-1.0.0-uAyBgZPSAgBHStx7nrj0u3sN66g8Ppnn3XFUEJhn00rP",
+            .url = "git+https://git.lerch.org/lobo/smithy.git#09c0a618877ebaf8e15fbfc505983876f4e063d5",
+            .hash = "smithy-1.0.0-uAyBgTnTAgBp2v6vypGcK5-YOCtxs2iEqR-4LfC5FTlS",
         },
         .models = .{
             .url = "https://github.com/aws/aws-sdk-go-v2/archive/refs/tags/release-2025-05-05.tar.gz",
             .hash = "N-V-__8AAKWdeiawujEcrfukQbb8lLAiQIRT0uG5gCcm4b7W",
         },
         .zeit = .{
-            .url = "git+https://github.com/rockorager/zeit#f86d568b89a5922f084dae524a1eaf709855cd5e",
-            .hash = "zeit-0.6.0-5I6bkzt5AgC1_BCuSzXkV0JHeF4Mhti1Z_jFC7E_nmD2",
+            .url = "git+https://github.com/rockorager/zeit?ref=zig-0.15#ed2ca60db118414bda2b12df2039e33bad3b0b88",
+            .hash = "zeit-0.6.0-5I6bk0J9AgCVa0nnyL0lNY9Xa9F68hHq-ZarhuXNV-Jb",
         },
         .date = .{
             .path = "lib/date",
@@ -32,8 +33,8 @@
             .path = "lib/json",
         },
         .case = .{
-            .url = "git+https://github.com/travisstaloch/case.git#610caade88ca54d2745f115114b08e73e2c6fe02",
-            .hash = "N-V-__8AAIfIAAC_RzCtghVVBVdqUzB8AaaGIyvK2WWz38bC",
+            .url = "git+https://github.com/travisstaloch/case.git#f8003fe5f93b65f673d10d41323e347225e8cb87",
+            .hash = "case-0.0.1-chGYqx_EAADaGJjmoln5M1iMBDTrMdd8to5wdEVpfXm4",
         },
     },
 }
