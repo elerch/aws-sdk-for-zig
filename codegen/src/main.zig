@@ -209,7 +209,7 @@ fn processFile(file_name: []const u8, output_dir: std.fs.Dir, manifest: *std.Io.
     var output = try std.Io.Writer.Allocating.initCapacity(allocator, 1024 * 1024 * 2);
     defer output.deinit();
 
-    var writer = output.writer;
+    const writer = &output.writer;
 
     _ = try writer.write("const std = @import(\"std\");\n");
     _ = try writer.write("const smithy = @import(\"smithy\");\n");
@@ -226,7 +226,7 @@ fn processFile(file_name: []const u8, output_dir: std.fs.Dir, manifest: *std.Io.
         allocator,
         ";",
         file_name,
-        &writer,
+        writer,
     ) catch |err| {
         std.log.err("Error processing file: {s}", .{file_name});
         return err;
