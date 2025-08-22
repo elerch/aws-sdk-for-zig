@@ -133,6 +133,7 @@ fn processDirectories(models_dir: std.fs.Dir, output_dir: std.fs.Dir, parent_pro
     const manifest_file = try output_dir.createFile("service_manifest.zig", .{});
     defer manifest_file.close();
     var manifest = manifest_file.writer(&manifest_buf);
+    defer manifest.interface.flush() catch @panic("Error flushing service_manifest.zig");
     var mi = models_dir.iterate();
 
     const generating_models_progress = parent_progress.start("generating models", count);
