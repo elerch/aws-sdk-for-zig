@@ -1,18 +1,17 @@
 AWS SDK for Zig
 ===============
 
-[Zig 0.14](https://ziglang.org/download/#release-0.14.0):
+[Zig 0.15.1](https://ziglang.org/download/#release-0.15.1):
 
-[![Build Status: Zig 0.14.0](https://git.lerch.org/lobo/aws-sdk-for-zig/actions/workflows/build.yaml/badge.svg)](https://git.lerch.org/lobo/aws-sdk-for-zig/actions?workflow=build.yaml&state=closed)
+[![Build Status: Zig 0.15.1](https://git.lerch.org/lobo/aws-sdk-for-zig/actions/workflows/build.yaml/badge.svg)](https://git.lerch.org/lobo/aws-sdk-for-zig/actions?workflow=build.yaml&state=closed)
 
 [Nightly Zig](https://ziglang.org/download/):
 
 [![Build Status: Zig Nightly](https://git.lerch.org/lobo/aws-sdk-for-zig/actions/workflows/zig-nightly.yaml/badge.svg)](https://git.lerch.org/lobo/aws-sdk-for-zig/actions?workflow=zig-nightly.yaml&state=closed)
 
-[Zig 0.13](https://ziglang.org/download/#release-0.13.0):
+[Zig 0.14.1](https://ziglang.org/download/#release-0.14.1):
 
-[![Build Status: Zig 0.13.0](https://git.lerch.org/lobo/aws-sdk-for-zig/actions/workflows/zig-previous.yaml/badge.svg)](https://git.lerch.org/lobo/aws-sdk-for-zig/actions?workflow=zig-previous.yaml&state=closed)
-
+[![Build Status: Zig 0.14.x](https://git.lerch.org/lobo/aws-sdk-for-zig/actions/workflows/zig-previous.yaml/badge.svg)](https://git.lerch.org/lobo/aws-sdk-for-zig/actions?workflow=zig-previous.yaml&state=closed)
 
 Current executable size for the demo is 980k after compiling with -Doptimize=ReleaseSmall
 in x86_64-linux, and will vary based on services used. Tested targets:
@@ -30,15 +29,15 @@ Tested targets are built, but not continuously tested, by CI.
 Branches
 --------
 
-* **master**:      This branch tracks the latest released zig version
-* **zig-0.13**:    This branch tracks the 0.13 released zig version.
-                   Support for the previous version is best effort, generally
-                   degrading over time. Fixes will generally appear in master, then
-                   backported into the previous version.
 * **zig-develop**: This branch tracks zig nightly, and is used mainly as a canary
                    for breaking changes that will need to be dealt with when
                    a new zig release appears. Expect significant delays in any
                    build failures (PRs always welcome!).
+* **master**:      This branch tracks the latest released zig version
+* **zig-0.14.x**:  This branch tracks the 0.14/0.14.1 released zig versions.
+                   Support for these previous version is best effort, generally
+                   degrading over time. Fixes will generally appear in master, then
+                   backported into the previous version.
 
 Other branches/tags exist but are unsupported
 
