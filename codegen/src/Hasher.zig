@@ -107,8 +107,9 @@ pub fn computeDirectoryHash(
     const arena = arena_instance.allocator();
 
     // Collect all files, recursively, then sort.
-    var all_files = std.ArrayList(*HashedFile).init(gpa);
-    defer all_files.deinit();
+    // Normally we're looking at around 300 model files
+    var all_files = try std.ArrayList(*HashedFile).initCapacity(gpa, 300);
+    defer all_files.deinit(gpa);
 
     var walker = try dir.walk(gpa);
     defer walker.deinit();
@@ -139,7 +140,7 @@ pub fn computeDirectoryHash(
             wait_group.start();
             try thread_pool.spawn(workerHashFile, .{ dir, hashed_file, &wait_group });
 
-            try all_files.append(hashed_file);
+            try all_files.append(gpa, hashed_file);
         }
     }
 
@@ -155,7 +156,7 @@ pub fn computeDirectoryHash(
         hasher.update(&hashed_file.hash);
     }
     if (any_failures) return error.DirectoryHashUnavailable;
-    if (options.needFileHashes) options.fileHashes = try all_files.toOwnedSlice();
+    if (options.needFileHashes) options.fileHashes = try all_files.toOwnedSlice(gpa);
     return hasher.finalResult();
 }
 fn workerHashFile(dir: std.fs.Dir, hashed_file: *HashedFile, wg: *std.Thread.WaitGroup) void {

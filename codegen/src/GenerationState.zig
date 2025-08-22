@@ -12,7 +12,7 @@ allocator: std.mem.Allocator,
 indent_level: u64,
 
 pub fn appendToTypeStack(self: @This(), shape_info: *const smithy.ShapeInfo) !void {
-    try self.type_stack.append(shape_info);
+    try self.type_stack.append(self.allocator, shape_info);
 }
 
 pub fn popFromTypeStack(self: @This()) void {

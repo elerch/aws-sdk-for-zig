@@ -1,11 +1,19 @@
 .{
-    .name = "aws-zig-codegen",
+    .name = .codegen,
     .version = "0.0.1",
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "README.md",
+        "LICENSE",
+    },
+    .fingerprint = 0x41c2ec2d551fe279,
 
     .dependencies = .{
         .smithy = .{
-            .url = "https://git.lerch.org/lobo/smithy/archive/41b61745d25a65817209dd5dddbb5f9b66896a99.tar.gz",
-            .hash = "122087deb0ae309b2258d59b40d82fe5921fdfc35b420bb59033244851f7f276fa34",
+            .url = "git+https://git.lerch.org/lobo/smithy.git#09c0a618877ebaf8e15fbfc505983876f4e063d5",
+            .hash = "smithy-1.0.0-uAyBgTnTAgBp2v6vypGcK5-YOCtxs2iEqR-4LfC5FTlS",
         },
     },
 }

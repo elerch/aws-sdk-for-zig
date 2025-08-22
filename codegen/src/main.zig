@@ -17,6 +17,9 @@ const ServiceShape = smt.ServiceShape;
 const ListShape = smt.ListShape;
 const MapShape = smt.MapShape;
 
+// manifest file 21k currently, but unbounded
+var manifest_buf: [1024 * 32]u8 = undefined;
+
 pub fn main() anyerror!void {
     const root_progress_node = std.Progress.start(.{});
     defer root_progress_node.end();
@@ -27,7 +30,8 @@ pub fn main() anyerror!void {
 
     const args = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, args);
-    const stdout = std.io.getStdOut().writer();
+    var stdout_writer = std.fs.File.stdout().writer(&.{});
+    const stdout = &stdout_writer.interface;
 
     var output_dir = std.fs.cwd();
     defer if (output_dir.fd > 0) output_dir.close();
@@ -48,11 +52,10 @@ pub fn main() anyerror!void {
             models_dir = try std.fs.cwd().openDir(args[i + 1], .{ .iterate = true });
     }
 
-    // TODO: We need a different way to handle this file...
-    const manifest_file_started = false;
-    var manifest_file: std.fs.File = undefined;
-    defer if (manifest_file_started) manifest_file.close();
-    var manifest: std.fs.File.Writer = undefined;
+    var manifest_file = try output_dir.createFile("service_manifest.zig", .{});
+    defer manifest_file.close();
+    var manifest = manifest_file.writer(&manifest_buf).interface;
+    defer manifest.flush() catch @panic("Could not flush service manifest");
     var files_processed: usize = 0;
     var skip_next = true;
     for (args) |arg| {
@@ -71,11 +74,7 @@ pub fn main() anyerror!void {
             skip_next = true;
             continue;
         }
-        if (!manifest_file_started) {
-            manifest_file = try output_dir.createFile("service_manifest.zig", .{});
-            manifest = manifest_file.writer();
-        }
-        try processFile(arg, output_dir, manifest);
+        try processFile(arg, output_dir, &manifest);
         files_processed += 1;
     }
     if (files_processed == 0) {
@@ -94,7 +93,7 @@ pub fn main() anyerror!void {
     }
 
     if (args.len == 0)
-        _ = try generateServices(allocator, ";", std.io.getStdIn(), stdout);
+        _ = try generateServices(allocator, ";", std.fs.File.stdin(), stdout);
 
     if (verbose) {
         const output_path = try output_dir.realpathAlloc(allocator, ".");
@@ -133,7 +132,7 @@ fn processDirectories(models_dir: std.fs.Dir, output_dir: std.fs.Dir, parent_pro
     // Do this in a brain dead fashion from here, no optimization
     const manifest_file = try output_dir.createFile("service_manifest.zig", .{});
     defer manifest_file.close();
-    const manifest = manifest_file.writer();
+    var manifest = manifest_file.writer(&manifest_buf);
     var mi = models_dir.iterate();
 
     const generating_models_progress = parent_progress.start("generating models", count);
@@ -141,18 +140,15 @@ fn processDirectories(models_dir: std.fs.Dir, output_dir: std.fs.Dir, parent_pro
 
     while (try mi.next()) |e| {
         if ((e.kind == .file or e.kind == .sym_link) and std.mem.endsWith(u8, e.name, ".json")) {
-            try processFile(e.name, output_dir, manifest);
+            try processFile(e.name, output_dir, &manifest.interface);
             generating_models_progress.completeOne();
         }
     }
     // re-calculate so we can store the manifest
     model_digest = calculated_manifest.model_dir_hash_digest;
     _, calculated_manifest = try calculateDigests(models_dir, output_dir, &thread_pool);
-    try output_dir.writeFile(.{ .sub_path = "output_manifest.json", .data = try std.json.stringifyAlloc(
-        allocator,
-        calculated_manifest,
-        .{ .whitespace = .indent_2 },
-    ) });
+    const data = try std.fmt.allocPrint(allocator, "{f}", .{std.json.fmt(calculated_manifest, .{ .whitespace = .indent_2 })});
+    try output_dir.writeFile(.{ .sub_path = "output_manifest.json", .data = data });
 }
 
 var model_digest: ?[Hasher.hex_multihash_len]u8 = null;
@@ -200,7 +196,7 @@ fn calculateDigests(models_dir: std.fs.Dir, output_dir: std.fs.Dir, thread_pool:
         },
     };
 }
-fn processFile(file_name: []const u8, output_dir: std.fs.Dir, manifest: anytype) !void {
+fn processFile(file_name: []const u8, output_dir: std.fs.Dir, manifest: *std.Io.Writer) !void {
     // It's probably best to create our own allocator here so we can deint at the end and
     // toss all allocations related to the services in this file
     // I can't guarantee we're not leaking something, and at the end of the
@@ -209,11 +205,10 @@ fn processFile(file_name: []const u8, output_dir: std.fs.Dir, manifest: anytype)
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    var output = try std.ArrayListUnmanaged(u8).initCapacity(allocator, 1024 * 1024 * 2);
-    defer output.deinit(allocator);
+    var output = try std.Io.Writer.Allocating.initCapacity(allocator, 1024 * 1024 * 2);
+    defer output.deinit();
 
-    var counting_writer = std.io.countingWriter(output.writer(allocator));
-    var writer = counting_writer.writer();
+    var writer = output.writer;
 
     _ = try writer.write("const std = @import(\"std\");\n");
     _ = try writer.write("const smithy = @import(\"smithy\");\n");
@@ -226,7 +221,12 @@ fn processFile(file_name: []const u8, output_dir: std.fs.Dir, manifest: anytype)
 
     if (verbose) std.log.info("Processing file: {s}", .{file_name});
 
-    const service_names = generateServicesForFilePath(allocator, ";", file_name, writer) catch |err| {
+    const service_names = generateServicesForFilePath(
+        allocator,
+        ";",
+        file_name,
+        &writer,
+    ) catch |err| {
         std.log.err("Error processing file: {s}", .{file_name});
         return err;
     };
@@ -249,7 +249,7 @@ fn processFile(file_name: []const u8, output_dir: std.fs.Dir, manifest: anytype)
         output_file_name = new_output_file_name;
     }
 
-    const unformatted: [:0]const u8 = try output.toOwnedSliceSentinel(allocator, 0);
+    const unformatted: [:0]const u8 = try output.toOwnedSliceSentinel(0);
     const formatted = try zigFmt(allocator, unformatted);
 
     // Dump our buffer out to disk
@@ -266,14 +266,17 @@ fn zigFmt(allocator: std.mem.Allocator, buffer: [:0]const u8) ![]const u8 {
     var tree = try std.zig.Ast.parse(allocator, buffer, .zig);
     defer tree.deinit(allocator);
 
-    return try tree.render(allocator);
+    var aw = try std.Io.Writer.Allocating.initCapacity(allocator, buffer.len);
+    defer aw.deinit();
+    try tree.render(allocator, &aw.writer, .{});
+    return aw.toOwnedSlice();
 }
 
 fn generateServicesForFilePath(
     allocator: std.mem.Allocator,
     comptime terminator: []const u8,
     path: []const u8,
-    writer: anytype,
+    writer: *std.Io.Writer,
 ) ![][]const u8 {
     const file = try std.fs.cwd().openFile(path, .{});
     defer file.close();
@@ -288,28 +291,34 @@ fn addReference(id: []const u8, map: *std.StringHashMap(u64)) !void {
         res.value_ptr.* = 1;
     }
 }
-fn countAllReferences(shape_ids: [][]const u8, shapes: std.StringHashMap(smithy.ShapeInfo), shape_references: *std.StringHashMap(u64), stack: *std.ArrayList([]const u8)) anyerror!void {
+fn countAllReferences(allocator: std.mem.Allocator, shape_ids: [][]const u8, shapes: std.StringHashMap(smithy.ShapeInfo), shape_references: *std.StringHashMap(u64), stack: *std.ArrayList([]const u8)) anyerror!void {
     for (shape_ids) |id| {
         const shape = shapes.get(id);
         if (shape == null) {
             std.log.err("Error - could not find shape with id {s}", .{id});
             return error.ShapeNotFound;
         }
-        try countReferences(shape.?, shapes, shape_references, stack);
+        try countReferences(allocator, shape.?, shapes, shape_references, stack);
     }
 }
-fn countTypeMembersReferences(type_members: []smithy.TypeMember, shapes: std.StringHashMap(smithy.ShapeInfo), shape_references: *std.StringHashMap(u64), stack: *std.ArrayList([]const u8)) anyerror!void {
+fn countTypeMembersReferences(allocator: std.mem.Allocator, type_members: []smithy.TypeMember, shapes: std.StringHashMap(smithy.ShapeInfo), shape_references: *std.StringHashMap(u64), stack: *std.ArrayList([]const u8)) anyerror!void {
     for (type_members) |m| {
         const target = shapes.get(m.target);
         if (target == null) {
             std.log.err("Error - could not find target {s}", .{m.target});
             return error.TargetNotFound;
         }
-        try countReferences(target.?, shapes, shape_references, stack);
+        try countReferences(allocator, target.?, shapes, shape_references, stack);
     }
 }
 
-fn countReferences(shape: smithy.ShapeInfo, shapes: std.StringHashMap(smithy.ShapeInfo), shape_references: *std.StringHashMap(u64), stack: *std.ArrayList([]const u8)) anyerror!void {
+fn countReferences(
+    allocator: std.mem.Allocator,
+    shape: smithy.ShapeInfo,
+    shapes: std.StringHashMap(smithy.ShapeInfo),
+    shape_references: *std.StringHashMap(u64),
+    stack: *std.ArrayList([]const u8),
+) anyerror!void {
     // Add ourselves as a reference, then we will continue down the tree
     try addReference(shape.id, shape_references);
     // Put ourselves on the stack. If we come back to ourselves, we want to end.
@@ -317,7 +326,7 @@ fn countReferences(shape: smithy.ShapeInfo, shapes: std.StringHashMap(smithy.Sha
         if (std.mem.eql(u8, shape.id, i))
             return;
     }
-    try stack.append(shape.id);
+    try stack.append(allocator, shape.id);
     defer _ = stack.pop();
     // Well, this is a fun read: https://awslabs.github.io/smithy/1.0/spec/core/model.html#recursive-shape-definitions
     // Looks like recursion has special rules in the spec to accomodate Java.
@@ -339,15 +348,15 @@ fn countReferences(shape: smithy.ShapeInfo, shapes: std.StringHashMap(smithy.Sha
         .unit,
         => {},
         .document, .member, .resource => {}, // less sure about these?
-        .list => |i| try countReferences(shapes.get(i.member_target).?, shapes, shape_references, stack),
-        .set => |i| try countReferences(shapes.get(i.member_target).?, shapes, shape_references, stack),
+        .list => |i| try countReferences(allocator, shapes.get(i.member_target).?, shapes, shape_references, stack),
+        .set => |i| try countReferences(allocator, shapes.get(i.member_target).?, shapes, shape_references, stack),
         .map => |i| {
-            try countReferences(shapes.get(i.key).?, shapes, shape_references, stack);
-            try countReferences(shapes.get(i.value).?, shapes, shape_references, stack);
+            try countReferences(allocator, shapes.get(i.key).?, shapes, shape_references, stack);
+            try countReferences(allocator, shapes.get(i.value).?, shapes, shape_references, stack);
         },
-        .structure => |m| try countTypeMembersReferences(m.members, shapes, shape_references, stack),
-        .uniontype => |m| try countTypeMembersReferences(m.members, shapes, shape_references, stack),
-        .service => |i| try countAllReferences(i.operations, shapes, shape_references, stack),
+        .structure => |m| try countTypeMembersReferences(allocator, m.members, shapes, shape_references, stack),
+        .uniontype => |m| try countTypeMembersReferences(allocator, m.members, shapes, shape_references, stack),
+        .service => |i| try countAllReferences(allocator, i.operations, shapes, shape_references, stack),
         .operation => |op| {
             if (op.input) |i| {
                 const val = shapes.get(i);
@@ -355,7 +364,7 @@ fn countReferences(shape: smithy.ShapeInfo, shapes: std.StringHashMap(smithy.Sha
                     std.log.err("Error processing shape with id \"{s}\". Input shape \"{s}\" was not found", .{ shape.id, i });
                     return error.ShapeNotFound;
                 }
-                try countReferences(val.?, shapes, shape_references, stack);
+                try countReferences(allocator, val.?, shapes, shape_references, stack);
             }
             if (op.output) |i| {
                 const val = shapes.get(i);
@@ -363,27 +372,31 @@ fn countReferences(shape: smithy.ShapeInfo, shapes: std.StringHashMap(smithy.Sha
                     std.log.err("Error processing shape with id \"{s}\". Output shape \"{s}\" was not found", .{ shape.id, i });
                     return error.ShapeNotFound;
                 }
-                try countReferences(val.?, shapes, shape_references, stack);
+                try countReferences(allocator, val.?, shapes, shape_references, stack);
             }
-            if (op.errors) |i| try countAllReferences(i, shapes, shape_references, stack);
+            if (op.errors) |i| try countAllReferences(allocator, i, shapes, shape_references, stack);
         },
-        .@"enum" => |m| try countTypeMembersReferences(m.members, shapes, shape_references, stack),
+        .@"enum" => |m| try countTypeMembersReferences(allocator, m.members, shapes, shape_references, stack),
     }
 }
 
-fn generateServices(allocator: std.mem.Allocator, comptime _: []const u8, file: std.fs.File, writer: anytype) ![][]const u8 {
+fn generateServices(
+    allocator: std.mem.Allocator,
+    comptime _: []const u8,
+    file: std.fs.File,
+    writer: *std.Io.Writer,
+) ![][]const u8 {
     const json = try file.readToEndAlloc(allocator, 1024 * 1024 * 1024);
     defer allocator.free(json);
     const model = try smithy.parse(allocator, json);
     defer model.deinit();
     var shapes = std.StringHashMap(smithy.ShapeInfo).init(allocator);
     defer shapes.deinit();
-    var services = std.ArrayList(smithy.ShapeInfo).init(allocator);
-    defer services.deinit();
+    var services = try std.ArrayList(smithy.ShapeInfo).initCapacity(allocator, model.shapes.len);
     for (model.shapes) |shape| {
         try shapes.put(shape.id, shape);
         switch (shape.shape) {
-            .service => try services.append(shape),
+            .service => services.appendAssumeCapacity(shape),
             else => {},
         }
     }
@@ -392,15 +405,15 @@ fn generateServices(allocator: std.mem.Allocator, comptime _: []const u8, file: 
     // a reference count in case there are recursive data structures
     var shape_references = std.StringHashMap(u64).init(allocator);
     defer shape_references.deinit();
-    var stack = std.ArrayList([]const u8).init(allocator);
-    defer stack.deinit();
+    var stack: std.ArrayList([]const u8) = .{};
+    defer stack.deinit(allocator);
     for (services.items) |service|
-        try countReferences(service, shapes, &shape_references, &stack);
+        try countReferences(allocator, service, shapes, &shape_references, &stack);
 
-    var constant_names = std.ArrayList([]const u8).init(allocator);
-    defer constant_names.deinit();
-    var unresolved = std.ArrayList(smithy.ShapeInfo).init(allocator);
-    defer unresolved.deinit();
+    var constant_names = try std.ArrayList([]const u8).initCapacity(allocator, services.items.len);
+    defer constant_names.deinit(allocator);
+    var unresolved: std.ArrayList(smithy.ShapeInfo) = .{};
+    defer unresolved.deinit(allocator);
     var generated = std.StringHashMap(void).init(allocator);
     defer generated.deinit();
 
@@ -445,7 +458,7 @@ fn generateServices(allocator: std.mem.Allocator, comptime _: []const u8, file: 
         // name of the field will be snake_case of whatever comes in from
         // sdk_id. Not sure this will simple...
         const constant_name = try support.constantName(allocator, sdk_id, .snake);
-        try constant_names.append(constant_name);
+        constant_names.appendAssumeCapacity(constant_name);
         try writer.print("const Self = @This();\n", .{});
         if (version) |v|
             try writer.print("pub const version: ?[]const u8 = \"{s}\";\n", .{v})
@@ -481,16 +494,16 @@ fn generateServices(allocator: std.mem.Allocator, comptime _: []const u8, file: 
             try generateOperation(allocator, shapes.get(op).?, state, writer);
     }
     try generateAdditionalTypes(allocator, state, writer);
-    return constant_names.toOwnedSlice();
+    return constant_names.toOwnedSlice(allocator);
 }
 
-fn generateAdditionalTypes(allocator: std.mem.Allocator, file_state: FileGenerationState, writer: anytype) !void {
+fn generateAdditionalTypes(allocator: std.mem.Allocator, file_state: FileGenerationState, writer: *std.Io.Writer) !void {
     // More types may be added during processing
     while (file_state.additional_types_to_generate.pop()) |t| {
         if (file_state.additional_types_generated.getEntry(t.name) != null) continue;
         // std.log.info("\t\t{s}", .{t.name});
-        var type_stack = std.ArrayList(*const smithy.ShapeInfo).init(allocator);
-        defer type_stack.deinit();
+        var type_stack: std.ArrayList(*const smithy.ShapeInfo) = .{};
+        defer type_stack.deinit(allocator);
         const state = GenerationState{
             .type_stack = &type_stack,
             .file_state = file_state,
@@ -510,9 +523,9 @@ fn generateAdditionalTypes(allocator: std.mem.Allocator, file_state: FileGenerat
     }
 }
 
-fn outputIndent(state: GenerationState, writer: anytype) !void {
+fn outputIndent(state: GenerationState, writer: *std.Io.Writer) !void {
     const n_chars = 4 * state.indent_level;
-    try writer.writeByteNTimes(' ', n_chars);
+    try writer.splatBytesAll(" ", n_chars);
 }
 
 const StructType = enum {
@@ -536,12 +549,12 @@ const operation_sub_types = [_]OperationSubTypeInfo{
     },
 };
 
-fn generateOperation(allocator: std.mem.Allocator, operation: smithy.ShapeInfo, file_state: FileGenerationState, writer: anytype) !void {
+fn generateOperation(allocator: std.mem.Allocator, operation: smithy.ShapeInfo, file_state: FileGenerationState, writer: *std.Io.Writer) !void {
     const snake_case_name = try support.constantName(allocator, operation.name, .snake);
     defer allocator.free(snake_case_name);
 
-    var type_stack = std.ArrayList(*const smithy.ShapeInfo).init(allocator);
-    defer type_stack.deinit();
+    var type_stack: std.ArrayList(*const smithy.ShapeInfo) = .{};
+    defer type_stack.deinit(allocator);
     const state = GenerationState{
         .type_stack = &type_stack,
         .file_state = file_state,
@@ -586,7 +599,12 @@ fn generateOperation(allocator: std.mem.Allocator, operation: smithy.ShapeInfo, 
                     new_state.indent_level = 0;
                     std.debug.assert(new_state.type_stack.items.len == 0);
 
-                    try serialization.json.generateToJsonFunction(shape_id, writer.any(), new_state, generate_type_options.keyCase(.pascal));
+                    try serialization.json.generateToJsonFunction(
+                        shape_id,
+                        writer,
+                        new_state,
+                        generate_type_options.keyCase(.pascal),
+                    );
 
                     try writer.writeAll("\n");
                 },
@@ -638,7 +656,7 @@ fn generateOperation(allocator: std.mem.Allocator, operation: smithy.ShapeInfo, 
     _ = try writer.write("} = .{};\n");
 }
 
-fn generateMetadataFunction(operation_name: []const u8, state: GenerationState, writer: anytype, options: GenerateTypeOptions) !void {
+fn generateMetadataFunction(operation_name: []const u8, state: GenerationState, writer: *std.Io.Writer, options: GenerateTypeOptions) !void {
     // TODO: Shove these lines in here, and also the else portion
     // pub fn metaInfo(self: @This()) struct { service: @TypeOf(sts), action: @TypeOf(sts.get_caller_identity) } {
     //     return .{ .service = sts, .action = sts.get_caller_identity };
@@ -699,7 +717,7 @@ fn getTypeName(allocator: std.mem.Allocator, shape: smithy.ShapeInfo) ![]const u
     }
 }
 
-fn reuseCommonType(shape: smithy.ShapeInfo, writer: anytype, state: GenerationState) !bool {
+fn reuseCommonType(shape: smithy.ShapeInfo, writer: *std.Io.Writer, state: GenerationState) !bool {
     // We want to return if we're at the top level of the stack. There are three
     // reasons for this:
     // 1. For operations, we have a request that includes a metadata function
@@ -729,14 +747,14 @@ fn reuseCommonType(shape: smithy.ShapeInfo, writer: anytype, state: GenerationSt
             rc = true;
             _ = try writer.write(type_name); // This can't possibly be this easy...
             if (state.file_state.additional_types_generated.getEntry(shape.name) == null)
-                try state.file_state.additional_types_to_generate.append(shape);
+                try state.file_state.additional_types_to_generate.append(state.allocator, shape);
         }
     }
     return rc;
 }
 
 /// return type is anyerror!void as this is a recursive function, so the compiler cannot properly infer error types
-fn generateTypeFor(shape_id: []const u8, writer: anytype, state: GenerationState, comptime options: GenerateTypeOptions) anyerror!bool {
+fn generateTypeFor(shape_id: []const u8, writer: *std.Io.Writer, state: GenerationState, comptime options: GenerateTypeOptions) anyerror!bool {
     const end_structure = options.end_structure;
 
     var rc = false;
@@ -808,7 +826,8 @@ fn generateTypeFor(shape_id: []const u8, writer: anytype, state: GenerationState
         .float => |s| try generateSimpleTypeFor(s, "f32", writer),
         .long => |s| try generateSimpleTypeFor(s, "i64", writer),
         .map => |m| {
-            if (!try reuseCommonType(shape_info, std.io.null_writer, state)) {
+            var null_writer = std.Io.Writer.Discarding.init(&.{}).writer;
+            if (!try reuseCommonType(shape_info, &null_writer, state)) {
                 try generateMapTypeFor(m, writer, state, options);
                 rc = true;
             } else {
@@ -825,7 +844,7 @@ fn generateTypeFor(shape_id: []const u8, writer: anytype, state: GenerationState
     return rc;
 }
 
-fn generateMapTypeFor(map: anytype, writer: anytype, state: GenerationState, comptime options: GenerateTypeOptions) anyerror!void {
+fn generateMapTypeFor(map: anytype, writer: *std.Io.Writer, state: GenerationState, comptime options: GenerateTypeOptions) anyerror!void {
     _ = try writer.write("struct {\n");
 
     try writer.writeAll("pub const is_map_type = true;\n\n");
@@ -848,12 +867,12 @@ fn generateMapTypeFor(map: anytype, writer: anytype, state: GenerationState, com
     _ = try writer.write("}");
 }
 
-fn generateSimpleTypeFor(_: anytype, type_name: []const u8, writer: anytype) !void {
+fn generateSimpleTypeFor(_: anytype, type_name: []const u8, writer: *std.Io.Writer) !void {
     _ = try writer.write(type_name); // This had required stuff but the problem was elsewhere. Better to leave as function just in case
 }
 
 const Mapping = struct { snake: []const u8, original: []const u8 };
-fn generateComplexTypeFor(shape_id: []const u8, members: []smithy.TypeMember, type_type_name: []const u8, writer: anytype, state: GenerationState, comptime options: GenerateTypeOptions) anyerror!void {
+fn generateComplexTypeFor(shape_id: []const u8, members: []smithy.TypeMember, type_type_name: []const u8, writer: *std.Io.Writer, state: GenerationState, comptime options: GenerateTypeOptions) anyerror!void {
     _ = shape_id;
 
     var arena = std.heap.ArenaAllocator.init(state.allocator);
@@ -861,7 +880,7 @@ fn generateComplexTypeFor(shape_id: []const u8, members: []smithy.TypeMember, ty
     const allocator = arena.allocator();
 
     var field_name_mappings = try std.ArrayList(Mapping).initCapacity(allocator, members.len);
-    defer field_name_mappings.deinit();
+    defer field_name_mappings.deinit(allocator);
     // There is an httpQueryParams trait as well, but nobody is using it. API GW
     // pretends to, but it's an empty map
     //
@@ -869,13 +888,13 @@ fn generateComplexTypeFor(shape_id: []const u8, members: []smithy.TypeMember, ty
     //
     // httpLabel is interesting - right now we just assume anything can be used - do we need to track this?
     var http_query_mappings = try std.ArrayList(Mapping).initCapacity(allocator, members.len);
-    defer http_query_mappings.deinit();
+    defer http_query_mappings.deinit(allocator);
 
     var http_header_mappings = try std.ArrayList(Mapping).initCapacity(allocator, members.len);
-    defer http_header_mappings.deinit();
+    defer http_header_mappings.deinit(allocator);
 
-    var map_fields = std.ArrayList([]const u8).init(allocator);
-    defer map_fields.deinit();
+    var map_fields = try std.ArrayList([]const u8).initCapacity(allocator, members.len);
+    defer map_fields.deinit(allocator);
 
     // prolog. We'll rely on caller to get the spacing correct here
     _ = try writer.write(type_type_name);
@@ -930,7 +949,7 @@ fn generateComplexTypeFor(shape_id: []const u8, members: []smithy.TypeMember, ty
         try writer.print("{s}: ", .{member_name});
         try writeOptional(member.traits, writer, null);
         if (try generateTypeFor(member.target, writer, child_state, options.endStructure(true)))
-            try map_fields.append(try std.fmt.allocPrint(allocator, "{s}", .{member_name}));
+            map_fields.appendAssumeCapacity(try std.fmt.allocPrint(allocator, "{s}", .{member_name}));
 
         if (!std.mem.eql(u8, "union", type_type_name))
             try writeOptional(member.traits, writer, " = null");
@@ -978,7 +997,14 @@ fn generateComplexTypeFor(shape_id: []const u8, members: []smithy.TypeMember, ty
     _ = try writer.write("}\n");
 }
 
-fn writeMappings(state: GenerationState, @"pub": []const u8, mapping_name: []const u8, mappings: anytype, force_output: bool, writer: anytype) !void {
+fn writeMappings(
+    state: GenerationState,
+    @"pub": []const u8,
+    mapping_name: []const u8,
+    mappings: anytype,
+    force_output: bool,
+    writer: *std.Io.Writer,
+) !void {
     if (mappings.items.len == 0 and !force_output) return;
     try outputIndent(state, writer);
     if (mappings.items.len == 0) {
@@ -998,7 +1024,7 @@ fn writeMappings(state: GenerationState, @"pub": []const u8, mapping_name: []con
     _ = try writer.write("};\n");
 }
 
-fn writeOptional(traits: ?[]smithy.Trait, writer: anytype, value: ?[]const u8) !void {
+fn writeOptional(traits: ?[]smithy.Trait, writer: *std.Io.Writer, value: ?[]const u8) !void {
     if (traits) |ts| if (smt.hasTrait(.required, ts)) return;
     try writer.writeAll(value orelse "?");
 }

@@ -17,7 +17,7 @@ const JsonMember = struct {
     shape_info: smithy.ShapeInfo,
 };
 
-pub fn generateToJsonFunction(shape_id: []const u8, writer: std.io.AnyWriter, state: GenerationState, comptime options: GenerateTypeOptions) !void {
+pub fn generateToJsonFunction(shape_id: []const u8, writer: *std.Io.Writer, state: GenerationState, comptime options: GenerateTypeOptions) !void {
     _ = options;
     const allocator = state.allocator;
 
@@ -117,15 +117,15 @@ fn getMemberValueJson(allocator: std.mem.Allocator, source: []const u8, member: 
     const member_value = try std.fmt.allocPrint(allocator, "@field({s}, \"{s}\")", .{ source, member.field_name });
     defer allocator.free(member_value);
 
-    var output_block = std.ArrayListUnmanaged(u8){};
-    const writer = output_block.writer(allocator);
+    var output_block = std.Io.Writer.Allocating.init(allocator);
+    defer output_block.deinit();
 
     try writeMemberValue(
-        writer,
+        &output_block.writer,
         member_value,
     );
 
-    return output_block.toOwnedSlice(allocator);
+    return output_block.toOwnedSlice();
 }
 
 fn getShapeJsonValueType(shape: Shape) []const u8 {
@@ -139,7 +139,7 @@ fn getShapeJsonValueType(shape: Shape) []const u8 {
 }
 
 fn writeMemberValue(
-    writer: anytype,
+    writer: *std.Io.Writer,
     member_value: []const u8,
 ) !void {
     try writer.writeAll(member_value);
@@ -153,7 +153,7 @@ const WriteMemberJsonParams = struct {
     member: smithy.TypeMember,
 };
 
-fn writeStructureJson(params: WriteMemberJsonParams, writer: std.io.AnyWriter) !void {
+fn writeStructureJson(params: WriteMemberJsonParams, writer: *std.Io.Writer) !void {
     const shape_type = "structure";
     const allocator = params.state.allocator;
     const state = params.state;
@@ -221,7 +221,7 @@ fn writeStructureJson(params: WriteMemberJsonParams, writer: std.io.AnyWriter) !
     }
 }
 
-fn writeListJson(list: smithy_tools.ListShape, params: WriteMemberJsonParams, writer: std.io.AnyWriter) anyerror!void {
+fn writeListJson(list: smithy_tools.ListShape, params: WriteMemberJsonParams, writer: *std.Io.Writer) anyerror!void {
     const state = params.state;
     const allocator = state.allocator;
 
@@ -274,7 +274,7 @@ fn writeListJson(list: smithy_tools.ListShape, params: WriteMemberJsonParams, wr
     }
 }
 
-fn writeMapJson(map: smithy_tools.MapShape, params: WriteMemberJsonParams, writer: std.io.AnyWriter) anyerror!void {
+fn writeMapJson(map: smithy_tools.MapShape, params: WriteMemberJsonParams, writer: *std.Io.Writer) anyerror!void {
     const state = params.state;
     const name = params.field_name;
     const value = params.field_value;
@@ -351,11 +351,11 @@ fn writeMapJson(map: smithy_tools.MapShape, params: WriteMemberJsonParams, write
     }
 }
 
-fn writeScalarJson(comment: []const u8, params: WriteMemberJsonParams, writer: std.io.AnyWriter) anyerror!void {
+fn writeScalarJson(comment: []const u8, params: WriteMemberJsonParams, writer: *std.Io.Writer) anyerror!void {
     try writer.print("try jw.write({s}); // {s}\n\n", .{ params.field_value, comment });
 }
 
-fn writeMemberJson(params: WriteMemberJsonParams, writer: std.io.AnyWriter) anyerror!void {
+fn writeMemberJson(params: WriteMemberJsonParams, writer: *std.Io.Writer) anyerror!void {
     const shape_id = params.shape_id;
     const state = params.state;
     const shape_info = try smithy_tools.getShapeInfo(shape_id, state.file_state.shapes);
