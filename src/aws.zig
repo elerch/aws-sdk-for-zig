@@ -1165,22 +1165,22 @@ fn buildPath(
                 inline for (std.meta.fields(ActionRequest)) |field| {
                     if (std.mem.eql(u8, request.fieldNameFor(field.name), replacement_label)) {
                         try replaced_fields.append(allocator, replacement_label);
-                        var replacement_buffer = try std.ArrayList(u8).initCapacity(allocator, raw_uri.len);
-                        defer replacement_buffer.deinit(allocator);
+                        var replacement_buffer = try std.Io.Writer.Allocating.initCapacity(allocator, raw_uri.len);
+                        defer replacement_buffer.deinit();
 
-                        var encoded_buffer = std.Io.Writer.Allocating.init(allocator);
-                        defer encoded_buffer.deinit();
-
-                        try (&encoded_buffer.writer).print(
+                        try (&replacement_buffer.writer).print(
                             "{f}",
                             .{std.json.fmt(
                                 @field(request, field.name),
                                 .{ .whitespace = .indent_4 },
                             )},
                         );
-                        const trimmed_replacement_val = std.mem.trim(u8, replacement_buffer.items, "\"");
+                        const trimmed_replacement_val = std.mem.trim(u8, replacement_buffer.written(), "\"");
+
                         // NOTE: We have to encode here as it is a portion of the rest JSON protocol.
                         // This makes the encoding in the standard library wrong
+                        var encoded_buffer = try std.Io.Writer.Allocating.initCapacity(allocator, raw_uri.len);
+                        defer encoded_buffer.deinit();
                         try uriEncode(trimmed_replacement_val, &encoded_buffer.writer, encode_slash);
                         try buffer.appendSlice(allocator, encoded_buffer.written());
                     }
@@ -1442,7 +1442,6 @@ test "REST Json v1 buildpath substitutes" {
     try std.testing.expectEqualStrings("https://myhost/1/", output_path);
 }
 test "REST Json v1 buildpath handles restricted characters" {
-    if (true) return error.SkipZigTest;
     const allocator = std.testing.allocator;
     var al = std.ArrayList([]const u8){};
     defer al.deinit(allocator);
