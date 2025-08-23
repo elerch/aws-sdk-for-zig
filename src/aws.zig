@@ -1,11 +1,11 @@
 const builtin = @import("builtin");
+const case = @import("case");
 const std = @import("std");
 const zeit = @import("zeit");
 
 const awshttp = @import("aws_http.zig");
 const json = @import("json");
 const url = @import("url.zig");
-const case = @import("case.zig");
 const date = @import("date");
 const servicemodel = @import("servicemodel.zig");
 const xml_shaper = @import("xml_shaper.zig");
@@ -196,8 +196,8 @@ pub fn Request(comptime request_action: anytype) type {
             log.debug("Rest method: '{s}'", .{aws_request.method});
             log.debug("Rest success code: '{d}'", .{Action.http_config.success_code});
             log.debug("Rest raw uri: '{s}'", .{Action.http_config.uri});
-            var al = std.ArrayList([]const u8).init(options.client.allocator);
-            defer al.deinit();
+            var al = std.ArrayList([]const u8){};
+            defer al.deinit(options.client.allocator);
             aws_request.path = try buildPath(
                 options.client.allocator,
                 Action.http_config.uri,
@@ -230,14 +230,13 @@ pub fn Request(comptime request_action: anytype) type {
             log.debug("Rest query: '{s}'", .{aws_request.query});
             defer options.client.allocator.free(aws_request.query);
             // We don't know if we need a body...guessing here, this should cover most
-            var buffer = std.ArrayList(u8).init(options.client.allocator);
+            var buffer = std.Io.Writer.Allocating.init(options.client.allocator);
             defer buffer.deinit();
             if (Self.service_meta.aws_protocol == .rest_json_1) {
-                if (std.mem.eql(u8, "PUT", aws_request.method) or std.mem.eql(u8, "POST", aws_request.method)) {
-                    try std.json.stringify(request, .{ .whitespace = .indent_4 }, buffer.writer());
-                }
+                if (std.mem.eql(u8, "PUT", aws_request.method) or std.mem.eql(u8, "POST", aws_request.method))
+                    try buffer.writer.print("{f}", .{std.json.fmt(request, .{ .whitespace = .indent_4 })});
             }
-            aws_request.body = buffer.items;
+            aws_request.body = buffer.written();
             var rest_xml_body: ?[]const u8 = null;
             defer if (rest_xml_body) |b| options.client.allocator.free(b);
             if (Self.service_meta.aws_protocol == .rest_xml) {
@@ -315,9 +314,6 @@ pub fn Request(comptime request_action: anytype) type {
                 });
             defer options.client.allocator.free(target);
 
-            var buffer = std.ArrayList(u8).init(options.client.allocator);
-            defer buffer.deinit();
-
             // The transformer needs to allocate stuff out of band, but we
             // can guarantee we don't need the memory after this call completes,
             // so we'll use an arena allocator to whack everything.
@@ -326,7 +322,13 @@ pub fn Request(comptime request_action: anytype) type {
             //       smithy spec, "A null value MAY be provided or omitted
             //       for a boxed member with no observable difference." But we're
             //       seeing a lot of differences here between spec and reality
-            try std.json.stringify(request, .{ .whitespace = .indent_4 }, buffer.writer());
+
+            const body = try std.fmt.allocPrint(
+                options.client.allocator,
+                "{f}",
+                .{std.json.fmt(request, .{ .whitespace = .indent_4 })},
+            );
+            defer options.client.allocator.free(body);
 
             var content_type: []const u8 = undefined;
             switch (Self.service_meta.aws_protocol) {
@@ -336,7 +338,7 @@ pub fn Request(comptime request_action: anytype) type {
             }
             return try Self.callAws(.{
                 .query = "",
-                .body = buffer.items,
+                .body = body,
                 .content_type = content_type,
                 .headers = @constCast(&[_]awshttp.Header{.{ .name = "X-Amz-Target", .value = target }}),
             }, options);
@@ -348,13 +350,13 @@ pub fn Request(comptime request_action: anytype) type {
         // handle lists and maps properly anyway yet, so we'll go for it and see
         // where it breaks. PRs and/or failing test cases appreciated.
         fn callQuery(request: ActionRequest, options: Options) !FullResponseType {
-            var buffer = std.ArrayList(u8).init(options.client.allocator);
-            defer buffer.deinit();
-            const writer = buffer.writer();
+            var aw: std.Io.Writer.Allocating = .init(options.client.allocator);
+            defer aw.deinit();
+            const writer = &aw.writer;
             try url.encode(options.client.allocator, request, writer, .{
                 .field_name_transformer = queryFieldTransformer,
             });
-            const continuation = if (buffer.items.len > 0) "&" else "";
+            const continuation = if (aw.written().len > 0) "&" else "";
 
             const query = if (Self.service_meta.aws_protocol == .query)
                 ""
@@ -376,7 +378,7 @@ pub fn Request(comptime request_action: anytype) type {
                     action.action_name,
                     Self.service_meta.version.?, // Version required for the protocol, we should panic if it is not present
                     continuation,
-                    buffer.items,
+                    aw.written(),
                 });
             defer options.client.allocator.free(body);
 
@@ -889,9 +891,25 @@ fn parseInt(comptime T: type, val: []const u8) !T {
 }
 
 fn generalAllocPrint(allocator: Allocator, val: anytype) !?[]const u8 {
-    switch (@typeInfo(@TypeOf(val))) {
+    const T = @TypeOf(val);
+    switch (@typeInfo(T)) {
         .optional => if (val) |v| return generalAllocPrint(allocator, v) else return null,
-        .array, .pointer => return try std.fmt.allocPrint(allocator, "{s}", .{val}),
+        .array, .pointer => switch (@typeInfo(T)) {
+            .array => return try std.fmt.allocPrint(allocator, "{s}", .{val}),
+            .pointer => |info| switch (info.size) {
+                .one => return try std.fmt.allocPrint(allocator, "{s}", .{val}),
+                .many => return try std.fmt.allocPrint(allocator, "{s}", .{val}),
+                .slice => {
+                    log.warn(
+                        "printing object of type [][]const u8...pretty sure this is wrong: {any}",
+                        .{val},
+                    );
+                    return try std.fmt.allocPrint(allocator, "{any}", .{val});
+                },
+                .c => return try std.fmt.allocPrint(allocator, "{s}", .{val}),
+            },
+            else => {},
+        },
         else => return try std.fmt.allocPrint(allocator, "{any}", .{val}),
     }
 }
@@ -904,6 +922,7 @@ fn headersFor(allocator: Allocator, request: anytype) ![]awshttp.Header {
     // It would be awesome to have a fixed array, but we can't because
     // it depends on a runtime value based on whether these variables are null
     var headers = try std.ArrayList(awshttp.Header).initCapacity(allocator, fields.len);
+    defer headers.deinit(allocator);
     inline for (fields) |f| {
         // Header name = value of field
         // Header value = value of the field of the request based on field name
@@ -916,7 +935,7 @@ fn headersFor(allocator: Allocator, request: anytype) ![]awshttp.Header {
             });
         }
     }
-    return headers.toOwnedSlice();
+    return headers.toOwnedSlice(allocator);
 }
 
 fn freeHeadersFor(allocator: Allocator, request: anytype, headers: []const awshttp.Header) void {
@@ -1027,14 +1046,14 @@ fn ServerResponse(comptime action: anytype) type {
                     .type = T,
                     .default_value_ptr = null,
                     .is_comptime = false,
-                    .alignment = 0,
+                    .alignment = std.meta.alignment(T),
                 },
                 .{
                     .name = "ResponseMetadata",
                     .type = ResponseMetadata,
                     .default_value_ptr = null,
                     .is_comptime = false,
-                    .alignment = 0,
+                    .alignment = std.meta.alignment(ResponseMetadata),
                 },
             },
             .decls = &[_]std.builtin.Type.Declaration{},
@@ -1050,7 +1069,7 @@ fn ServerResponse(comptime action: anytype) type {
                     .type = Result,
                     .default_value_ptr = null,
                     .is_comptime = false,
-                    .alignment = 0,
+                    .alignment = std.meta.alignment(Result),
                 },
             },
             .decls = &[_]std.builtin.Type.Declaration{},
@@ -1111,7 +1130,13 @@ fn safeFree(allocator: Allocator, obj: anytype) void {
     }
 }
 fn queryFieldTransformer(allocator: Allocator, field_name: []const u8) anyerror![]const u8 {
-    return try case.snakeToPascal(allocator, field_name);
+    var reader = std.Io.Reader.fixed(field_name);
+    var aw = try std.Io.Writer.Allocating.initCapacity(allocator, 100);
+    defer aw.deinit();
+    const writer = &aw.writer;
+    try case.to(.pascal, &reader, writer);
+    return aw.toOwnedSlice();
+    // return try case.snakeToPascal(allocator, field_name);
 }
 
 fn buildPath(
@@ -1123,8 +1148,7 @@ fn buildPath(
     replaced_fields: *std.ArrayList([]const u8),
 ) ![]const u8 {
     var buffer = try std.ArrayList(u8).initCapacity(allocator, raw_uri.len);
-    // const writer = buffer.writer();
-    defer buffer.deinit();
+    defer buffer.deinit(allocator);
     var in_label = false;
     var start: usize = 0;
     for (raw_uri, 0..) |c, inx| {
@@ -1142,40 +1166,42 @@ fn buildPath(
                 const replacement_label = raw_uri[start..end];
                 inline for (std.meta.fields(ActionRequest)) |field| {
                     if (std.mem.eql(u8, request.fieldNameFor(field.name), replacement_label)) {
-                        try replaced_fields.append(replacement_label);
+                        try replaced_fields.append(allocator, replacement_label);
                         var replacement_buffer = try std.ArrayList(u8).initCapacity(allocator, raw_uri.len);
-                        defer replacement_buffer.deinit();
-                        var encoded_buffer = try std.ArrayList(u8).initCapacity(allocator, raw_uri.len);
+                        defer replacement_buffer.deinit(allocator);
+
+                        var encoded_buffer = std.Io.Writer.Allocating.init(allocator);
                         defer encoded_buffer.deinit();
-                        const replacement_writer = replacement_buffer.writer();
-                        // std.mem.replacementSize
-                        try std.json.stringify(
-                            @field(request, field.name),
-                            .{ .whitespace = .indent_4 },
-                            replacement_writer,
+
+                        try (&encoded_buffer.writer).print(
+                            "{f}",
+                            .{std.json.fmt(
+                                @field(request, field.name),
+                                .{ .whitespace = .indent_4 },
+                            )},
                         );
                         const trimmed_replacement_val = std.mem.trim(u8, replacement_buffer.items, "\"");
                         // NOTE: We have to encode here as it is a portion of the rest JSON protocol.
                         // This makes the encoding in the standard library wrong
-                        try uriEncode(trimmed_replacement_val, encoded_buffer.writer(), encode_slash);
-                        try buffer.appendSlice(encoded_buffer.items);
+                        try uriEncode(trimmed_replacement_val, &encoded_buffer.writer, encode_slash);
+                        try buffer.appendSlice(allocator, encoded_buffer.written());
                     }
                 }
             },
             else => if (!in_label) {
-                try buffer.append(c);
+                try buffer.append(allocator, c);
             } else {},
         }
     }
-    return buffer.toOwnedSlice();
+    return buffer.toOwnedSlice(allocator);
 }
 
-fn uriEncode(input: []const u8, writer: anytype, encode_slash: bool) !void {
+fn uriEncode(input: []const u8, writer: *std.Io.Writer, encode_slash: bool) !void {
     for (input) |c|
         try uriEncodeByte(c, writer, encode_slash);
 }
 
-fn uriEncodeByte(char: u8, writer: anytype, encode_slash: bool) !void {
+fn uriEncodeByte(char: u8, writer: *std.Io.Writer, encode_slash: bool) !void {
     switch (char) {
         '!' => _ = try writer.write("%21"),
         '#' => _ = try writer.write("%23"),
@@ -1209,9 +1235,9 @@ fn buildQuery(allocator: Allocator, request: anytype) ![]const u8 {
     //     .function_version = "FunctionVersion",
     //     .marker = "Marker",
     // };
-    var buffer = std.ArrayList(u8).init(allocator);
-    const writer = buffer.writer();
+    var buffer = std.Io.Writer.Allocating.init(allocator);
     defer buffer.deinit();
+    const writer = &buffer.writer;
     var prefix = "?";
     if (@hasDecl(@TypeOf(request), "http_query")) {
         const query_arguments = @field(@TypeOf(request), "http_query");
@@ -1224,7 +1250,7 @@ fn buildQuery(allocator: Allocator, request: anytype) ![]const u8 {
     return buffer.toOwnedSlice();
 }
 
-fn addQueryArg(comptime ValueType: type, prefix: []const u8, key: []const u8, value: anytype, writer: anytype) !bool {
+fn addQueryArg(comptime ValueType: type, prefix: []const u8, key: []const u8, value: anytype, writer: *std.Io.Writer) !bool {
     switch (@typeInfo(@TypeOf(value))) {
         .optional => {
             if (value) |v|
@@ -1259,69 +1285,77 @@ fn addQueryArg(comptime ValueType: type, prefix: []const u8, key: []const u8, va
         },
     }
 }
-fn addBasicQueryArg(prefix: []const u8, key: []const u8, value: anytype, writer: anytype) !bool {
+fn addBasicQueryArg(prefix: []const u8, key: []const u8, value: anytype, writer: *std.Io.Writer) !bool {
     _ = try writer.write(prefix);
     // TODO: url escaping
     try uriEncode(key, writer, true);
     _ = try writer.write("=");
-    var encoding_writer = uriEncodingWriter(writer);
-    var ignoring_writer = ignoringWriter(encoding_writer.writer(), '"');
-    try std.json.stringify(value, .{}, ignoring_writer.writer());
+    var encoding_writer = UriEncodingWriter.init(writer);
+    var ignoring_writer = IgnoringWriter.init(&encoding_writer.writer, '"');
+    try ignoring_writer.writer.print("{f}", .{std.json.fmt(value, .{})});
     return true;
 }
-pub fn uriEncodingWriter(child_stream: anytype) UriEncodingWriter(@TypeOf(child_stream)) {
-    return .{ .child_stream = child_stream };
-}
+
+const UriEncodingWriter = struct {
+    child_writer: *std.Io.Writer,
+    writer: std.Io.Writer,
+
+    pub fn init(child: *std.Io.Writer) UriEncodingWriter {
+        return .{
+            .child_writer = child,
+            .writer = .{
+                .buffer = &.{},
+                .vtable = &.{
+                    .drain = drain,
+                },
+            },
+        };
+    }
+
+    fn drain(w: *std.Io.Writer, data: []const []const u8, splat: usize) std.Io.Writer.Error!usize {
+        if (splat > 0) return error.WriteFailed; // no splat support
+        const self: *UriEncodingWriter = @fieldParentPtr("writer", w);
+        var total: usize = 0;
+        for (data) |bytes| {
+            try uriEncode(bytes, self.child_writer, true);
+            total += bytes.len;
+        }
+        return total; // We say that all bytes are "written", even if they're not, as caller may be retrying
+    }
+};
 
 /// A Writer that ignores a character
-pub fn UriEncodingWriter(comptime WriterType: type) type {
-    return struct {
-        child_stream: WriterType,
+const IgnoringWriter = struct {
+    child_writer: *std.Io.Writer,
+    ignore: u8,
+    writer: std.Io.Writer,
 
-        pub const Error = WriterType.Error;
-        pub const Writer = std.io.Writer(*Self, Error, write);
+    pub fn init(child: *std.Io.Writer, ignore: u8) IgnoringWriter {
+        return .{
+            .child_writer = child,
+            .ignore = ignore,
+            .writer = .{
+                .buffer = &.{},
+                .vtable = &.{
+                    .drain = drain,
+                },
+            },
+        };
+    }
 
-        const Self = @This();
-
-        pub fn write(self: *Self, bytes: []const u8) Error!usize {
-            try uriEncode(bytes, self.child_stream, true);
-            return bytes.len; // We say that all bytes are "written", even if they're not, as caller may be retrying
-        }
-
-        pub fn writer(self: *Self) Writer {
-            return .{ .context = self };
-        }
-    };
-}
-
-pub fn ignoringWriter(child_stream: anytype, ignore: u8) IgnoringWriter(@TypeOf(child_stream)) {
-    return .{ .child_stream = child_stream, .ignore = ignore };
-}
-
-/// A Writer that ignores a character
-pub fn IgnoringWriter(comptime WriterType: type) type {
-    return struct {
-        child_stream: WriterType,
-        ignore: u8,
-
-        pub const Error = WriterType.Error;
-        pub const Writer = std.io.Writer(*Self, Error, write);
-
-        const Self = @This();
-
-        pub fn write(self: *Self, bytes: []const u8) Error!usize {
-            for (bytes) |b| {
+    fn drain(w: *std.Io.Writer, data: []const []const u8, splat: usize) std.Io.Writer.Error!usize {
+        if (splat > 0) return error.WriteFailed; // no splat support
+        const self: *IgnoringWriter = @fieldParentPtr("writer", w);
+        var total: usize = 0;
+        for (data) |bytes| {
+            for (bytes) |b|
                 if (b != self.ignore)
-                    try self.child_stream.writeByte(b);
-            }
-            return bytes.len; // We say that all bytes are "written", even if they're not, as caller may be retrying
+                    try self.child_writer.writeByte(b);
+            total += bytes.len;
         }
-
-        pub fn writer(self: *Self) Writer {
-            return .{ .context = self };
-        }
-    };
-}
+        return total; // We say that all bytes are "written", even if they're not, as caller may be retrying
+    }
+};
 
 fn reportTraffic(
     allocator: Allocator,
@@ -1330,9 +1364,9 @@ fn reportTraffic(
     response: awshttp.HttpResult,
     comptime reporter: fn (comptime []const u8, anytype) void,
 ) !void {
-    var msg = std.ArrayList(u8).init(allocator);
+    var msg = try std.Io.Writer.Allocating.initCapacity(allocator, 256);
     defer msg.deinit();
-    const writer = msg.writer();
+    const writer = &msg.writer;
     try writer.print("{s}\n\n", .{info});
     try writer.print("Return status: {d}\n\n", .{response.response_code});
     if (request.query.len > 0) try writer.print("Request Query:\n  \t{s}\n", .{request.query});
@@ -1354,7 +1388,7 @@ fn reportTraffic(
     _ = try writer.write("Response Body:\n");
     try writer.print("--------------\n{s}\n", .{response.body});
     _ = try writer.write("--------------\n");
-    reporter("{s}\n", .{msg.items});
+    reporter("{s}\n", .{msg.written()});
 }
 
 ////////////////////////////////////////////////////////////////////////

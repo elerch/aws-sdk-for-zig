@@ -199,8 +199,8 @@ pub const AwsHttp = struct {
         // We will use endpoint instead
         request_cp.path = endpoint.path;
 
-        var request_headers = std.ArrayList(std.http.Header).init(self.allocator);
-        defer request_headers.deinit();
+        var request_headers = std.ArrayList(std.http.Header){};
+        defer request_headers.deinit(self.allocator);
 
         const len = try addHeaders(self.allocator, &request_headers, endpoint.host, request_cp.body, request_cp.content_type, request_cp.headers);
         defer if (len) |l| self.allocator.free(l);
@@ -213,10 +213,10 @@ pub const AwsHttp = struct {
             }
         }
 
-        var headers = std.ArrayList(std.http.Header).init(self.allocator);
-        defer headers.deinit();
+        var headers = std.ArrayList(std.http.Header){};
+        defer headers.deinit(self.allocator);
         for (request_cp.headers) |header|
-            try headers.append(.{ .name = header.name, .value = header.value });
+            try headers.append(self.allocator, .{ .name = header.name, .value = header.value });
         log.debug("All Request Headers:", .{});
         for (headers.items) |h| {
             log.debug("\t{s}: {s}", .{ h.name, h.value });
@@ -230,16 +230,10 @@ pub const AwsHttp = struct {
         defer cl.deinit(); // TODO: Connection pooling
 
         const method = std.meta.stringToEnum(std.http.Method, request_cp.method).?;
-        var server_header_buffer: [16 * 1024]u8 = undefined;
-        var resp_payload = std.ArrayList(u8).init(self.allocator);
-        defer resp_payload.deinit();
-        const req = try cl.fetch(.{
-            .server_header_buffer = &server_header_buffer,
-            .method = method,
-            .payload = if (request_cp.body.len > 0) request_cp.body else null,
-            .response_storage = .{ .dynamic = &resp_payload },
-            .raw_uri = true,
-            .location = .{ .url = url },
+
+        // Fetch API in 0.15.1 is insufficient as it does not provide
+        // server headers. We'll construct and send the request ourselves
+        var req = try cl.request(method, try std.Uri.parse(url), .{
             // we need full control over most headers. I wish libraries would do a
             // better job of having default headers as an opt-in...
             .headers = .{
@@ -266,33 +260,64 @@ pub const AwsHttp = struct {
         // }
         // try req.wait();
 
+        if (request_cp.body.len > 0) {
+            // This seems a bit silly, but we can't have a []const u8 here
+            // because when it sends, it's using a writer, and this becomes
+            // the buffer of the writer. It's conceivable that something
+            // in the chain then does actually modify the body of the request
+            // so we'll need to duplicate it here
+            const req_body = try self.allocator.dupe(u8, request_cp.body);
+            try req.sendBodyComplete(req_body);
+        } else try req.sendBodiless();
+
+        var response = try req.receiveHead(&.{});
+
         // TODO: Timeout - is this now above us?
         log.debug(
             "Request Complete. Response code {d}: {?s}",
-            .{ @intFromEnum(req.status), req.status.phrase() },
+            .{ @intFromEnum(response.head.status), response.head.status.phrase() },
         );
         log.debug("Response headers:", .{});
-        var resp_headers = std.ArrayList(Header).init(
-            self.allocator,
-        );
-        defer resp_headers.deinit();
-        var it = std.http.HeaderIterator.init(server_header_buffer[0..]);
+        var resp_headers = std.ArrayList(Header){};
+        defer resp_headers.deinit(self.allocator);
+        var it = response.head.iterateHeaders();
         while (it.next()) |h| { // even though we don't expect to fill the buffer,
             // we don't get a length, but looks via stdlib source
             // it should be ok to call next on the undefined memory
             log.debug("    {s}: {s}", .{ h.name, h.value });
-            try resp_headers.append(.{
+            try resp_headers.append(self.allocator, .{
                 .name = try (self.allocator.dupe(u8, h.name)),
                 .value = try (self.allocator.dupe(u8, h.value)),
             });
         }
+        // This is directly lifted from fetch, as there is no function in
+        // 0.15.1 client to negotiate decompression
+        const decompress_buffer: []u8 = switch (response.head.content_encoding) {
+            .identity => &.{},
+            .zstd => try self.allocator.alloc(u8, std.compress.zstd.default_window_len),
+            .deflate, .gzip => try self.allocator.alloc(u8, std.compress.flate.max_window_len),
+            .compress => return error.UnsupportedCompressionMethod,
+        };
+        defer self.allocator.free(decompress_buffer);
 
-        log.debug("raw response body:\n{s}", .{resp_payload.items});
+        var transfer_buffer: [64]u8 = undefined;
+        var decompress: std.http.Decompress = undefined;
+        const reader = response.readerDecompressing(&transfer_buffer, &decompress, decompress_buffer);
+
+        // Not sure on optimal size here, but should definitely be > 0
+        var aw = try std.Io.Writer.Allocating.initCapacity(self.allocator, 128);
+        defer aw.deinit();
+        const response_writer = &aw.writer;
+        _ = reader.streamRemaining(response_writer) catch |err| switch (err) {
+            error.ReadFailed => return response.bodyErr().?,
+            else => |e| return e,
+        };
+        log.debug("raw response body:\n{s}", .{aw.written()});
 
         const rc = HttpResult{
-            .response_code = @intFromEnum(req.status),
-            .body = try resp_payload.toOwnedSlice(),
-            .headers = try resp_headers.toOwnedSlice(),
+            .response_code = @intFromEnum(response.head.status),
+            .body = try aw.toOwnedSlice(),
+            .headers = try resp_headers.toOwnedSlice(self.allocator),
             .allocator = self.allocator,
         };
         return rc;
@@ -305,15 +330,21 @@ fn getRegion(service: []const u8, region: []const u8) []const u8 {
     return region;
 }
 
-fn addHeaders(allocator: std.mem.Allocator, headers: *std.ArrayList(std.http.Header), host: []const u8, body: []const u8, content_type: []const u8, additional_headers: []const Header) !?[]const u8 {
-    // We don't need allocator and body because they were to add a
-    // Content-Length header. But that is being added by the client send()
-    // function, so we don't want it on the request twice. But I also feel
-    // pretty strongly that send() should be providing us control, because
-    // I think if we don't add it here, it won't get signed, and we would
-    // really prefer it to be signed. So, we will wait and watch for this
-    // situation to change in stdlib
-    _ = allocator;
+fn addHeaders(
+    allocator: std.mem.Allocator,
+    headers: *std.ArrayList(std.http.Header),
+    host: []const u8,
+    body: []const u8,
+    content_type: []const u8,
+    additional_headers: []const Header,
+) !?[]const u8 {
+    // We don't need body because they were to add a Content-Length header. But
+    // that is being added by the client send() function, so we don't want it
+    // on the request twice. But I also feel pretty strongly that send() should
+    // be providing us control, because I think if we don't add it here, it
+    // won't get signed, and we would really prefer it to be signed. So, we
+    // will wait and watch for this situation to change in stdlib
+
     _ = body;
     var has_content_type = false;
     for (additional_headers) |h| {
@@ -322,12 +353,12 @@ fn addHeaders(allocator: std.mem.Allocator, headers: *std.ArrayList(std.http.Hea
             break;
         }
     }
-    try headers.append(.{ .name = "Accept", .value = "application/json" });
-    try headers.append(.{ .name = "Host", .value = host });
-    try headers.append(.{ .name = "User-Agent", .value = "zig-aws 1.0" });
+    try headers.append(allocator, .{ .name = "Accept", .value = "application/json" });
+    try headers.append(allocator, .{ .name = "Host", .value = host });
+    try headers.append(allocator, .{ .name = "User-Agent", .value = "zig-aws 1.0" });
     if (!has_content_type)
-        try headers.append(.{ .name = "Content-Type", .value = content_type });
-    try headers.appendSlice(additional_headers);
+        try headers.append(allocator, .{ .name = "Content-Type", .value = content_type });
+    try headers.appendSlice(allocator, additional_headers);
     return null;
 }
 

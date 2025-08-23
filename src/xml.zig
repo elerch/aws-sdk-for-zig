@@ -26,12 +26,14 @@ pub const Element = struct {
     attributes: AttributeList,
     children: ContentList,
     next_sibling: ?*Element = null,
+    allocator: std.mem.Allocator,
 
     fn init(tag: []const u8, alloc: Allocator) Element {
         return .{
             .tag = tag,
-            .attributes = AttributeList.init(alloc),
-            .children = ContentList.init(alloc),
+            .attributes = AttributeList{},
+            .children = ContentList{},
+            .allocator = alloc,
         };
     }
 
@@ -454,7 +456,7 @@ fn tryParseElement(ctx: *ParseContext, alloc: Allocator, parent: ?*Element) !?*E
 
     while (ctx.eatWs()) {
         const attr = (try tryParseAttr(ctx, alloc)) orelse break;
-        try element.attributes.append(attr);
+        try element.attributes.append(element.allocator, attr);
     }
 
     if (ctx.eatStr("/>")) {
@@ -471,7 +473,7 @@ fn tryParseElement(ctx: *ParseContext, alloc: Allocator, parent: ?*Element) !?*E
         }
 
         const content = try parseContent(ctx, alloc, element);
-        try element.children.append(content);
+        try element.children.append(element.allocator, content);
     }
 
     const closing_tag = try parseNameNoDupe(ctx);

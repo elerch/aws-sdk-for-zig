@@ -17,10 +17,10 @@ pub const Timestamp = enum(zeit.Nanoseconds) {
         }) catch std.debug.panic("Failed to parse timestamp to instant: {d}", .{value});
 
         const fmt = "Mon, 02 Jan 2006 15:04:05 GMT";
-        var buf = std.mem.zeroes([fmt.len]u8);
+        var buf: [fmt.len]u8 = undefined;
 
-        var fbs = std.io.fixedBufferStream(&buf);
-        instant.time().gofmt(fbs.writer(), fmt) catch std.debug.panic("Failed to format instant: {d}", .{instant.timestamp});
+        var fbs = std.Io.Writer.fixed(&buf);
+        instant.time().gofmt(&fbs, fmt) catch std.debug.panic("Failed to format instant: {d}", .{instant.timestamp});
 
         try jw.write(&buf);
     }

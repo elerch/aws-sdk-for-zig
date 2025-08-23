@@ -53,7 +53,7 @@ pub const XmlSerializeError = error{
 pub fn stringify(
     value: anytype,
     options: StringifyOptions,
-    writer: anytype,
+    writer: *std.Io.Writer,
 ) !void {
     // Write XML declaration if requested
     if (options.include_declaration)
@@ -62,9 +62,9 @@ pub fn stringify(
     // Start serialization with the root element
     const root_name = options.root_name;
     if (@typeInfo(@TypeOf(value)) != .optional or value == null)
-        try serializeValue(value, root_name, options, writer.any(), 0)
+        try serializeValue(value, root_name, options, writer, 0)
     else
-        try serializeValue(value.?, root_name, options, writer.any(), 0);
+        try serializeValue(value.?, root_name, options, writer, 0);
 }
 
 /// Serializes a value to XML and returns an allocated string
@@ -73,10 +73,10 @@ pub fn stringifyAlloc(
     value: anytype,
     options: StringifyOptions,
 ) ![]u8 {
-    var list = std.ArrayList(u8).init(allocator);
-    errdefer list.deinit();
+    var list = std.Io.Writer.Allocating.init(allocator);
+    defer list.deinit();
 
-    try stringify(value, options, list.writer());
+    try stringify(value, options, &list.writer);
     return list.toOwnedSlice();
 }
 
@@ -85,7 +85,7 @@ fn serializeValue(
     value: anytype,
     element_name: ?[]const u8,
     options: StringifyOptions,
-    writer: anytype,
+    writer: *std.Io.Writer,
     depth: usize,
 ) !void {
     const T = @TypeOf(value);
@@ -274,7 +274,7 @@ fn serializeValue(
     try writeClose(writer, element_name);
 }
 
-fn writeClose(writer: anytype, element_name: ?[]const u8) !void {
+fn writeClose(writer: *std.Io.Writer, element_name: ?[]const u8) !void {
     // Close element tag
     if (element_name) |n| {
         try writer.writeAll("</");
@@ -284,7 +284,7 @@ fn writeClose(writer: anytype, element_name: ?[]const u8) !void {
 }
 
 /// Writes indentation based on depth and indent level
-fn writeIndent(writer: anytype, depth: usize, whitespace: StringifyOptions.Whitespace) @TypeOf(writer).Error!void {
+fn writeIndent(writer: *std.Io.Writer, depth: usize, whitespace: StringifyOptions.Whitespace) std.Io.Writer.Error!void {
     var char: u8 = ' ';
     const n_chars = switch (whitespace) {
         .minified => return,
@@ -298,16 +298,16 @@ fn writeIndent(writer: anytype, depth: usize, whitespace: StringifyOptions.White
             break :blk depth;
         },
     };
-    try writer.writeByteNTimes(char, n_chars);
+    try writer.splatBytesAll(&.{char}, n_chars);
 }
 
 fn serializeString(
-    writer: anytype,
+    writer: *std.Io.Writer,
     element_name: ?[]const u8,
     value: []const u8,
     options: StringifyOptions,
     depth: usize,
-) @TypeOf(writer).Error!void {
+) error{ WriteFailed, OutOfMemory }!void {
     if (options.emit_strings_as_arrays) {
         // if (true) return error.seestackrun;
         for (value) |c| {
@@ -333,7 +333,7 @@ fn serializeString(
     try escapeString(writer, value);
 }
 /// Escapes special characters in XML strings
-fn escapeString(writer: anytype, value: []const u8) @TypeOf(writer).Error!void {
+fn escapeString(writer: *std.Io.Writer, value: []const u8) std.Io.Writer.Error!void {
     for (value) |c| {
         switch (c) {
             '&' => try writer.writeAll("&amp;"),

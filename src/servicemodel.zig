@@ -14,7 +14,7 @@ pub fn Services(comptime service_imports: anytype) type {
             .type = @TypeOf(import_field),
             .default_value_ptr = &import_field,
             .is_comptime = false,
-            .alignment = 0,
+            .alignment = std.meta.alignment(@TypeOf(import_field)),
         };
     }
 

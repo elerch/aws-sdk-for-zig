@@ -381,14 +381,17 @@ fn parseInternal(comptime T: type, element: *xml.Element, options: ParseOptions)
 
                         log.debug("type = {s}, style = {s}, ptr_info.child == {s}, element = {s}", .{ @typeName(T), @tagName(array_style), @typeName(ptr_info.child), element.tag });
 
-                        var children = std.ArrayList(ptr_info.child).init(allocator);
-                        defer children.deinit();
+                        var children = std.ArrayList(ptr_info.child){};
+                        defer children.deinit(allocator);
 
                         switch (array_style) {
                             .collection => {
                                 var iterator = element.elements();
                                 while (iterator.next()) |child_element| {
-                                    try children.append(try parseInternal(ptr_info.child, child_element, options));
+                                    try children.append(
+                                        allocator,
+                                        try parseInternal(ptr_info.child, child_element, options),
+                                    );
                                 }
                             },
                             .repeated_root => {
@@ -396,12 +399,15 @@ fn parseInternal(comptime T: type, element: *xml.Element, options: ParseOptions)
                                 while (current) |el| : (current = el.next_sibling) {
                                     if (!std.mem.eql(u8, el.tag, element.tag)) continue;
 
-                                    try children.append(try parseInternal(ptr_info.child, el, options));
+                                    try children.append(
+                                        allocator,
+                                        try parseInternal(ptr_info.child, el, options),
+                                    );
                                 }
                             },
                         }
 
-                        return children.toOwnedSlice();
+                        return children.toOwnedSlice(allocator);
                     }
                     return try allocator.dupe(u8, element.children.items[0].CharData);
                 },

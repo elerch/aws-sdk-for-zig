@@ -157,7 +157,7 @@ pub const SigningError = error{
     XAmzExpiresHeaderInRequest,
     /// Used if the request headers already includes x-amz-region-set
     XAmzRegionSetHeaderInRequest,
-} || std.fmt.AllocPrintError;
+} || error{OutOfMemory};
 
 const forbidden_headers = .{
     .{ .name = "x-amz-content-sha256", .err = SigningError.XAmzContentSha256HeaderInRequest },
@@ -312,12 +312,12 @@ pub fn signRequest(allocator: std.mem.Allocator, request: base.Request, config: 
         .name = "Authorization",
         .value = try std.fmt.allocPrint(
             allocator,
-            "AWS4-HMAC-SHA256 Credential={s}/{s}, SignedHeaders={s}, Signature={s}",
+            "AWS4-HMAC-SHA256 Credential={s}/{s}, SignedHeaders={s}, Signature={x}",
             .{
                 config.credentials.access_key,
                 scope,
                 canonical_request.headers.signed_headers,
-                std.fmt.fmtSliceHexLower(signature),
+                signature,
             },
         ),
     };
@@ -545,7 +545,7 @@ fn getSigningKey(allocator: std.mem.Allocator, signing_date: []const u8, config:
     defer {
         // secureZero avoids compiler optimizations that may say
         // "WTF are you doing this thing? Looks like nothing to me. It's silly and we will remove it"
-        std.crypto.utils.secureZero(u8, secret); // zero our copy of secret
+        std.crypto.secureZero(u8, secret); // zero our copy of secret
         allocator.free(secret);
     }
     // log.debug("secret: {s}", .{secret});
@@ -673,7 +673,7 @@ fn canonicalUri(allocator: std.mem.Allocator, path: []const u8, double_encode: b
 fn encodeParamPart(allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
     const unreserved_marks = "-_.!~*'()";
     var encoded = try std.ArrayList(u8).initCapacity(allocator, path.len);
-    defer encoded.deinit();
+    defer encoded.deinit(allocator);
     for (path) |c| {
         var should_encode = true;
         for (unreserved_marks) |r|
@@ -685,16 +685,16 @@ fn encodeParamPart(allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
             should_encode = false;
 
         if (!should_encode) {
-            try encoded.append(c);
+            try encoded.append(allocator, c);
             continue;
         }
         // Whatever remains, encode it
-        try encoded.append('%');
-        const hex = try std.fmt.allocPrint(allocator, "{s}", .{std.fmt.fmtSliceHexUpper(&[_]u8{c})});
+        try encoded.append(allocator, '%');
+        const hex = try std.fmt.allocPrint(allocator, "{X}", .{&[_]u8{c}});
         defer allocator.free(hex);
-        try encoded.appendSlice(hex);
+        try encoded.appendSlice(allocator, hex);
     }
-    return encoded.toOwnedSlice();
+    return encoded.toOwnedSlice(allocator);
 }
 
 // URI encode every byte except the unreserved characters:
@@ -715,7 +715,7 @@ fn encodeUri(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
     const reserved_characters = ";,/?:@&=+$#";
     const unreserved_marks = "-_.!~*'()";
     var encoded = try std.ArrayList(u8).initCapacity(allocator, path.len);
-    defer encoded.deinit();
+    defer encoded.deinit(allocator);
     // if (std.mem.startsWith(u8, path, "/2017-03-31/tags/arn")) {
     //     try encoded.appendSlice("/2017-03-31/tags/arn%25253Aaws%25253Alambda%25253Aus-west-2%25253A550620852718%25253Afunction%25253Aawsome-lambda-LambdaStackawsomeLambda");
     //     return encoded.toOwnedSlice();
@@ -738,16 +738,16 @@ fn encodeUri(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
             should_encode = false;
 
         if (!should_encode) {
-            try encoded.append(c);
+            try encoded.append(allocator, c);
             continue;
         }
         // Whatever remains, encode it
-        try encoded.append('%');
-        const hex = try std.fmt.allocPrint(allocator, "{s}", .{std.fmt.fmtSliceHexUpper(&[_]u8{c})});
+        try encoded.append(allocator, '%');
+        const hex = try std.fmt.allocPrint(allocator, "{X}", .{&[_]u8{c}});
         defer allocator.free(hex);
-        try encoded.appendSlice(hex);
+        try encoded.appendSlice(allocator, hex);
     }
-    return encoded.toOwnedSlice();
+    return encoded.toOwnedSlice(allocator);
 }
 
 fn canonicalQueryString(allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
@@ -800,25 +800,25 @@ fn canonicalQueryString(allocator: std.mem.Allocator, path: []const u8) ![]const
 
     // Split this by component
     var portions = std.mem.splitScalar(u8, query, '&');
-    var sort_me = std.ArrayList([]const u8).init(allocator);
-    defer sort_me.deinit();
+    var sort_me = std.ArrayList([]const u8){};
+    defer sort_me.deinit(allocator);
     while (portions.next()) |item|
-        try sort_me.append(item);
+        try sort_me.append(allocator, item);
     std.sort.pdq([]const u8, sort_me.items, {}, lessThanBinary);
 
     var normalized = try std.ArrayList(u8).initCapacity(allocator, path.len);
-    defer normalized.deinit();
+    defer normalized.deinit(allocator);
     var first = true;
     for (sort_me.items) |i| {
-        if (!first) try normalized.append('&');
+        if (!first) try normalized.append(allocator, '&');
         first = false;
         const first_equals = std.mem.indexOf(u8, i, "=");
         if (first_equals == null) {
             // Rare. This is "foo="
             const normed_item = try encodeUri(allocator, i);
             defer allocator.free(normed_item);
-            try normalized.appendSlice(i); // This should be encoded
-            try normalized.append('=');
+            try normalized.appendSlice(allocator, i); // This should be encoded
+            try normalized.append(allocator, '=');
             continue;
         }
 
@@ -831,12 +831,12 @@ fn canonicalQueryString(allocator: std.mem.Allocator, path: []const u8) ![]const
         // Double-encode any = in the value. But not anything else?
         const weird_equals_in_value_thing = try replace(allocator, value, "%3D", "%253D");
         defer allocator.free(weird_equals_in_value_thing);
-        try normalized.appendSlice(key);
-        try normalized.append('=');
-        try normalized.appendSlice(weird_equals_in_value_thing);
+        try normalized.appendSlice(allocator, key);
+        try normalized.append(allocator, '=');
+        try normalized.appendSlice(allocator, weird_equals_in_value_thing);
     }
 
-    return normalized.toOwnedSlice();
+    return normalized.toOwnedSlice(allocator);
 }
 
 fn replace(allocator: std.mem.Allocator, haystack: []const u8, needle: []const u8, replacement_value: []const u8) ![]const u8 {
@@ -875,7 +875,7 @@ fn canonicalHeaders(allocator: std.mem.Allocator, headers: []const std.http.Head
             allocator.free(h.name);
             allocator.free(h.value);
         }
-        dest.deinit();
+        dest.deinit(allocator);
     }
     var total_len: usize = 0;
     var total_name_len: usize = 0;
@@ -905,15 +905,15 @@ fn canonicalHeaders(allocator: std.mem.Allocator, headers: []const std.http.Head
         defer allocator.free(value);
         const n = try std.ascii.allocLowerString(allocator, h.name);
         const v = try std.fmt.allocPrint(allocator, "{s}", .{value});
-        try dest.append(.{ .name = n, .value = v });
+        try dest.append(allocator, .{ .name = n, .value = v });
     }
 
     std.sort.pdq(std.http.Header, dest.items, {}, lessThan);
 
     var dest_str = try std.ArrayList(u8).initCapacity(allocator, total_len);
-    defer dest_str.deinit();
+    defer dest_str.deinit(allocator);
     var signed_headers = try std.ArrayList(u8).initCapacity(allocator, total_name_len);
-    defer signed_headers.deinit();
+    defer signed_headers.deinit(allocator);
     var first = true;
     for (dest.items) |h| {
         dest_str.appendSliceAssumeCapacity(h.name);
@@ -926,8 +926,8 @@ fn canonicalHeaders(allocator: std.mem.Allocator, headers: []const std.http.Head
         signed_headers.appendSliceAssumeCapacity(h.name);
     }
     return CanonicalHeaders{
-        .str = try dest_str.toOwnedSlice(),
-        .signed_headers = try signed_headers.toOwnedSlice(),
+        .str = try dest_str.toOwnedSlice(allocator),
+        .signed_headers = try signed_headers.toOwnedSlice(allocator),
     };
 }
 
@@ -972,7 +972,7 @@ fn hash(allocator: std.mem.Allocator, payload: []const u8, sig_type: SignatureTy
     };
     var out: [std.crypto.hash.sha2.Sha256.digest_length]u8 = undefined;
     std.crypto.hash.sha2.Sha256.hash(to_hash, &out, .{});
-    return try std.fmt.allocPrint(allocator, "{s}", .{std.fmt.fmtSliceHexLower(&out)});
+    return try std.fmt.allocPrint(allocator, "{x}", .{out});
 }
 // SignedHeaders + '\n' +
 // HexEncode(Hash(RequestPayload))

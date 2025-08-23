@@ -11,7 +11,7 @@ pub const EncodingOptions = struct {
     field_name_transformer: fieldNameTransformerFn = defaultTransformer,
 };
 
-pub fn encode(allocator: std.mem.Allocator, obj: anytype, writer: anytype, comptime options: EncodingOptions) !void {
+pub fn encode(allocator: std.mem.Allocator, obj: anytype, writer: *std.Io.Writer, comptime options: EncodingOptions) !void {
     _ = try encodeInternal(allocator, "", "", true, obj, writer, options);
 }
 
@@ -20,7 +20,7 @@ fn encodeStruct(
     parent: []const u8,
     first: bool,
     obj: anytype,
-    writer: anytype,
+    writer: *std.Io.Writer,
     comptime options: EncodingOptions,
 ) !bool {
     var rc = first;
@@ -41,7 +41,7 @@ pub fn encodeInternal(
     field_name: []const u8,
     first: bool,
     obj: anytype,
-    writer: anytype,
+    writer: *std.Io.Writer,
     comptime options: EncodingOptions,
 ) !bool {
     // @compileLog(@typeName(@TypeOf(obj)));
@@ -56,10 +56,18 @@ pub fn encodeInternal(
         } else {
             if (!first) _ = try writer.write("&");
             // @compileLog(@typeInfo(@TypeOf(obj)));
-            if (ti.child == []const u8 or ti.child == u8)
-                try writer.print("{s}{s}={s}", .{ parent, field_name, obj })
-            else
-                try writer.print("{s}{s}={any}", .{ parent, field_name, obj });
+            switch (ti.child) {
+                // TODO: not sure this first one is valid. How should [][]const u8 be serialized here?
+                []const u8 => {
+                    std.log.warn(
+                        "encoding object of type [][]const u8...pretty sure this is wrong {s}{s}={any}",
+                        .{ parent, field_name, obj },
+                    );
+                    try writer.print("{s}{s}={any}", .{ parent, field_name, obj });
+                },
+                u8 => try writer.print("{s}{s}={s}", .{ parent, field_name, obj }),
+                else => try writer.print("{s}{s}={any}", .{ parent, field_name, obj }),
+            }
             rc = false;
         },
         .@"struct" => if (std.mem.eql(u8, "", field_name)) {

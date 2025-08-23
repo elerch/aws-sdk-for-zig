@@ -1772,12 +1772,12 @@ fn parseInternal(comptime T: type, token: Token, tokens: *TokenStream, options: 
                 .slice => {
                     switch (token) {
                         .ArrayBegin => {
-                            var arraylist = std.ArrayList(ptrInfo.child).init(allocator);
+                            var arraylist = std.ArrayList(ptrInfo.child){};
                             errdefer {
                                 while (arraylist.pop()) |v| {
                                     parseFree(ptrInfo.child, v, options);
                                 }
-                                arraylist.deinit();
+                                arraylist.deinit(allocator);
                             }
 
                             while (true) {
@@ -1787,11 +1787,11 @@ fn parseInternal(comptime T: type, token: Token, tokens: *TokenStream, options: 
                                     else => {},
                                 }
 
-                                try arraylist.ensureTotalCapacity(arraylist.items.len + 1);
+                                try arraylist.ensureTotalCapacity(allocator, arraylist.items.len + 1);
                                 const v = try parseInternal(ptrInfo.child, tok, tokens, options);
                                 arraylist.appendAssumeCapacity(v);
                             }
-                            return arraylist.toOwnedSlice();
+                            return arraylist.toOwnedSlice(allocator);
                         },
                         .String => |stringToken| {
                             if (ptrInfo.child != u8) return error.UnexpectedToken;
@@ -1817,12 +1817,12 @@ fn parseInternal(comptime T: type, token: Token, tokens: *TokenStream, options: 
                             if (key_type == null) return error.UnexpectedToken;
                             const value_type = typeForField(ptrInfo.child, "value");
                             if (value_type == null) return error.UnexpectedToken;
-                            var arraylist = std.ArrayList(ptrInfo.child).init(allocator);
+                            var arraylist = std.ArrayList(ptrInfo.child){};
                             errdefer {
                                 while (arraylist.pop()) |v| {
                                     parseFree(ptrInfo.child, v, options);
                                 }
-                                arraylist.deinit();
+                                arraylist.deinit(allocator);
                             }
                             while (true) {
                                 const key = (try tokens.next()) orelse return error.UnexpectedEndOfJson;
@@ -1831,13 +1831,13 @@ fn parseInternal(comptime T: type, token: Token, tokens: *TokenStream, options: 
                                     else => {},
                                 }
 
-                                try arraylist.ensureTotalCapacity(arraylist.items.len + 1);
+                                try arraylist.ensureTotalCapacity(allocator, arraylist.items.len + 1);
                                 const key_val = try parseInternal(key_type.?, key, tokens, options);
                                 const val = (try tokens.next()) orelse return error.UnexpectedEndOfJson;
                                 const val_val = try parseInternal(value_type.?, val, tokens, options);
                                 arraylist.appendAssumeCapacity(.{ .key = key_val, .value = val_val });
                             }
-                            return arraylist.toOwnedSlice();
+                            return arraylist.toOwnedSlice(allocator);
                         },
                         else => return error.UnexpectedToken,
                     }

@@ -34,7 +34,8 @@ pub fn log(
     // Print the message to stderr, silently ignoring any errors
     std.debug.lockStdErr();
     defer std.debug.unlockStdErr();
-    const stderr = std.io.getStdErr().writer();
+    var stderr_writer = std.fs.File.stderr().writer(&.{});
+    const stderr = &stderr_writer.interface;
     nosuspend stderr.print(prefix ++ format ++ "\n", args) catch return;
 }
 
@@ -62,14 +63,14 @@ pub fn main() anyerror!void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
-    var tests = std.ArrayList(Tests).init(allocator);
-    defer tests.deinit();
+    var tests = try std.ArrayList(Tests).initCapacity(allocator, @typeInfo(Tests).@"enum".fields.len);
+    defer tests.deinit(allocator);
     var args = try std.process.argsWithAllocator(allocator);
     defer args.deinit();
-    const stdout_raw = std.io.getStdOut().writer();
-    var bw = std.io.bufferedWriter(stdout_raw);
-    defer bw.flush() catch unreachable;
-    const stdout = bw.writer();
+    var stdout_buf: [4096]u8 = undefined;
+    const stdout_raw = std.fs.File.stdout().writer(&stdout_buf);
+    var stdout = stdout_raw.interface;
+    defer stdout.flush() catch @panic("could not flush stdout");
     var arg0: ?[]const u8 = null;
     var proxy: ?std.http.Client.Proxy = null;
     while (args.next()) |arg| {
@@ -99,14 +100,14 @@ pub fn main() anyerror!void {
         }
         inline for (@typeInfo(Tests).@"enum".fields) |f| {
             if (std.mem.eql(u8, f.name, arg)) {
-                try tests.append(@field(Tests, f.name));
+                try tests.append(allocator, @field(Tests, f.name));
                 break;
             }
         }
     }
     if (tests.items.len == 0) {
         inline for (@typeInfo(Tests).@"enum".fields) |f|
-            try tests.append(@field(Tests, f.name));
+            try tests.append(allocator, @field(Tests, f.name));
     }
 
     std.log.info("Start\n", .{});
@@ -193,7 +194,7 @@ pub fn main() anyerror!void {
                         const arn = func.function_arn.?;
                         // This is a bit ugly. Maybe a helper function in the library would help?
                         var tags = try std.ArrayList(aws.services.lambda.TagKeyValue).initCapacity(allocator, 1);
-                        defer tags.deinit();
+                        defer tags.deinit(allocator);
                         tags.appendAssumeCapacity(.{ .key = "Foo", .value = "Bar" });
                         const req = services.lambda.tag_resource.Request{ .resource = arn, .tags = tags.items };
                         const addtag = try aws.Request(services.lambda.tag_resource).call(req, options);
@@ -262,7 +263,7 @@ pub fn main() anyerror!void {
                 defer result.deinit();
                 std.log.info("request id: {s}", .{result.response_metadata.request_id});
                 const list = result.response.key_group_list.?;
-                std.log.info("key group list max: {?d}", .{list.max_items});
+                std.log.info("key group list max: {d}", .{list.max_items});
                 std.log.info("key group quantity: {d}", .{list.quantity});
             },
             .rest_xml_work_with_s3 => {
