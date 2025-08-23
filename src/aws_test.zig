@@ -7,13 +7,9 @@ const json = @import("json");
 const aws = @import("aws.zig");
 const awshttp = @import("aws_http.zig");
 
-const services = aws.servicemodel.services;
-const Services = aws.servicemodel.Services;
+const Services = aws.Services;
 
 const log = std.log.scoped(.aws_test);
-
-pub var buildQuery: u8 = undefined;
-pub var buildPath: u8 = undefined;
 
 // TODO: Where does this belong really?
 fn typeForField(comptime T: type, comptime field_name: []const u8) !type {
@@ -34,11 +30,14 @@ test "custom serialization for map objects" {
     const allocator = std.testing.allocator;
     var buffer = std.Io.Writer.Allocating.init(allocator);
     defer buffer.deinit();
+    const services = Services(.{.lambda}){};
     var tags = try std.ArrayList(@typeInfo(try typeForField(services.lambda.tag_resource.Request, "tags")).pointer.child).initCapacity(allocator, 2);
     defer tags.deinit(allocator);
     tags.appendAssumeCapacity(.{ .key = "Foo", .value = "Bar" });
     tags.appendAssumeCapacity(.{ .key = "Baz", .value = "Qux" });
-    const req = services.lambda.TagResourceRequest{ .resource = "hello", .tags = tags.items };
+
+    const lambda = (Services(.{.lambda}){}).lambda;
+    const req = lambda.TagResourceRequest{ .resource = "hello", .tags = tags.items };
     try buffer.writer.print("{f}", .{std.json.fmt(req, .{ .whitespace = .indent_4 })});
 
     const parsed_body = try std.json.parseFromSlice(struct {
@@ -61,7 +60,8 @@ test "proper serialization for kms" {
     const allocator = std.testing.allocator;
     var buffer = std.Io.Writer.Allocating.init(allocator);
     defer buffer.deinit();
-    const req = services.kms.encrypt.Request{
+    const kms = (Services(.{.kms}){}).kms;
+    const req = kms.encrypt.Request{
         .encryption_algorithm = "SYMMETRIC_DEFAULT",
         // Since encryption_context is not null, we expect "{}" to be the value
         // here, not "[]", because this is our special AWS map pattern
@@ -93,7 +93,7 @@ test "proper serialization for kms" {
 
     var buffer_null = std.Io.Writer.Allocating.init(allocator);
     defer buffer_null.deinit();
-    const req_null = services.kms.encrypt.Request{
+    const req_null = kms.encrypt.Request{
         .encryption_algorithm = "SYMMETRIC_DEFAULT",
         // Since encryption_context here *IS* null, we expect simply "null" to be the value
         .encryption_context = null,
@@ -125,66 +125,6 @@ test "proper serialization for kms" {
     }
 }
 
-test "REST Json v1 builds proper queries" {
-    const allocator = std.testing.allocator;
-    const svs = Services(.{.lambda}){};
-    const request = svs.lambda.list_functions.Request{
-        .max_items = 1,
-    };
-    const query = try buildQuery(allocator, request);
-    defer allocator.free(query);
-    try std.testing.expectEqualStrings("?MaxItems=1", query);
-}
-test "REST Json v1 handles reserved chars in queries" {
-    const allocator = std.testing.allocator;
-    const svs = Services(.{.lambda}){};
-    var keys = [_][]const u8{"Foo?I'm a crazy%dude"}; // Would love to have a way to express this without burning a var here
-    const request = svs.lambda.untag_resource.Request{
-        .tag_keys = keys[0..],
-        .resource = "hello",
-    };
-    const query = try buildQuery(allocator, request);
-    defer allocator.free(query);
-    try std.testing.expectEqualStrings("?tagKeys=Foo%3FI%27m a crazy%25dude", query);
-}
-test "REST Json v1 serializes lists in queries" {
-    const allocator = std.testing.allocator;
-    const svs = Services(.{.lambda}){};
-    var keys = [_][]const u8{ "Foo", "Bar" }; // Would love to have a way to express this without burning a var here
-    const request = svs.lambda.untag_resource.Request{
-        .tag_keys = keys[0..],
-        .resource = "hello",
-    };
-    const query = try buildQuery(allocator, request);
-    defer allocator.free(query);
-    try std.testing.expectEqualStrings("?tagKeys=Foo&tagKeys=Bar", query);
-}
-test "REST Json v1 buildpath substitutes" {
-    const allocator = std.testing.allocator;
-    var al = std.ArrayList([]const u8){};
-    defer al.deinit(allocator);
-    const svs = Services(.{.lambda}){};
-    const request = svs.lambda.list_functions.Request{
-        .max_items = 1,
-    };
-    const input_path = "https://myhost/{MaxItems}/";
-    const output_path = try buildPath(allocator, input_path, @TypeOf(request), request, true, &al);
-    defer allocator.free(output_path);
-    try std.testing.expectEqualStrings("https://myhost/1/", output_path);
-}
-test "REST Json v1 buildpath handles restricted characters" {
-    const allocator = std.testing.allocator;
-    var al = std.ArrayList([]const u8){};
-    defer al.deinit(allocator);
-    const svs = Services(.{.lambda}){};
-    const request = svs.lambda.list_functions.Request{
-        .marker = ":",
-    };
-    const input_path = "https://myhost/{Marker}/";
-    const output_path = try buildPath(allocator, input_path, @TypeOf(request), request, true, &al);
-    defer allocator.free(output_path);
-    try std.testing.expectEqualStrings("https://myhost/%3A/", output_path);
-}
 test "basic json request serialization" {
     const allocator = std.testing.allocator;
     const svs = Services(.{.dynamo_db}){};
@@ -286,7 +226,7 @@ test {
 }
 const TestOptions = struct {
     allocator: std.mem.Allocator,
-    arena: ?*std.mem.ArenaAllocator = null,
+    arena: ?*std.heap.ArenaAllocator = null,
     server_port: ?u16 = null,
     server_remaining_requests: usize = 1,
     server_response: []const u8 = "unset",
@@ -375,7 +315,7 @@ const TestOptions = struct {
 fn threadMain(options: *TestOptions) !void {
     // https://github.com/ziglang/zig/blob/d2be725e4b14c33dbd39054e33d926913eee3cd4/lib/compiler/std-docs.zig#L22-L54
 
-    options.arena = try options.allocator.create(std.mem.ArenaAllocator);
+    options.arena = try options.allocator.create(std.heap.ArenaAllocator);
     options.arena.?.* = std.heap.ArenaAllocator.init(options.allocator);
     const allocator = options.arena.?.allocator();
     options.allocator = allocator;
@@ -694,7 +634,7 @@ test "json_1_0_query_with_input: dynamodb listTables runtime" {
     });
     defer test_harness.deinit();
     const options = try test_harness.start();
-    const dynamo_db = services.dynamo_db;
+    const dynamo_db = (Services(.{.dynamo_db}){}).dynamo_db;
     const call = try test_harness.client.call(dynamo_db.list_tables.Request{
         .limit = 1,
     }, options);
@@ -913,7 +853,7 @@ test "rest_json_1_work_with_lambda: lambda tagResource (only), to excercise zig 
     var tags = try std.ArrayList(@typeInfo(try typeForField(lambda.tag_resource.Request, "tags")).pointer.child).initCapacity(allocator, 1);
     defer tags.deinit(allocator);
     tags.appendAssumeCapacity(.{ .key = "Foo", .value = "Bar" });
-    const req = services.lambda.tag_resource.Request{ .resource = "arn:aws:lambda:us-west-2:550620852718:function:awsome-lambda-LambdaStackawsomeLambda", .tags = tags.items };
+    const req = lambda.tag_resource.Request{ .resource = "arn:aws:lambda:us-west-2:550620852718:function:awsome-lambda-LambdaStackawsomeLambda", .tags = tags.items };
     const call = try aws.Request(lambda.tag_resource).call(req, options);
     defer call.deinit();
     test_harness.stop();
@@ -950,7 +890,7 @@ test "rest_json_1_url_parameters_not_in_request: lambda update_function_code" {
     const lambda = (Services(.{.lambda}){}).lambda;
     const architectures = [_][]const u8{"x86_64"};
     const arches: [][]const u8 = @constCast(architectures[0..]);
-    const req = services.lambda.update_function_code.Request{
+    const req = lambda.update_function_code.Request{
         .function_name = "functionname",
         .architectures = arches,
         .zip_file = "zipfile",
@@ -1158,7 +1098,8 @@ test "rest_xml_with_input: S3 put object" {
         .client = options.client,
         .signing_time = TestSetup.signing_time,
     };
-    const result = try aws.Request(services.s3.put_object).call(.{
+    const s3 = (Services(.{.s3}){}).s3;
+    const result = try aws.Request(s3.put_object).call(.{
         .bucket = "mysfitszj3t6webstack-hostingbucketa91a61fe-1ep3ezkgwpxr0",
         .key = "i/am/a/teapot/foo",
         .content_type = "text/plain",
@@ -1284,7 +1225,8 @@ test "test server timeout works" {
 const testing = std.testing;
 
 test "jsonStringify: structure + enums" {
-    const request = services.media_convert.PutPolicyRequest{
+    const media_convert = (Services(.{.media_convert}){}).media_convert;
+    const request = media_convert.PutPolicyRequest{
         .policy = .{
             .http_inputs = "foo",
             .https_inputs = "bar",
@@ -1313,7 +1255,8 @@ test "jsonStringify: structure + enums" {
 }
 
 test "jsonStringify: strings" {
-    const request = services.media_convert.AssociateCertificateRequest{
+    const media_convert = (Services(.{.media_convert}){}).media_convert;
+    const request = media_convert.AssociateCertificateRequest{
         .arn = "1234",
     };
 
@@ -1327,14 +1270,15 @@ test "jsonStringify: strings" {
 }
 
 test "jsonStringify" {
-    var tags = [_]services.media_convert.MapOfStringKeyValue{
+    const media_convert = (Services(.{.media_convert}){}).media_convert;
+    var tags = [_]media_convert.MapOfStringKeyValue{
         .{
             .key = "foo",
             .value = "bar",
         },
     };
 
-    const request = services.media_convert.TagResourceRequest{
+    const request = media_convert.TagResourceRequest{
         .arn = "1234",
         .tags = &tags,
     };
@@ -1360,11 +1304,12 @@ test "jsonStringify" {
 test "jsonStringify nullable object" {
     // structure is not null
     {
-        const request = services.lambda.CreateAliasRequest{
+        const lambda = (Services(.{.lambda}){}).lambda;
+        const request = lambda.CreateAliasRequest{
             .function_name = "foo",
             .function_version = "bar",
             .name = "baz",
-            .routing_config = services.lambda.AliasRoutingConfiguration{
+            .routing_config = lambda.AliasRoutingConfiguration{
                 .additional_version_weights = null,
             },
         };
@@ -1390,7 +1335,8 @@ test "jsonStringify nullable object" {
 
     // structure is null
     {
-        const request = services.kms.DecryptRequest{
+        const kms = (Services(.{.kms}){}).kms;
+        const request = kms.DecryptRequest{
             .key_id = "foo",
             .ciphertext_blob = "bar",
         };

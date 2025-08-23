@@ -1226,7 +1226,7 @@ fn uriEncodeByte(char: u8, writer: *std.Io.Writer, encode_slash: bool) !void {
     }
 }
 
-fn buildQuery(allocator: std.mem.Allocator, request: anytype) ![]const u8 {
+fn buildQuery(allocator: std.mem.Allocator, request: anytype) error{ WriteFailed, OutOfMemory }![]const u8 {
     // query should look something like this:
     // pub const http_query = .{
     //     .master_region = "MasterRegion",
@@ -1248,7 +1248,7 @@ fn buildQuery(allocator: std.mem.Allocator, request: anytype) ![]const u8 {
     return buffer.toOwnedSlice();
 }
 
-fn addQueryArg(comptime ValueType: type, prefix: []const u8, key: []const u8, value: anytype, writer: *std.Io.Writer) !bool {
+fn addQueryArg(comptime ValueType: type, prefix: []const u8, key: []const u8, value: anytype, writer: *std.Io.Writer) std.Io.Writer.Error!bool {
     switch (@typeInfo(@TypeOf(value))) {
         .optional => {
             if (value) |v|
@@ -1283,7 +1283,7 @@ fn addQueryArg(comptime ValueType: type, prefix: []const u8, key: []const u8, va
         },
     }
 }
-fn addBasicQueryArg(prefix: []const u8, key: []const u8, value: anytype, writer: *std.Io.Writer) !bool {
+fn addBasicQueryArg(prefix: []const u8, key: []const u8, value: anytype, writer: *std.Io.Writer) std.Io.Writer.Error!bool {
     _ = try writer.write(prefix);
     // TODO: url escaping
     try uriEncode(key, writer, true);
@@ -1390,8 +1390,67 @@ fn reportTraffic(
 }
 
 test {
-    _ = @import("aws_test.zig"){
-        .buildQuery = buildQuery,
-        .buildPath = buildPath,
+    _ = @import("aws_test.zig");
+}
+
+// buildQuery/buildPath tests, which are here as they are a) generic and b) private
+test "REST Json v1 builds proper queries" {
+    const allocator = std.testing.allocator;
+    const svs = Services(.{.lambda}){};
+    const request = svs.lambda.list_functions.Request{
+        .max_items = 1,
     };
+    const query = try buildQuery(allocator, request);
+    defer allocator.free(query);
+    try std.testing.expectEqualStrings("?MaxItems=1", query);
+}
+test "REST Json v1 handles reserved chars in queries" {
+    const allocator = std.testing.allocator;
+    const svs = Services(.{.lambda}){};
+    var keys = [_][]const u8{"Foo?I'm a crazy%dude"}; // Would love to have a way to express this without burning a var here
+    const request = svs.lambda.untag_resource.Request{
+        .tag_keys = keys[0..],
+        .resource = "hello",
+    };
+    const query = try buildQuery(allocator, request);
+    defer allocator.free(query);
+    try std.testing.expectEqualStrings("?tagKeys=Foo%3FI%27m a crazy%25dude", query);
+}
+test "REST Json v1 serializes lists in queries" {
+    const allocator = std.testing.allocator;
+    const svs = Services(.{.lambda}){};
+    var keys = [_][]const u8{ "Foo", "Bar" }; // Would love to have a way to express this without burning a var here
+    const request = svs.lambda.untag_resource.Request{
+        .tag_keys = keys[0..],
+        .resource = "hello",
+    };
+    const query = try buildQuery(allocator, request);
+    defer allocator.free(query);
+    try std.testing.expectEqualStrings("?tagKeys=Foo&tagKeys=Bar", query);
+}
+test "REST Json v1 buildpath substitutes" {
+    const allocator = std.testing.allocator;
+    var al = std.ArrayList([]const u8){};
+    defer al.deinit(allocator);
+    const svs = Services(.{.lambda}){};
+    const request = svs.lambda.list_functions.Request{
+        .max_items = 1,
+    };
+    const input_path = "https://myhost/{MaxItems}/";
+    const output_path = try buildPath(allocator, input_path, @TypeOf(request), request, true, &al);
+    defer allocator.free(output_path);
+    try std.testing.expectEqualStrings("https://myhost/1/", output_path);
+}
+test "REST Json v1 buildpath handles restricted characters" {
+    const allocator = std.testing.allocator;
+    var al = std.ArrayList([]const u8){};
+    defer al.deinit(allocator);
+    const svs = Services(.{.lambda}){};
+    const request = svs.lambda.list_functions.Request{
+        .marker = ":",
+    };
+    const input_path = "https://myhost/{Marker}/";
+    const output_path = try buildPath(allocator, input_path, @TypeOf(request), request, true, &al);
+    defer allocator.free(output_path);
+    try std.testing.expectEqualStrings("https://myhost/%3A/", output_path);
 }
