@@ -1412,14 +1412,14 @@ fn typeForField(comptime T: type, comptime field_name: []const u8) !type {
 
 test "custom serialization for map objects" {
     const allocator = std.testing.allocator;
-    var buffer = std.ArrayList(u8).init(allocator);
+    var buffer = std.Io.Writer.Allocating.init(allocator);
     defer buffer.deinit();
     var tags = try std.ArrayList(@typeInfo(try typeForField(services.lambda.tag_resource.Request, "tags")).pointer.child).initCapacity(allocator, 2);
-    defer tags.deinit();
+    defer tags.deinit(allocator);
     tags.appendAssumeCapacity(.{ .key = "Foo", .value = "Bar" });
     tags.appendAssumeCapacity(.{ .key = "Baz", .value = "Qux" });
     const req = services.lambda.TagResourceRequest{ .resource = "hello", .tags = tags.items };
-    try std.json.stringify(req, .{ .whitespace = .indent_4 }, buffer.writer());
+    try buffer.writer.print("{f}", .{std.json.fmt(req, .{ .whitespace = .indent_4 })});
 
     const parsed_body = try std.json.parseFromSlice(struct {
         Resource: []const u8,
@@ -1427,7 +1427,7 @@ test "custom serialization for map objects" {
             Foo: []const u8,
             Baz: []const u8,
         },
-    }, testing.allocator, buffer.items, .{});
+    }, testing.allocator, buffer.written(), .{});
     defer parsed_body.deinit();
 
     try testing.expectEqualStrings("hello", parsed_body.value.Resource);
@@ -1439,7 +1439,7 @@ test "proper serialization for kms" {
     // Github issue #8
     // https://github.com/elerch/aws-sdk-for-zig/issues/8
     const allocator = std.testing.allocator;
-    var buffer = std.ArrayList(u8).init(allocator);
+    var buffer = std.Io.Writer.Allocating.init(allocator);
     defer buffer.deinit();
     const req = services.kms.encrypt.Request{
         .encryption_algorithm = "SYMMETRIC_DEFAULT",
@@ -1451,7 +1451,7 @@ test "proper serialization for kms" {
         .dry_run = false,
         .grant_tokens = &[_][]const u8{},
     };
-    try std.json.stringify(req, .{ .whitespace = .indent_4 }, buffer.writer());
+    try buffer.writer.print("{f}", .{std.json.fmt(req, .{ .whitespace = .indent_4 })});
 
     {
         const parsed_body = try std.json.parseFromSlice(struct {
@@ -1461,7 +1461,7 @@ test "proper serialization for kms" {
             GrantTokens: [][]const u8,
             EncryptionAlgorithm: []const u8,
             DryRun: bool,
-        }, testing.allocator, buffer.items, .{});
+        }, testing.allocator, buffer.written(), .{});
         defer parsed_body.deinit();
 
         try testing.expectEqualStrings("42", parsed_body.value.KeyId);
@@ -1471,7 +1471,7 @@ test "proper serialization for kms" {
         try testing.expectEqual(false, parsed_body.value.DryRun);
     }
 
-    var buffer_null = std.ArrayList(u8).init(allocator);
+    var buffer_null = std.Io.Writer.Allocating.init(allocator);
     defer buffer_null.deinit();
     const req_null = services.kms.encrypt.Request{
         .encryption_algorithm = "SYMMETRIC_DEFAULT",
@@ -1483,7 +1483,7 @@ test "proper serialization for kms" {
         .grant_tokens = &[_][]const u8{},
     };
 
-    try std.json.stringify(req_null, .{ .whitespace = .indent_4 }, buffer_null.writer());
+    try buffer_null.writer.print("{f}", .{std.json.fmt(req_null, .{ .whitespace = .indent_4 })});
 
     {
         const parsed_body = try std.json.parseFromSlice(struct {
@@ -1493,7 +1493,7 @@ test "proper serialization for kms" {
             GrantTokens: [][]const u8,
             EncryptionAlgorithm: []const u8,
             DryRun: bool,
-        }, testing.allocator, buffer_null.items, .{});
+        }, testing.allocator, buffer_null.written(), .{});
         defer parsed_body.deinit();
 
         try testing.expectEqualStrings("42", parsed_body.value.KeyId);
@@ -1541,8 +1541,8 @@ test "REST Json v1 serializes lists in queries" {
 }
 test "REST Json v1 buildpath substitutes" {
     const allocator = std.testing.allocator;
-    var al = std.ArrayList([]const u8).init(allocator);
-    defer al.deinit();
+    var al = std.ArrayList([]const u8){};
+    defer al.deinit(allocator);
     const svs = Services(.{.lambda}){};
     const request = svs.lambda.list_functions.Request{
         .max_items = 1,
@@ -1554,8 +1554,8 @@ test "REST Json v1 buildpath substitutes" {
 }
 test "REST Json v1 buildpath handles restricted characters" {
     const allocator = std.testing.allocator;
-    var al = std.ArrayList([]const u8).init(allocator);
-    defer al.deinit();
+    var al = std.ArrayList([]const u8){};
+    defer al.deinit(allocator);
     const svs = Services(.{.lambda}){};
     const request = svs.lambda.list_functions.Request{
         .marker = ":",
@@ -1571,7 +1571,7 @@ test "basic json request serialization" {
     const request = svs.dynamo_db.list_tables.Request{
         .limit = 1,
     };
-    var buffer = std.ArrayList(u8).init(allocator);
+    var buffer = std.Io.Writer.Allocating.init(allocator);
     defer buffer.deinit();
 
     // The transformer needs to allocate stuff out of band, but we
@@ -1583,13 +1583,13 @@ test "basic json request serialization" {
     //       for a boxed member with no observable difference." But we're
     //       seeing a lot of differences here between spec and reality
     //
-    try std.json.stringify(request, .{ .whitespace = .indent_4 }, buffer.writer());
+    try buffer.writer.print("{f}", .{std.json.fmt(request, .{ .whitespace = .indent_4 })});
     try std.testing.expectEqualStrings(
         \\{
         \\    "ExclusiveStartTableName": null,
         \\    "Limit": 1
         \\}
-    , buffer.items);
+    , buffer.written());
 }
 test "layer object only" {
     const TestResponse = struct {
@@ -2291,7 +2291,7 @@ test "rest_json_1_work_with_lambda: lambda tagResource (only), to excercise zig 
     const options = try test_harness.start();
     const lambda = (Services(.{.lambda}){}).lambda;
     var tags = try std.ArrayList(@typeInfo(try typeForField(lambda.tag_resource.Request, "tags")).pointer.child).initCapacity(allocator, 1);
-    defer tags.deinit();
+    defer tags.deinit(allocator);
     tags.appendAssumeCapacity(.{ .key = "Foo", .value = "Bar" });
     const req = services.lambda.tag_resource.Request{ .resource = "arn:aws:lambda:us-west-2:550620852718:function:awsome-lambda-LambdaStackawsomeLambda", .tags = tags.items };
     const call = try Request(lambda.tag_resource).call(req, options);
@@ -2674,7 +2674,7 @@ test "jsonStringify: structure + enums" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
 
-    const request_json = try std.json.stringifyAlloc(std.testing.allocator, request, .{});
+    const request_json = try std.fmt.allocPrint(std.testing.allocator, "{f}", .{std.json.fmt(request, .{})});
     defer std.testing.allocator.free(request_json);
 
     const parsed = try std.json.parseFromSlice(struct {
@@ -2699,7 +2699,7 @@ test "jsonStringify: strings" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
 
-    const request_json = try std.json.stringifyAlloc(std.testing.allocator, request, .{});
+    const request_json = try std.fmt.allocPrint(std.testing.allocator, "{f}", .{std.json.fmt(request, .{})});
     defer std.testing.allocator.free(request_json);
 
     try testing.expectEqualStrings("{\"arn\":\"1234\"}", request_json);
@@ -2721,7 +2721,7 @@ test "jsonStringify" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
 
-    const request_json = try std.json.stringifyAlloc(std.testing.allocator, request, .{});
+    const request_json = try std.fmt.allocPrint(std.testing.allocator, "{f}", .{std.json.fmt(request, .{})});
     defer std.testing.allocator.free(request_json);
 
     const json_parsed = try std.json.parseFromSlice(struct {
@@ -2748,7 +2748,7 @@ test "jsonStringify nullable object" {
             },
         };
 
-        const request_json = try std.json.stringifyAlloc(std.testing.allocator, request, .{});
+        const request_json = try std.fmt.allocPrint(std.testing.allocator, "{f}", .{std.json.fmt(request, .{})});
         defer std.testing.allocator.free(request_json);
 
         const json_parsed = try std.json.parseFromSlice(struct {
@@ -2774,7 +2774,7 @@ test "jsonStringify nullable object" {
             .ciphertext_blob = "bar",
         };
 
-        const request_json = try std.json.stringifyAlloc(std.testing.allocator, request, .{});
+        const request_json = try std.fmt.allocPrint(std.testing.allocator, "{f}", .{std.json.fmt(request, .{})});
         defer std.testing.allocator.free(request_json);
 
         const json_parsed = try std.json.parseFromSlice(struct {

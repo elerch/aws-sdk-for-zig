@@ -103,60 +103,72 @@ pub fn encodeInternal(
     return rc;
 }
 
-fn testencode(allocator: std.mem.Allocator, expected: []const u8, value: anytype, comptime options: EncodingOptions) !void {
-    const ValidationWriter = struct {
-        const Self = @This();
-        pub const Writer = std.io.Writer(*Self, Error, write);
-        pub const Error = error{
-            TooMuchData,
-            DifferentData,
-        };
-
-        expected_remaining: []const u8,
-
-        fn init(exp: []const u8) Self {
-            return .{ .expected_remaining = exp };
-        }
-
-        pub fn writer(self: *Self) Writer {
-            return .{ .context = self };
-        }
-
-        fn write(self: *Self, bytes: []const u8) Error!usize {
-            // std.debug.print("{s}\n", .{bytes});
-            if (self.expected_remaining.len < bytes.len) {
-                std.log.warn(
-                    \\====== expected this output: =========
-                    \\{s}
-                    \\======== instead found this: =========
-                    \\{s}
-                    \\======================================
-                , .{
-                    self.expected_remaining,
-                    bytes,
-                });
-                return error.TooMuchData;
-            }
-            if (!std.mem.eql(u8, self.expected_remaining[0..bytes.len], bytes)) {
-                std.log.warn(
-                    \\====== expected this output: =========
-                    \\{s}
-                    \\======== instead found this: =========
-                    \\{s}
-                    \\======================================
-                , .{
-                    self.expected_remaining[0..bytes.len],
-                    bytes,
-                });
-                return error.DifferentData;
-            }
-            self.expected_remaining = self.expected_remaining[bytes.len..];
-            return bytes.len;
-        }
+const ValidationWriter = struct {
+    const Self = @This();
+    pub const Writer = std.io.Writer(*Self, Error, write);
+    pub const Error = error{
+        TooMuchData,
+        DifferentData,
     };
 
+    expected_remaining: []const u8,
+    writer: std.Io.Writer,
+
+    fn init(exp: []const u8) Self {
+        return .{
+            .expected_remaining = exp,
+            .writer = .{
+                .buffer = &.{},
+                .vtable = &.{
+                    .drain = drain,
+                },
+            },
+        };
+    }
+
+    fn drain(w: *std.Io.Writer, data: []const []const u8, splat: usize) std.Io.Writer.Error!usize {
+        if (splat > 0) @panic("No splat");
+        const self: *ValidationWriter = @fieldParentPtr("writer", w);
+
+        var bytes: usize = 0;
+        for (data) |d| bytes += try self.write(d);
+        return bytes;
+    }
+
+    fn write(self: *Self, bytes: []const u8) std.Io.Writer.Error!usize {
+        if (self.expected_remaining.len < bytes.len) {
+            std.log.warn(
+                \\====== expected this output: =========
+                \\{s}
+                \\======== instead found this: =========
+                \\{s}
+                \\======================================
+            , .{
+                self.expected_remaining,
+                bytes,
+            });
+            return error.WriteFailed;
+        }
+        if (!std.mem.eql(u8, self.expected_remaining[0..bytes.len], bytes)) {
+            std.log.warn(
+                \\====== expected this output: =========
+                \\{s}
+                \\======== instead found this: =========
+                \\{s}
+                \\======================================
+            , .{
+                self.expected_remaining[0..bytes.len],
+                bytes,
+            });
+            return error.WriteFailed;
+        }
+        self.expected_remaining = self.expected_remaining[bytes.len..];
+        return bytes.len;
+    }
+};
+fn testencode(allocator: std.mem.Allocator, expected: []const u8, value: anytype, comptime options: EncodingOptions) !void {
     var vos = ValidationWriter.init(expected);
-    try encode(allocator, value, vos.writer(), options);
+    try encode(allocator, value, &vos.writer, options);
     if (vos.expected_remaining.len > 0) return error.NotEnoughData;
 }
 
@@ -238,17 +250,17 @@ test "can urlencode an EC2 Filter" {
         },
         .{},
     ) catch |err| {
-        var al = std.ArrayList(u8).init(std.testing.allocator);
-        defer al.deinit();
+        var aw = std.Io.Writer.Allocating.init(std.testing.allocator);
+        defer aw.deinit();
         try encode(
             std.testing.allocator,
             Request{
                 .filters = @constCast(&[_]Filter{.{ .name = "foo", .values = @constCast(&[_][]const u8{"bar"}) }}),
             },
-            al.writer(),
+            &aw.writer,
             .{},
         );
-        std.log.warn("Error found. Full encoding is '{s}'", .{al.items});
+        std.log.warn("Error found. Full encoding is '{s}'", .{aw.written()});
         return err;
     };
 }

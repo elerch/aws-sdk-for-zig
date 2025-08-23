@@ -348,10 +348,10 @@ pub fn freeSignedRequest(allocator: std.mem.Allocator, request: *base.Request, c
 
 pub const credentialsFn = *const fn ([]const u8) ?Credentials;
 
-pub fn verifyServerRequest(allocator: std.mem.Allocator, request: *std.http.Server.Request, request_body_reader: anytype, credentials_fn: credentialsFn) !bool {
+pub fn verifyServerRequest(allocator: std.mem.Allocator, request: *std.http.Server.Request, credentials_fn: credentialsFn) !bool {
     var unverified_request = try UnverifiedRequest.init(allocator, request);
     defer unverified_request.deinit();
-    return verify(allocator, unverified_request, request_body_reader, credentials_fn);
+    return verify(allocator, unverified_request, credentials_fn);
 }
 
 pub const UnverifiedRequest = struct {
@@ -359,17 +359,19 @@ pub const UnverifiedRequest = struct {
     target: []const u8,
     method: std.http.Method,
     allocator: std.mem.Allocator,
+    raw: *std.http.Server.Request,
 
     pub fn init(allocator: std.mem.Allocator, request: *std.http.Server.Request) !UnverifiedRequest {
-        var al = std.ArrayList(std.http.Header).init(allocator);
-        defer al.deinit();
+        var al = std.ArrayList(std.http.Header){};
+        defer al.deinit(allocator);
         var it = request.iterateHeaders();
-        while (it.next()) |h| try al.append(h);
+        while (it.next()) |h| try al.append(allocator, h);
         return .{
             .target = request.head.target,
             .method = request.head.method,
-            .headers = try al.toOwnedSlice(),
+            .headers = try al.toOwnedSlice(allocator),
             .allocator = allocator,
+            .raw = request,
         };
     }
 
@@ -387,7 +389,7 @@ pub const UnverifiedRequest = struct {
     }
 };
 
-pub fn verify(allocator: std.mem.Allocator, request: UnverifiedRequest, request_body_reader: anytype, credentials_fn: credentialsFn) !bool {
+pub fn verify(allocator: std.mem.Allocator, request: UnverifiedRequest, credentials_fn: credentialsFn) !bool {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
     const aa = arena.allocator();
@@ -420,7 +422,6 @@ pub fn verify(allocator: std.mem.Allocator, request: UnverifiedRequest, request_
     return verifyParsedAuthorization(
         aa,
         request,
-        request_body_reader,
         credential.?,
         signed_headers.?,
         signature.?,
@@ -431,7 +432,6 @@ pub fn verify(allocator: std.mem.Allocator, request: UnverifiedRequest, request_
 fn verifyParsedAuthorization(
     allocator: std.mem.Allocator,
     request: UnverifiedRequest,
-    request_body_reader: anytype,
     credential: []const u8,
     signed_headers: []const u8,
     signature: []const u8,
@@ -494,7 +494,8 @@ fn verifyParsedAuthorization(
         .content_type = request.getFirstHeaderValue("content-type").?,
     };
     signed_request.query = request.target[signed_request.path.len..]; // TODO: should this be +1? query here would include '?'
-    signed_request.body = try request_body_reader.readAllAlloc(allocator, std.math.maxInt(usize));
+    // TODO: This is almost certainly not what we want here long term, but will get tests working
+    signed_request.body = try request.raw.server.reader.in.allocRemaining(allocator, .unlimited);
     defer allocator.free(signed_request.body);
     signed_request = try signRequest(allocator, signed_request, config);
     defer freeSignedRequest(allocator, &signed_request, config);
@@ -1010,13 +1011,13 @@ test "canonical query" {
 test "canonical headers" {
     const allocator = std.testing.allocator;
     var headers = try std.ArrayList(std.http.Header).initCapacity(allocator, 5);
-    defer headers.deinit();
-    try headers.append(.{ .name = "Host", .value = "iam.amazonaws.com" });
-    try headers.append(.{ .name = "Content-Type", .value = "application/x-www-form-urlencoded; charset=utf-8" });
-    try headers.append(.{ .name = "User-Agent", .value = "This header should be skipped" });
-    try headers.append(.{ .name = "My-header1", .value = "  a  b  c  " });
-    try headers.append(.{ .name = "X-Amz-Date", .value = "20150830T123600Z" });
-    try headers.append(.{ .name = "My-header2", .value = "  \"a  b  c\"  " });
+    defer headers.deinit(allocator);
+    try headers.append(allocator, .{ .name = "Host", .value = "iam.amazonaws.com" });
+    try headers.append(allocator, .{ .name = "Content-Type", .value = "application/x-www-form-urlencoded; charset=utf-8" });
+    try headers.append(allocator, .{ .name = "User-Agent", .value = "This header should be skipped" });
+    try headers.append(allocator, .{ .name = "My-header1", .value = "  a  b  c  " });
+    try headers.append(allocator, .{ .name = "X-Amz-Date", .value = "20150830T123600Z" });
+    try headers.append(allocator, .{ .name = "My-header2", .value = "  \"a  b  c\"  " });
     const expected =
         \\content-type:application/x-www-form-urlencoded; charset=utf-8
         \\host:iam.amazonaws.com
@@ -1035,12 +1036,12 @@ test "canonical headers" {
 test "canonical request" {
     const allocator = std.testing.allocator;
     var headers = try std.ArrayList(std.http.Header).initCapacity(allocator, 5);
-    defer headers.deinit();
-    try headers.append(.{ .name = "User-agent", .value = "c sdk v1.0" });
+    defer headers.deinit(allocator);
+    try headers.append(allocator, .{ .name = "User-agent", .value = "c sdk v1.0" });
     // In contrast to AWS CRT (aws-c-auth), we add the date as part of the
     // signing operation. They add it as part of the canonicalization
-    try headers.append(.{ .name = "X-Amz-Date", .value = "20150830T123600Z" });
-    try headers.append(.{ .name = "Host", .value = "example.amazonaws.com" });
+    try headers.append(allocator, .{ .name = "X-Amz-Date", .value = "20150830T123600Z" });
+    try headers.append(allocator, .{ .name = "Host", .value = "example.amazonaws.com" });
     const req = base.Request{
         .path = "/",
         .method = "GET",
@@ -1095,10 +1096,10 @@ test "can sign" {
 
     const allocator = std.testing.allocator;
     var headers = try std.ArrayList(std.http.Header).initCapacity(allocator, 5);
-    defer headers.deinit();
-    try headers.append(.{ .name = "Content-Type", .value = "application/x-www-form-urlencoded; charset=utf-8" });
-    try headers.append(.{ .name = "Content-Length", .value = "13" });
-    try headers.append(.{ .name = "Host", .value = "example.amazonaws.com" });
+    defer headers.deinit(allocator);
+    try headers.append(allocator, .{ .name = "Content-Type", .value = "application/x-www-form-urlencoded; charset=utf-8" });
+    try headers.append(allocator, .{ .name = "Content-Length", .value = "13" });
+    try headers.append(allocator, .{ .name = "Host", .value = "example.amazonaws.com" });
     const req = base.Request{
         .path = "/",
         .query = "",
@@ -1165,25 +1166,25 @@ test "can verify server request" {
         "X-Amz-Date: 20230908T170252Z\r\n" ++
         "x-amz-content-sha256: fcde2b2edba56bf408601fb721fe9b5c338d10ee429ea04fae5511b68fbf8fb9\r\n" ++
         "Authorization: AWS4-HMAC-SHA256 Credential=ACCESS/20230908/us-west-2/s3/aws4_request, SignedHeaders=accept;content-length;content-type;host;x-amz-content-sha256;x-amz-date;x-amz-storage-class, Signature=fcc43ce73a34c9bd1ddf17e8a435f46a859812822f944f9eeb2aabcd64b03523\r\n\r\nbar";
-    var read_buffer: [1024]u8 = undefined;
-    @memcpy(read_buffer[0..req.len], req);
+    var reader = std.Io.Reader.fixed(req);
     var server: std.http.Server = .{
-        .connection = undefined,
-        .state = .ready,
-        .read_buffer = &read_buffer,
-        .read_buffer_len = req.len,
-        .next_request_start = 0,
+        .out = undefined, // We're not sending a response here
+        .reader = .{
+            .in = &reader,
+            .interface = undefined,
+            .state = .ready,
+            .max_head_len = req.len,
+        },
     };
     var request: std.http.Server.Request = .{
         .server = &server,
-        .head_end = req.len - 3,
-        .head = try std.http.Server.Request.Head.parse(read_buffer[0 .. req.len - 3]),
-        .reader_state = undefined,
+        .head = undefined,
+        .head_buffer = &.{},
     };
+    // I think we need a request.receiveHead() call here
 
     // std.testing.log_level = .debug;
-    var fbs = std.io.fixedBufferStream("bar");
-    try std.testing.expect(try verifyServerRequest(allocator, &request, fbs.reader(), struct {
+    try std.testing.expect(try verifyServerRequest(allocator, &request, struct {
         cred: Credentials,
 
         const Self = @This();
@@ -1221,22 +1222,24 @@ test "can verify server request without x-amz-content-sha256" {
     const req_data = head ++ body;
     var read_buffer: [2048]u8 = undefined;
     @memcpy(read_buffer[0..req_data.len], req_data);
+    var reader = std.Io.Reader.fixed(&read_buffer);
     var server: std.http.Server = .{
-        .connection = undefined,
-        .state = .ready,
-        .read_buffer = &read_buffer,
-        .read_buffer_len = req_data.len,
-        .next_request_start = 0,
+        .out = undefined, // We're not sending a response here
+        .reader = .{
+            .interface = undefined,
+            .in = &reader,
+            .state = .ready,
+            .max_head_len = 1024,
+        },
     };
     var request: std.http.Server.Request = .{
         .server = &server,
-        .head_end = head.len,
-        .head = try std.http.Server.Request.Head.parse(read_buffer[0..head.len]),
-        .reader_state = undefined,
+        .head = undefined,
+        .head_buffer = &.{},
     };
     {
-        var h = std.ArrayList(std.http.Header).init(allocator);
-        defer h.deinit();
+        var h = try std.ArrayList(std.http.Header).initCapacity(allocator, 4);
+        defer h.deinit(allocator);
         const signed_headers = &[_][]const u8{ "content-type", "host", "x-amz-date", "x-amz-target" };
         var it = request.iterateHeaders();
         while (it.next()) |source| {
@@ -1245,7 +1248,7 @@ test "can verify server request without x-amz-content-sha256" {
                 match = std.ascii.eqlIgnoreCase(s, source.name);
                 if (match) break;
             }
-            if (match) try h.append(.{ .name = source.name, .value = source.value });
+            if (match) try h.append(allocator, .{ .name = source.name, .value = source.value });
         }
         const req = base.Request{
             .path = "/",
@@ -1282,9 +1285,7 @@ test "can verify server request without x-amz-content-sha256" {
     }
 
     { // verification
-        var fis = std.io.fixedBufferStream(body[0..]);
-
-        try std.testing.expect(try verifyServerRequest(allocator, &request, fis.reader(), struct {
+        try std.testing.expect(try verifyServerRequest(allocator, &request, struct {
             cred: Credentials,
 
             const Self = @This();
