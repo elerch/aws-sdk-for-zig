@@ -90,8 +90,37 @@ pub const Options = struct {
     dualstack: bool = false,
     sigv4_service_name: ?[]const u8 = null,
 
-    /// Used for testing to provide consistent signing. If null, will use current time
-    signing_time: ?i64 = null,
+    mock: ?Mock = null,
+};
+
+/// mocking methods for isolated testing
+pub const Mock = struct {
+    /// Used to provide consistent signing
+    signing_time: ?i64,
+    /// context is desiged to be type-erased pointer (@intFromPtr)
+    context: usize = 0,
+    request_fn: *const fn (
+        usize,
+        std.http.Method,
+        std.Uri,
+        std.http.Client.RequestOptions,
+    ) std.http.Client.RequestError!std.http.Client.Request,
+    send_body_complete: *const fn (usize, []u8) std.Io.Writer.Error!void,
+    receive_head: *const fn (usize) std.http.Client.Request.ReceiveHeadError!std.http.Client.Response,
+    reader_decompressing: *const fn (usize) *std.Io.Reader,
+
+    fn request(m: Mock, method: std.http.Method, uri: std.Uri, options: std.http.Client.RequestOptions) std.http.Client.RequestError!std.http.Client.Request {
+        return m.request_fn(m.context, method, uri, options);
+    }
+    fn sendBodyComplete(m: Mock, body: []u8) std.Io.Writer.Error!void {
+        return m.send_body_complete(m.context, body);
+    }
+    fn receiveHead(m: Mock) std.http.Client.Request.ReceiveHeadError!std.http.Client.Response {
+        return m.receive_head(m.context);
+    }
+    fn readerDecompressing(m: Mock) *std.Io.Reader {
+        return m.reader_decompressing(m.context);
+    }
 };
 
 pub const Header = std.http.Header;
@@ -163,9 +192,9 @@ pub const AwsHttp = struct {
             .region = getRegion(service, options.region),
             .service = options.sigv4_service_name orelse service,
             .credentials = creds,
-            .signing_time = options.signing_time,
+            .signing_time = if (options.mock) |m| m.signing_time else null,
         };
-        return try self.makeRequest(endpoint, request, signing_config);
+        return try self.makeRequest(endpoint, request, signing_config, options);
     }
 
     /// makeRequest is a low level http/https function that can be used inside
@@ -184,7 +213,13 @@ pub const AwsHttp = struct {
     /// Content-Length: (length of body)
     ///
     /// Return value is an HttpResult, which will need the caller to deinit().
-    pub fn makeRequest(self: Self, endpoint: EndPoint, request: HttpRequest, signing_config: ?signing.Config) !HttpResult {
+    pub fn makeRequest(
+        self: Self,
+        endpoint: EndPoint,
+        request: HttpRequest,
+        signing_config: ?signing.Config,
+        options: Options,
+    ) !HttpResult {
         var request_cp = request;
 
         log.debug("Request Path: {s}", .{request_cp.path});
@@ -227,13 +262,16 @@ pub const AwsHttp = struct {
         log.debug("Request url: {s}", .{url});
         // TODO: Fix this proxy stuff. This is all a kludge just to compile, but std.http.Client has it all built in now
         var cl = std.http.Client{ .allocator = self.allocator, .https_proxy = if (self.proxy) |*p| @constCast(p) else null };
+        // Not sure this if statement is correct here. deinit seems to assume
+        // that client.request was called at least once, but we don't do that
+        // if we're in a test harness
         defer cl.deinit(); // TODO: Connection pooling
-
         const method = std.meta.stringToEnum(std.http.Method, request_cp.method).?;
 
         // Fetch API in 0.15.1 is insufficient as it does not provide
         // server headers. We'll construct and send the request ourselves
-        var req = try cl.request(method, try std.Uri.parse(url), .{
+        const uri = try std.Uri.parse(url);
+        const req_options: std.http.Client.RequestOptions = .{
             // we need full control over most headers. I wish libraries would do a
             // better job of having default headers as an opt-in...
             .headers = .{
@@ -245,7 +283,13 @@ pub const AwsHttp = struct {
                 .content_type = .omit,
             },
             .extra_headers = headers.items,
-        });
+        };
+
+        var req = if (options.mock) |m|
+            try m.request(method, uri, req_options) // This will call the test harness
+        else
+            try cl.request(method, uri, req_options);
+
         // TODO: Need to test for payloads > 2^14. I believe one of our tests does this, but not sure
         // if (request_cp.body.len > 0) {
         //     // Workaround for https://github.com/ziglang/zig/issues/15626
@@ -267,10 +311,14 @@ pub const AwsHttp = struct {
             // in the chain then does actually modify the body of the request
             // so we'll need to duplicate it here
             const req_body = try self.allocator.dupe(u8, request_cp.body);
-            try req.sendBodyComplete(req_body);
-        } else try req.sendBodiless();
+            defer self.allocator.free(req_body); // docs for sendBodyComplete say it flushes, so no need to outlive this
+            if (options.mock) |m|
+                try m.sendBodyComplete(req_body)
+            else
+                try req.sendBodyComplete(req_body);
+        } else if (options.mock == null) try req.sendBodiless();
 
-        var response = try req.receiveHead(&.{});
+        var response = if (options.mock) |m| try m.receiveHead() else try req.receiveHead(&.{});
 
         // TODO: Timeout - is this now above us?
         log.debug(

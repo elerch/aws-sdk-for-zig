@@ -85,9 +85,9 @@ pub const Options = struct {
     success_http_code: i64 = 200,
     client: Client,
 
-    /// Used for testing to provide consistent signing. If null, will use current time
-    signing_time: ?i64 = null,
     diagnostics: ?*Diagnostics = null,
+
+    mock: ?awshttp.Mock = null,
 };
 
 pub const Diagnostics = struct {
@@ -298,8 +298,8 @@ pub fn Request(comptime request_action: anytype) type {
                 .region = options.region,
                 .dualstack = options.dualstack,
                 .client = options.client,
-                .signing_time = options.signing_time,
                 .diagnostics = options.diagnostics,
+                .mock = options.mock,
             });
         }
 
@@ -395,7 +395,7 @@ pub fn Request(comptime request_action: anytype) type {
                     .region = options.region,
                     .dualstack = options.dualstack,
                     .sigv4_service_name = Self.service_meta.sigv4_name,
-                    .signing_time = options.signing_time,
+                    .mock = options.mock,
                 },
             );
             defer response.deinit();

@@ -11,6 +11,8 @@ const Services = aws.Services;
 
 const log = std.log.scoped(.aws_test);
 
+var test_error_log_enabled = true;
+
 // TODO: Where does this belong really?
 fn typeForField(comptime T: type, comptime field_name: []const u8) !type {
     const ti = @typeInfo(T);
@@ -25,6 +27,22 @@ fn typeForField(comptime T: type, comptime field_name: []const u8) !type {
     }
     return error.FieldNotFound;
 }
+pub fn StringCaseInsensitiveHashMap(comptime V: type) type {
+    return std.HashMap([]const u8, V, StringInsensitiveContext, std.hash_map.default_max_load_percentage);
+}
+pub const StringInsensitiveContext = struct {
+    pub fn hash(self: @This(), s: []const u8) u64 {
+        _ = self;
+        var buf: [1024]u8 = undefined;
+        if (s.len > buf.len) unreachable; // tolower has a debug assert, but we want non-debug check too
+        const lower_s = std.ascii.lowerString(buf[0..], s);
+        return std.hash.Wyhash.hash(0, lower_s);
+    }
+    pub fn eql(self: @This(), a: []const u8, b: []const u8) bool {
+        _ = self;
+        return std.ascii.eqlIgnoreCase(a, b);
+    }
+};
 
 test "custom serialization for map objects" {
     const allocator = std.testing.allocator;
@@ -46,12 +64,12 @@ test "custom serialization for map objects" {
             Foo: []const u8,
             Baz: []const u8,
         },
-    }, testing.allocator, buffer.written(), .{});
+    }, std.testing.allocator, buffer.written(), .{});
     defer parsed_body.deinit();
 
-    try testing.expectEqualStrings("hello", parsed_body.value.Resource);
-    try testing.expectEqualStrings("Bar", parsed_body.value.Tags.Foo);
-    try testing.expectEqualStrings("Qux", parsed_body.value.Tags.Baz);
+    try std.testing.expectEqualStrings("hello", parsed_body.value.Resource);
+    try std.testing.expectEqualStrings("Bar", parsed_body.value.Tags.Foo);
+    try std.testing.expectEqualStrings("Qux", parsed_body.value.Tags.Baz);
 }
 
 test "proper serialization for kms" {
@@ -81,14 +99,14 @@ test "proper serialization for kms" {
             GrantTokens: [][]const u8,
             EncryptionAlgorithm: []const u8,
             DryRun: bool,
-        }, testing.allocator, buffer.written(), .{});
+        }, std.testing.allocator, buffer.written(), .{});
         defer parsed_body.deinit();
 
-        try testing.expectEqualStrings("42", parsed_body.value.KeyId);
-        try testing.expectEqualStrings("foo", parsed_body.value.Plaintext);
-        try testing.expectEqual(0, parsed_body.value.GrantTokens.len);
-        try testing.expectEqualStrings("SYMMETRIC_DEFAULT", parsed_body.value.EncryptionAlgorithm);
-        try testing.expectEqual(false, parsed_body.value.DryRun);
+        try std.testing.expectEqualStrings("42", parsed_body.value.KeyId);
+        try std.testing.expectEqualStrings("foo", parsed_body.value.Plaintext);
+        try std.testing.expectEqual(0, parsed_body.value.GrantTokens.len);
+        try std.testing.expectEqualStrings("SYMMETRIC_DEFAULT", parsed_body.value.EncryptionAlgorithm);
+        try std.testing.expectEqual(false, parsed_body.value.DryRun);
     }
 
     var buffer_null = std.Io.Writer.Allocating.init(allocator);
@@ -113,15 +131,15 @@ test "proper serialization for kms" {
             GrantTokens: [][]const u8,
             EncryptionAlgorithm: []const u8,
             DryRun: bool,
-        }, testing.allocator, buffer_null.written(), .{});
+        }, std.testing.allocator, buffer_null.written(), .{});
         defer parsed_body.deinit();
 
-        try testing.expectEqualStrings("42", parsed_body.value.KeyId);
-        try testing.expectEqualStrings("foo", parsed_body.value.Plaintext);
-        try testing.expectEqual(null, parsed_body.value.EncryptionContext);
-        try testing.expectEqual(0, parsed_body.value.GrantTokens.len);
-        try testing.expectEqualStrings("SYMMETRIC_DEFAULT", parsed_body.value.EncryptionAlgorithm);
-        try testing.expectEqual(false, parsed_body.value.DryRun);
+        try std.testing.expectEqualStrings("42", parsed_body.value.KeyId);
+        try std.testing.expectEqualStrings("foo", parsed_body.value.Plaintext);
+        try std.testing.expectEqual(null, parsed_body.value.EncryptionContext);
+        try std.testing.expectEqual(0, parsed_body.value.GrantTokens.len);
+        try std.testing.expectEqualStrings("SYMMETRIC_DEFAULT", parsed_body.value.EncryptionAlgorithm);
+        try std.testing.expectEqual(false, parsed_body.value.DryRun);
     }
 }
 
@@ -224,280 +242,246 @@ test {
     std.testing.refAllDecls(@import("servicemodel.zig"));
     std.testing.refAllDecls(@import("xml_shaper.zig"));
 }
+
 const TestOptions = struct {
     allocator: std.mem.Allocator,
-    arena: ?*std.heap.ArenaAllocator = null,
-    server_port: ?u16 = null,
-    server_remaining_requests: usize = 1,
     server_response: []const u8 = "unset",
     server_response_status: std.http.Status = .ok,
     server_response_headers: []const std.http.Header = &.{},
     server_response_transfer_encoding: ?std.http.TransferEncoding = null,
-    request_body: []u8 = "",
-    request_method: std.http.Method = undefined,
-    request_target: []const u8 = undefined,
-    request_headers: []std.http.Header = undefined,
-    test_server_runtime_uri: ?[]u8 = null,
-    server_ready: std.Thread.Semaphore = .{},
-    requests_processed: usize = 0,
+};
+const TestSetup = struct {
+    allocator: std.mem.Allocator,
+    options: TestOptions,
+    creds: aws_auth.Credentials,
+    client: aws.Client,
+    call_options: *aws.Options,
 
-    const Self = @This();
+    request_actuals: ?*RequestActuals = null,
+    response_actuals: ?*ResponseActuals = null,
 
-    /// Builtin hashmap for strings as keys.
-    /// Key memory is managed by the caller.  Keys and values
-    /// will not automatically be freed.
-    pub fn StringCaseInsensitiveHashMap(comptime V: type) type {
-        return std.HashMap([]const u8, V, StringInsensitiveContext, std.hash_map.default_max_load_percentage);
-    }
+    pub const RequestActuals = struct {
+        request: *std.http.Client.Request,
+        trace: []const u8,
 
-    pub const StringInsensitiveContext = struct {
-        pub fn hash(self: @This(), s: []const u8) u64 {
-            _ = self;
-            return hashString(s);
+        // Looks like uri might be getting trounced before deinit
+        request_uri: []const u8,
+
+        /// Body only exists if and when sendBodyComplete is called
+        body: ?[]u8 = null,
+
+        /// extra_headers are copied from request call
+        extra_headers: []const std.http.Header,
+
+        fn expectHeader(self: RequestActuals, name: []const u8, value: []const u8) !void {
+            for (self.extra_headers) |h|
+                if (std.ascii.eqlIgnoreCase(name, h.name) and
+                    std.mem.eql(u8, value, h.value)) return;
+            return error.HeaderOrValueNotFound;
         }
-        pub fn eql(self: @This(), a: []const u8, b: []const u8) bool {
-            _ = self;
-            return eqlString(a, b);
+        fn expectNoDuplicateHeaders(self: RequestActuals, allocator: std.mem.Allocator) !void {
+            // As header keys are
+            var hm = StringCaseInsensitiveHashMap(void).init(allocator);
+            try hm.ensureTotalCapacity(@intCast(self.request.extra_headers.len));
+            defer hm.deinit();
+            // TODO: How should we deal with the standard headers?
+            for (self.extra_headers) |h| {
+                if (hm.getKey(h.name)) |_| {
+                    log.err("Duplicate key detected. Key name: {s}", .{h.name});
+                    return error.duplicateKeyDetected;
+                }
+                try hm.put(h.name, {});
+            }
+        }
+        fn deinit(self: *RequestActuals, allocator: std.mem.Allocator) void {
+            if (self.body) |b| allocator.free(b);
+            for (self.extra_headers) |h| {
+                allocator.free(h.name);
+                allocator.free(h.value);
+            }
+            allocator.free(self.extra_headers);
+
+            allocator.free(self.trace);
+            allocator.free(self.request_uri);
+            allocator.destroy(self.request.reader.in);
+            allocator.destroy(self.request);
         }
     };
 
-    pub fn eqlString(a: []const u8, b: []const u8) bool {
-        return std.ascii.eqlIgnoreCase(a, b);
-    }
-
-    pub fn hashString(s: []const u8) u64 {
-        var buf: [1024]u8 = undefined;
-        if (s.len > buf.len) unreachable; // tolower has a debug assert, but we want non-debug check too
-        const lower_s = std.ascii.lowerString(buf[0..], s);
-        return std.hash.Wyhash.hash(0, lower_s);
-    }
-
-    fn expectNoDuplicateHeaders(self: *Self) !void {
-        // As header keys are
-        var hm = StringCaseInsensitiveHashMap(void).init(self.allocator);
-        try hm.ensureTotalCapacity(@intCast(self.request_headers.len));
-        defer hm.deinit();
-        for (self.request_headers) |h| {
-            if (hm.getKey(h.name)) |_| {
-                log.err("Duplicate key detected. Key name: {s}", .{h.name});
-                return error.duplicateKeyDetected;
-            }
-            try hm.put(h.name, {});
-        }
-    }
-
-    fn expectHeader(self: *Self, name: []const u8, value: []const u8) !void {
-        for (self.request_headers) |h|
-            if (std.ascii.eqlIgnoreCase(name, h.name) and
-                std.mem.eql(u8, value, h.value)) return;
-        return error.HeaderOrValueNotFound;
-    }
-    fn waitForReady(self: *Self) !void {
-        // Set 10s timeout...this is way longer than necessary
-        log.debug("waiting for ready", .{});
-        try self.server_ready.timedWait(1000 * std.time.ns_per_ms);
-        // var deadline = std.Thread.Futex.Deadline.init(1000 * std.time.ns_per_ms);
-        // if (self.futex_word.load(.acquire) != 0) return;
-        // log.debug("futex zero", .{});
-        // // note that this seems backwards from the documentation...
-        // deadline.wait(self.futex_word, 1) catch {
-        //     log.err("futex value {d}", .{self.futex_word.load(.acquire)});
-        //     return error.TestServerTimeoutWaitingForReady;
-        // };
-        log.debug("the wait is over!", .{});
-    }
-};
-
-/// This starts a test server. We're not testing the server itself,
-/// so the main tests will start this thing up and create an arena around the
-/// whole thing so we can just deallocate everything at once at the end,
-/// leaks be damned
-fn threadMain(options: *TestOptions) !void {
-    // https://github.com/ziglang/zig/blob/d2be725e4b14c33dbd39054e33d926913eee3cd4/lib/compiler/std-docs.zig#L22-L54
-
-    options.arena = try options.allocator.create(std.heap.ArenaAllocator);
-    options.arena.?.* = std.heap.ArenaAllocator.init(options.allocator);
-    const allocator = options.arena.?.allocator();
-    options.allocator = allocator;
-
-    const address = try std.net.Address.parseIp("127.0.0.1", 0);
-    var http_server = try address.listen(.{});
-    options.server_port = http_server.listen_address.in.getPort();
-    // TODO: remove
-    options.test_server_runtime_uri = try std.fmt.allocPrint(options.allocator, "http://127.0.0.1:{d}", .{options.server_port.?});
-    log.debug("server listening at {s}", .{options.test_server_runtime_uri.?});
-    log.info("starting server thread, tid {d}", .{std.Thread.getCurrentId()});
-    // var arena = std.heap.ArenaAllocator.init(options.allocator);
-    // defer arena.deinit();
-    // var aa = arena.allocator();
-    // We're in control of all requests/responses, so this flag will tell us
-    // when it's time to shut down
-    if (options.server_remaining_requests == 0)
-        options.server_ready.post(); // This will cause the wait for server to return
-    while (options.server_remaining_requests > 0) : (options.server_remaining_requests -= 1) {
-        processRequest(options, &http_server) catch |e| {
-            log.err("Unexpected error processing request: {any}", .{e});
-            if (@errorReturnTrace()) |trace| {
-                std.debug.dumpStackTrace(trace.*);
-            }
-        };
-    }
-}
-
-fn processRequest(options: *TestOptions, net_server: *std.net.Server) !void {
-    log.debug(
-        "tid {d} (server): server waiting to accept. requests remaining: {d}",
-        .{ std.Thread.getCurrentId(), options.server_remaining_requests },
-    );
-    // options.futex_word.store(1, .release);
-    // errdefer options.futex_word.store(0, .release);
-    options.server_ready.post();
-    var connection = try net_server.accept();
-    defer connection.stream.close();
-    var read_buffer: [1024 * 16]u8 = undefined;
-    var http_server = std.http.Server.init(connection, &read_buffer);
-    while (http_server.state == .ready) {
-        var request = http_server.receiveHead() catch |err| switch (err) {
-            error.HttpConnectionClosing => return,
-            else => {
-                std.log.err("closing http connection: {s}", .{@errorName(err)});
-                std.log.debug("Error occurred from this request: \n{s}", .{read_buffer[0..http_server.read_buffer_len]});
-                return;
-            },
-        };
-        try serveRequest(options, &request);
-    }
-}
-
-fn serveRequest(options: *TestOptions, request: *std.http.Server.Request) !void {
-    options.requests_processed += 1;
-    options.request_body = try (try request.reader()).readAllAlloc(options.allocator, std.math.maxInt(usize));
-    options.request_method = request.head.method;
-    options.request_target = try options.allocator.dupe(u8, request.head.target);
-    var req_headers = std.ArrayList(std.http.Header).init(options.allocator);
-    defer req_headers.deinit();
-    var it = request.iterateHeaders();
-    while (it.next()) |f| {
-        const h = try options.allocator.create(std.http.Header);
-        h.* = .{ .name = try options.allocator.dupe(u8, f.name), .value = try options.allocator.dupe(u8, f.value) };
-        try req_headers.append(h.*);
-    }
-    options.request_headers = try req_headers.toOwnedSlice();
-    log.debug(
-        "tid {d} (server): {d} bytes read from request",
-        .{ std.Thread.getCurrentId(), options.request_body.len },
-    );
-
-    // try response.headers.append("content-type", "text/plain");
-    try request.respond(options.server_response, .{
-        .status = options.server_response_status,
-        .extra_headers = options.server_response_headers,
-    });
-
-    log.debug(
-        "tid {d} (server): sent response",
-        .{std.Thread.getCurrentId()},
-    );
-}
-
-////////////////////////////////////////////////////////////////////////
-// These will replicate the tests that were in src/main.zig
-// The server_response and server_response_headers come from logs of
-// a previous run of src/main.zig, with redactions
-////////////////////////////////////////////////////////////////////////
-
-const TestSetup = struct {
-    allocator: std.mem.Allocator,
-    request_options: TestOptions,
-    server_thread: std.Thread = undefined,
-    creds: aws_auth.Credentials = undefined,
-    client: aws.Client = undefined,
-    started: bool = false,
-
+    pub const ResponseActuals = struct {
+        body: []const u8,
+        response: std.http.Client.Response,
+    };
     const Self = @This();
 
     const aws_creds = @import("aws_credentials.zig");
     const aws_auth = @import("aws_authentication.zig");
     const signing_time =
-        date.dateTimeToTimestamp(date.parseIso8601ToDateTime("20230908T170252Z") catch @compileError("Cannot parse date")) catch @compileError("Cannot parse date");
+        date.dateTimeToTimestamp(
+            date.parseIso8601ToDateTime("20230908T170252Z") catch @compileError("Cannot parse date"),
+        ) catch @compileError("Cannot parse date");
 
-    fn init(options: TestOptions) Self {
-        return .{
-            .request_options = options,
-            .allocator = options.allocator,
+    fn request(
+        self_ptr: usize,
+        method: std.http.Method,
+        uri: std.Uri,
+        options: std.http.Client.RequestOptions,
+    ) std.http.Client.RequestError!std.http.Client.Request {
+        const self: *Self = @ptrFromInt(self_ptr);
+        if (self.request_actuals) |r| {
+            std.debug.print("request has been called twice. Previous stack trace:\n", .{});
+            var stderr = std.fs.File.stderr().writer(&.{});
+            stderr.interface.writeAll(r.trace) catch @panic("could not write to stderr");
+            std.debug.print("Current stack trace:\n", .{});
+            std.debug.dumpCurrentStackTrace(null);
+            return error.ConnectionRefused; // we should not be called twice
+        }
+        const acts = try self.allocator.create(RequestActuals);
+        errdefer self.allocator.destroy(acts);
+        var aw = std.Io.Writer.Allocating.init(self.allocator);
+        defer aw.deinit();
+        std.debug.dumpCurrentStackTraceToWriter(null, &aw.writer) catch return error.OutOfMemory;
+        const req = try self.allocator.create(std.http.Client.Request);
+        errdefer self.allocator.destroy(req);
+        const reader = try self.allocator.create(std.Io.Reader);
+        errdefer self.allocator.destroy(reader);
+        reader.* = .fixed(self.options.server_response);
+        req.* = .{
+            .uri = uri,
+            .client = undefined,
+            .connection = options.connection,
+            .reader = .{
+                .in = reader,
+                .interface = reader.*,
+                .state = .ready,
+                .max_head_len = 1024,
+            },
+            .keep_alive = true,
+            .method = method,
+            .transfer_encoding = .none,
+            .redirect_behavior = options.redirect_behavior,
+            .handle_continue = options.handle_continue,
+            .headers = options.headers,
+            .extra_headers = options.extra_headers,
+            .privileged_headers = options.privileged_headers,
         };
-    }
+        var al = try std.ArrayList(std.http.Header).initCapacity(self.allocator, options.extra_headers.len);
+        defer al.deinit(self.allocator);
+        for (options.extra_headers) |h|
+            al.appendAssumeCapacity(.{
+                .name = try self.allocator.dupe(u8, h.name),
+                .value = try self.allocator.dupe(u8, h.value),
+            });
 
-    fn start(self: *Self) !aws.Options {
-        self.server_thread = try std.Thread.spawn(
-            .{},
-            threadMain,
-            .{&self.request_options},
-        );
-        self.started = true;
-        try self.request_options.waitForReady();
-        // Not sure why we're getting sprayed here, but we have an arena allocator, and this
-        // is testing, so yolo
-        awshttp.endpoint_override = self.request_options.test_server_runtime_uri;
-        if (awshttp.endpoint_override == null) return error.TestSetupStartFailure;
-        std.log.debug("endpoint override set to {?s}", .{awshttp.endpoint_override});
-        self.creds = aws_auth.Credentials.init(
-            self.allocator,
-            try self.allocator.dupe(u8, "ACCESS"),
-            try self.allocator.dupe(u8, "SECRET"),
-            null,
-        );
-        aws_creds.static_credentials = self.creds;
-        const client = aws.Client.init(self.allocator, .{});
-        self.client = client;
-        return .{
+        acts.* = .{
+            .trace = try self.allocator.dupe(u8, aw.written()),
+            .request = req,
+            .request_uri = try std.fmt.allocPrint(self.allocator, "{f}", .{uri}),
+            .extra_headers = try al.toOwnedSlice(self.allocator),
+        };
+        self.request_actuals = acts;
+        return acts.request.*;
+    }
+    fn sendBodyComplete(self_ptr: usize, body: []u8) std.io.Writer.Error!void {
+        const self: *Self = @ptrFromInt(self_ptr);
+        if (self.request_actuals == null) return error.WriteFailed; // invalid state - must be called after request
+        self.request_actuals.?.body = self.allocator.dupe(u8, body) catch return error.WriteFailed;
+    }
+    fn receiveHead(self_ptr: usize) std.http.Client.Request.ReceiveHeadError!std.http.Client.Response {
+        const self: *Self = @ptrFromInt(self_ptr);
+        if (self.request_actuals == null) return error.WriteFailed; // invalid state - must be called after request
+        const req = self.request_actuals.?.request;
+
+        var response_body = try std.Io.Writer.Allocating.initCapacity(self.allocator, 256);
+        defer response_body.deinit();
+        const writer = &response_body.writer;
+
+        try writer.print("HTTP/1.1 {d} {?s}\r\n", .{ @intFromEnum(self.options.server_response_status), self.options.server_response_status.phrase() });
+        for (self.options.server_response_headers) |header|
+            try writer.print("{s}: {s}\r\n", .{ header.name, header.value });
+        try writer.print("\r\n", .{});
+        try writer.print("{s}", .{self.options.server_response});
+        // server_response_transfer_encoding: ?std.http.TransferEncoding = null,
+        // This is the real work here - now we have to do the server side of this and end up with a raw response
+        //
+        // const acts = self.request_actuals.?;
+        // acts.response = .{
+        //     .request = acts.request,
+        //     .head = std.http.Client.Response.Head.parse() catch return error.HttpHeadersInvalid,
+        // };
+        const body = try response_body.toOwnedSlice();
+        errdefer self.allocator.free(body);
+
+        const actual_response = try self.allocator.create(ResponseActuals);
+        errdefer self.allocator.destroy(actual_response);
+        actual_response.* = .{
+            .body = body,
+            .response = .{
+                .request = req,
+                .head = std.http.Client.Response.Head.parse(body) catch return error.HttpHeadersInvalid,
+            },
+        };
+        req.reader.state = .received_head;
+        self.response_actuals = actual_response;
+        return actual_response.response;
+    }
+    pub fn readerDecompressing(self_ptr: usize) *std.Io.Reader {
+        // At the end, this has to provide a reader that supports streamRemaining
+        const self: *Self = @ptrFromInt(self_ptr);
+        std.debug.assert(self.request_actuals != null); // invalid state - must be called after request
+        std.debug.assert(self.response_actuals != null); // invalid state - must be called after receiveHead
+        return self.request_actuals.?.request.reader.in;
+    }
+    fn init(options: TestOptions) !*Self {
+        const client = aws.Client.init(options.allocator, .{});
+        const call_options = try options.allocator.create(aws.Options);
+        const self = try options.allocator.create(Self);
+        call_options.* = .{
             .region = "us-west-2",
             .client = client,
-            .signing_time = signing_time,
+
+            // Test specific stuff
+            .mock = .{
+                .signing_time = signing_time,
+                .request_fn = request,
+                .send_body_complete = sendBodyComplete,
+                .receive_head = receiveHead,
+                .reader_decompressing = readerDecompressing,
+                .context = @intFromPtr(self),
+            },
         };
+        self.* = .{
+            .options = options,
+            .allocator = options.allocator,
+            .creds = aws_auth.Credentials.init(
+                options.allocator,
+                try options.allocator.dupe(u8, "ACCESS"),
+                try options.allocator.dupe(u8, "SECRET"),
+                null,
+            ),
+            .client = client,
+            .call_options = call_options,
+        };
+        aws_creds.static_credentials = self.creds;
+        return self;
     }
-
-    fn stop(self: *Self) void {
-        if (self.request_options.server_remaining_requests > 0)
-            if (test_error_log_enabled)
-                std.log.err(
-                    "Test server has {d} request(s) remaining to issue! Draining",
-                    .{self.request_options.server_remaining_requests},
-                )
-            else
-                std.log.info(
-                    "Test server has {d} request(s) remaining to issue! Draining",
-                    .{self.request_options.server_remaining_requests},
-                );
-
-        var rr = self.request_options.server_remaining_requests;
-        while (rr > 0) : (rr -= 1) {
-            std.log.debug("rr: {d}", .{self.request_options.server_remaining_requests});
-            // We need to drain all remaining requests, otherwise the server
-            // will hang indefinitely
-            var client = std.http.Client{ .allocator = self.allocator };
-            defer client.deinit();
-            _ = client.fetch(.{ .location = .{ .url = self.request_options.test_server_runtime_uri.? } }) catch unreachable;
-        }
-        self.server_thread.join();
-    }
-
     fn deinit(self: *Self) void {
-        if (self.request_options.arena) |a| {
-            a.deinit();
-            self.allocator.destroy(a);
+        if (self.response_actuals) |r| {
+            self.allocator.free(r.body);
+            self.allocator.destroy(r);
         }
-        if (!self.started) return;
-        awshttp.endpoint_override = null;
-        // creds.deinit(); Creds will get deinited in the course of the call. We don't want to do it twice
-        aws_creds.static_credentials = null; // we do need to reset the static creds for the next user though
-        self.client.deinit();
+        if (self.request_actuals) |r| {
+            r.deinit(self.allocator);
+            self.allocator.destroy(r);
+        }
+        self.allocator.destroy(self.call_options);
+        self.call_options = undefined;
+        self.allocator.destroy(self);
     }
 };
-
 test "query_no_input: sts getCallerIdentity comptime" {
     const allocator = std.testing.allocator;
-    var test_harness = TestSetup.init(.{
+    const test_harness = try TestSetup.init(.{
         .allocator = allocator,
         .server_response =
         \\{"GetCallerIdentityResponse":{"GetCallerIdentityResult":{"Account":"123456789012","Arn":"arn:aws:iam::123456789012:user/admin","UserId":"AIDAYAM4POHXHRVANDQBQ"},"ResponseMetadata":{"RequestId":"8f0d54da-1230-40f7-b4ac-95015c4b84cd"}}}
@@ -508,18 +492,18 @@ test "query_no_input: sts getCallerIdentity comptime" {
         },
     });
     defer test_harness.deinit();
-    const options = try test_harness.start();
     const sts = (Services(.{.sts}){}).sts;
-    const call = try aws.Request(sts.get_caller_identity).call(.{}, options);
-    // const call = try client.call(services.sts.get_caller_identity.Request{}, options);
+    const call = try aws.Request(sts.get_caller_identity).call(.{}, test_harness.call_options.*);
     defer call.deinit();
-    test_harness.stop();
+
     // Request expectations
-    try std.testing.expectEqual(std.http.Method.POST, test_harness.request_options.request_method);
-    try std.testing.expectEqualStrings("/", test_harness.request_options.request_target);
+    if (test_harness.request_actuals == null) return error.NoCallMade;
+    const req_actuals = test_harness.request_actuals.?;
+    try std.testing.expectEqual(std.http.Method.POST, req_actuals.request.method);
+    try std.testing.expectEqualStrings("https://sts.us-west-2.amazonaws.com/", req_actuals.request_uri);
     try std.testing.expectEqualStrings(
         \\Action=GetCallerIdentity&Version=2011-06-15
-    , test_harness.request_options.request_body);
+    , req_actuals.body.?);
     // Response expectations
     try std.testing.expectEqualStrings(
         "arn:aws:iam::123456789012:user/admin",
@@ -529,10 +513,11 @@ test "query_no_input: sts getCallerIdentity comptime" {
     try std.testing.expectEqualStrings("123456789012", call.response.account.?);
     try std.testing.expectEqualStrings("8f0d54da-1230-40f7-b4ac-95015c4b84cd", call.response_metadata.request_id);
 }
+
 test "query_with_input: iam getRole runtime" {
     // sqs switched from query to json in aws sdk for go v2 commit f5a08768ef820ff5efd62a49ba50c61c9ca5dbcb
     const allocator = std.testing.allocator;
-    var test_harness = TestSetup.init(.{
+    var test_harness = try TestSetup.init(.{
         .allocator = allocator,
         .server_response =
         \\<GetRoleResponse xmlns="https://iam.amazonaws.com/doc/2010-05-08/">
@@ -564,19 +549,19 @@ test "query_with_input: iam getRole runtime" {
         },
     });
     defer test_harness.deinit();
-    const options = try test_harness.start();
     const iam = (Services(.{.iam}){}).iam;
     const call = try test_harness.client.call(iam.get_role.Request{
         .role_name = "S3Access",
-    }, options);
+    }, test_harness.call_options.*);
     defer call.deinit();
-    test_harness.stop();
     // Request expectations
-    try std.testing.expectEqual(std.http.Method.POST, test_harness.request_options.request_method);
-    try std.testing.expectEqualStrings("/", test_harness.request_options.request_target);
+    if (test_harness.request_actuals == null) return error.NoCallMade;
+    const req_actuals = test_harness.request_actuals.?;
+    try std.testing.expectEqual(std.http.Method.POST, req_actuals.request.method);
+    try std.testing.expectEqualStrings("https://iam.amazonaws.com/", req_actuals.request_uri);
     try std.testing.expectEqualStrings(
         \\Action=GetRole&Version=2010-05-08&RoleName=S3Access
-    , test_harness.request_options.request_body);
+    , req_actuals.body.?);
     // Response expectations
     try std.testing.expectEqualStrings("arn:aws:iam::123456789012:role/application_abc/component_xyz/S3Access", call.response.role.arn);
     try std.testing.expectEqualStrings("df37e965-9967-11e1-a4c3-270EXAMPLE04", call.response_metadata.request_id);
@@ -584,7 +569,7 @@ test "query_with_input: iam getRole runtime" {
 test "query_with_input: sts getAccessKeyInfo runtime" {
     // sqs switched from query to json in aws sdk for go v2 commit f5a08768ef820ff5efd62a49ba50c61c9ca5dbcb
     const allocator = std.testing.allocator;
-    var test_harness = TestSetup.init(.{
+    var test_harness = try TestSetup.init(.{
         .allocator = allocator,
         .server_response =
         \\<GetAccessKeyInfoResponse xmlns="https://sts.amazonaws.com/doc/2011-06-15/">
@@ -602,19 +587,19 @@ test "query_with_input: sts getAccessKeyInfo runtime" {
         },
     });
     defer test_harness.deinit();
-    const options = try test_harness.start();
     const sts = (Services(.{.sts}){}).sts;
     const call = try test_harness.client.call(sts.get_access_key_info.Request{
         .access_key_id = "ASIAYAM4POHXJNKTYFUN",
-    }, options);
+    }, test_harness.call_options.*);
     defer call.deinit();
-    test_harness.stop();
     // Request expectations
-    try std.testing.expectEqual(std.http.Method.POST, test_harness.request_options.request_method);
-    try std.testing.expectEqualStrings("/", test_harness.request_options.request_target);
+    if (test_harness.request_actuals == null) return error.NoCallMade;
+    const req_actuals = test_harness.request_actuals.?;
+    try std.testing.expectEqual(std.http.Method.POST, req_actuals.request.method);
+    try std.testing.expectEqualStrings("https://sts.us-west-2.amazonaws.com/", req_actuals.request_uri);
     try std.testing.expectEqualStrings(
         \\Action=GetAccessKeyInfo&Version=2011-06-15&AccessKeyId=ASIAYAM4POHXJNKTYFUN
-    , test_harness.request_options.request_body);
+    , req_actuals.body.?);
     // Response expectations
     try std.testing.expect(call.response.account != null);
     try std.testing.expectEqualStrings("123456789012", call.response.account.?);
@@ -622,7 +607,7 @@ test "query_with_input: sts getAccessKeyInfo runtime" {
 }
 test "json_1_0_query_with_input: dynamodb listTables runtime" {
     const allocator = std.testing.allocator;
-    var test_harness = TestSetup.init(.{
+    var test_harness = try TestSetup.init(.{
         .allocator = allocator,
         .server_response =
         \\{"LastEvaluatedTableName":"Customer","TableNames":["Customer"]}
@@ -633,26 +618,26 @@ test "json_1_0_query_with_input: dynamodb listTables runtime" {
         },
     });
     defer test_harness.deinit();
-    const options = try test_harness.start();
     const dynamo_db = (Services(.{.dynamo_db}){}).dynamo_db;
     const call = try test_harness.client.call(dynamo_db.list_tables.Request{
         .limit = 1,
-    }, options);
+    }, test_harness.call_options.*);
     defer call.deinit();
-    test_harness.stop();
     // Request expectations
-    try std.testing.expectEqual(std.http.Method.POST, test_harness.request_options.request_method);
-    try std.testing.expectEqualStrings("/", test_harness.request_options.request_target);
-    try test_harness.request_options.expectHeader("X-Amz-Target", "DynamoDB_20120810.ListTables");
+    if (test_harness.request_actuals == null) return error.NoCallMade;
+    const req_actuals = test_harness.request_actuals.?;
+    try std.testing.expectEqual(std.http.Method.POST, req_actuals.request.method);
+    try std.testing.expectEqualStrings("https://dynamodb.us-west-2.amazonaws.com/", req_actuals.request_uri);
+    try req_actuals.expectHeader("X-Amz-Target", "DynamoDB_20120810.ListTables");
 
     const parsed_body = try std.json.parseFromSlice(struct {
         ExclusiveStartTableName: ?[]const u8,
         Limit: u8,
-    }, testing.allocator, test_harness.request_options.request_body, .{});
+    }, std.testing.allocator, req_actuals.body.?, .{});
     defer parsed_body.deinit();
 
-    try testing.expectEqual(null, parsed_body.value.ExclusiveStartTableName);
-    try testing.expectEqual(1, parsed_body.value.Limit);
+    try std.testing.expectEqual(null, parsed_body.value.ExclusiveStartTableName);
+    try std.testing.expectEqual(1, parsed_body.value.Limit);
 
     // Response expectations
     try std.testing.expectEqualStrings("QBI72OUIN8U9M9AG6PCSADJL4JVV4KQNSO5AEMVJF66Q9ASUAAJG", call.response_metadata.request_id);
@@ -662,7 +647,7 @@ test "json_1_0_query_with_input: dynamodb listTables runtime" {
 
 test "json_1_0_query_no_input: dynamodb listTables runtime" {
     const allocator = std.testing.allocator;
-    var test_harness = TestSetup.init(.{
+    var test_harness = try TestSetup.init(.{
         .allocator = allocator,
         .server_response =
         \\{"AccountMaxReadCapacityUnits":80000,"AccountMaxWriteCapacityUnits":80000,"TableMaxReadCapacityUnits":40000,"TableMaxWriteCapacityUnits":40000}
@@ -673,25 +658,25 @@ test "json_1_0_query_no_input: dynamodb listTables runtime" {
         },
     });
     defer test_harness.deinit();
-    const options = try test_harness.start();
     const dynamo_db = (Services(.{.dynamo_db}){}).dynamo_db;
-    const call = try test_harness.client.call(dynamo_db.describe_limits.Request{}, options);
+    const call = try test_harness.client.call(dynamo_db.describe_limits.Request{}, test_harness.call_options.*);
     defer call.deinit();
-    test_harness.stop();
     // Request expectations
-    try std.testing.expectEqual(std.http.Method.POST, test_harness.request_options.request_method);
-    try std.testing.expectEqualStrings("/", test_harness.request_options.request_target);
-    try test_harness.request_options.expectHeader("X-Amz-Target", "DynamoDB_20120810.DescribeLimits");
+    if (test_harness.request_actuals == null) return error.NoCallMade;
+    const req_actuals = test_harness.request_actuals.?;
+    try std.testing.expectEqual(std.http.Method.POST, req_actuals.request.method);
+    try std.testing.expectEqualStrings("https://dynamodb.us-west-2.amazonaws.com/", req_actuals.request_uri);
+    try req_actuals.expectHeader("X-Amz-Target", "DynamoDB_20120810.DescribeLimits");
     try std.testing.expectEqualStrings(
         \\{}
-    , test_harness.request_options.request_body);
+    , req_actuals.body.?);
     // Response expectations
     try std.testing.expectEqualStrings("QBI72OUIN8U9M9AG6PCSADJL4JVV4KQNSO5AEMVJF66Q9ASUAAJG", call.response_metadata.request_id);
     try std.testing.expectEqual(@as(i64, 80000), call.response.account_max_read_capacity_units.?);
 }
 test "json_1_1_query_with_input: ecs listClusters runtime" {
     const allocator = std.testing.allocator;
-    var test_harness = TestSetup.init(.{
+    var test_harness = try TestSetup.init(.{
         .allocator = allocator,
         .server_response =
         \\{"clusterArns":["arn:aws:ecs:us-west-2:550620852718:cluster/web-applicationehjaf-cluster"],"nextToken":"czE0Og=="}
@@ -702,26 +687,26 @@ test "json_1_1_query_with_input: ecs listClusters runtime" {
         },
     });
     defer test_harness.deinit();
-    const options = try test_harness.start();
     const ecs = (Services(.{.ecs}){}).ecs;
     const call = try test_harness.client.call(ecs.list_clusters.Request{
         .max_results = 1,
-    }, options);
+    }, test_harness.call_options.*);
     defer call.deinit();
-    test_harness.stop();
     // Request expectations
-    try std.testing.expectEqual(std.http.Method.POST, test_harness.request_options.request_method);
-    try std.testing.expectEqualStrings("/", test_harness.request_options.request_target);
-    try test_harness.request_options.expectHeader("X-Amz-Target", "AmazonEC2ContainerServiceV20141113.ListClusters");
+    if (test_harness.request_actuals == null) return error.NoCallMade;
+    const req_actuals = test_harness.request_actuals.?;
+    try std.testing.expectEqual(std.http.Method.POST, req_actuals.request.method);
+    try std.testing.expectEqualStrings("https://ecs.us-west-2.amazonaws.com/", req_actuals.request_uri);
+    try req_actuals.expectHeader("X-Amz-Target", "AmazonEC2ContainerServiceV20141113.ListClusters");
 
     const parsed_body = try std.json.parseFromSlice(struct {
         nextToken: ?[]const u8,
         maxResults: u8,
-    }, testing.allocator, test_harness.request_options.request_body, .{});
+    }, std.testing.allocator, req_actuals.body.?, .{});
     defer parsed_body.deinit();
 
-    try testing.expectEqual(null, parsed_body.value.nextToken);
-    try testing.expectEqual(1, parsed_body.value.maxResults);
+    try std.testing.expectEqual(null, parsed_body.value.nextToken);
+    try std.testing.expectEqual(1, parsed_body.value.maxResults);
 
     // Response expectations
     try std.testing.expectEqualStrings("b2420066-ff67-4237-b782-721c4df60744", call.response_metadata.request_id);
@@ -733,7 +718,7 @@ test "json_1_1_query_no_input: ecs listClusters runtime" {
     // defer std.testing.log_level = old;
     // std.testing.log_level = .debug;
     const allocator = std.testing.allocator;
-    var test_harness = TestSetup.init(.{
+    var test_harness = try TestSetup.init(.{
         .allocator = allocator,
         .server_response =
         \\{"clusterArns":["arn:aws:ecs:us-west-2:550620852718:cluster/web-applicationehjaf-cluster"],"nextToken":"czE0Og=="}
@@ -744,24 +729,24 @@ test "json_1_1_query_no_input: ecs listClusters runtime" {
         },
     });
     defer test_harness.deinit();
-    const options = try test_harness.start();
     const ecs = (Services(.{.ecs}){}).ecs;
-    const call = try test_harness.client.call(ecs.list_clusters.Request{}, options);
+    const call = try test_harness.client.call(ecs.list_clusters.Request{}, test_harness.call_options.*);
     defer call.deinit();
-    test_harness.stop();
     // Request expectations
-    try std.testing.expectEqual(std.http.Method.POST, test_harness.request_options.request_method);
-    try std.testing.expectEqualStrings("/", test_harness.request_options.request_target);
-    try test_harness.request_options.expectHeader("X-Amz-Target", "AmazonEC2ContainerServiceV20141113.ListClusters");
+    if (test_harness.request_actuals == null) return error.NoCallMade;
+    const req_actuals = test_harness.request_actuals.?;
+    try std.testing.expectEqual(std.http.Method.POST, req_actuals.request.method);
+    try std.testing.expectEqualStrings("https://ecs.us-west-2.amazonaws.com/", req_actuals.request_uri);
+    try req_actuals.expectHeader("X-Amz-Target", "AmazonEC2ContainerServiceV20141113.ListClusters");
 
     const parsed_body = try std.json.parseFromSlice(struct {
         nextToken: ?[]const u8,
         maxResults: ?u8,
-    }, testing.allocator, test_harness.request_options.request_body, .{});
+    }, std.testing.allocator, req_actuals.body.?, .{});
     defer parsed_body.deinit();
 
-    try testing.expectEqual(null, parsed_body.value.nextToken);
-    try testing.expectEqual(null, parsed_body.value.maxResults);
+    try std.testing.expectEqual(null, parsed_body.value.nextToken);
+    try std.testing.expectEqual(null, parsed_body.value.maxResults);
 
     // Response expectations
     try std.testing.expectEqualStrings("e65322b2-0065-45f2-ba37-f822bb5ce395", call.response_metadata.request_id);
@@ -770,7 +755,7 @@ test "json_1_1_query_no_input: ecs listClusters runtime" {
 }
 test "rest_json_1_query_with_input: lambda listFunctions runtime" {
     const allocator = std.testing.allocator;
-    var test_harness = TestSetup.init(.{
+    var test_harness = try TestSetup.init(.{
         .allocator = allocator,
         .server_response =
         \\{"Functions":[{"Description":"AWS CDK resource provider framework - onEvent (DevelopmentFrontendStack-g650u/com.amazonaws.cdk.custom-resources.amplify-asset-deployment-provider/amplify-asset-deployment-handler-provider)","TracingConfig":{"Mode":"PassThrough"},"VpcConfig":null,"SigningJobArn":null,"SnapStart":{"OptimizationStatus":"Off","ApplyOn":"None"},"RevisionId":"0c62fc74-a692-403d-9206-5fcbad406424","LastModified":"2023-03-01T18:13:15.704+0000","FileSystemConfigs":null,"FunctionName":"DevelopmentFrontendStack--amplifyassetdeploymentha-aZqB9IbZLIKU","Runtime":"nodejs14.x","Version":"$LATEST","PackageType":"Zip","LastUpdateStatus":null,"Layers":null,"FunctionArn":"arn:aws:lambda:us-west-2:550620852718:function:DevelopmentFrontendStack--amplifyassetdeploymentha-aZqB9IbZLIKU","KMSKeyArn":null,"MemorySize":128,"ImageConfigResponse":null,"LastUpdateStatusReason":null,"DeadLetterConfig":null,"Timeout":900,"Handler":"framework.onEvent","CodeSha256":"m4tt+M0l3p8bZvxIDj83dwGrwRW6atCfS/q8AiXCD3o=","Role":"arn:aws:iam::550620852718:role/DevelopmentFrontendStack-amplifyassetdeploymentha-1782JF7WAPXZ3","SigningProfileVersionArn":null,"MasterArn":null,"RuntimeVersionConfig":null,"CodeSize":4307,"State":null,"StateReason":null,"Environment":{"Variables":{"USER_ON_EVENT_FUNCTION_ARN":"arn:aws:lambda:us-west-2:550620852718:function:DevelopmentFrontendStack--amplifyassetdeploymenton-X9iZJSCSPYDH","WAITER_STATE_MACHINE_ARN":"arn:aws:states:us-west-2:550620852718:stateMachine:amplifyassetdeploymenthandlerproviderwaiterstatemachineB3C2FCBE-Ltggp5wBcHWO","USER_IS_COMPLETE_FUNCTION_ARN":"arn:aws:lambda:us-west-2:550620852718:function:DevelopmentFrontendStack--amplifyassetdeploymentis-jaHopLrSSARV"},"Error":null},"EphemeralStorage":{"Size":512},"StateReasonCode":null,"LastUpdateStatusReasonCode":null,"Architectures":["x86_64"]}],"NextMarker":"lslTXFcbLQKkb0vP9Kgh5hUL7C3VghELNGbWgZfxrRCk3eiDRMkct7D8EmptWfHSXssPdS7Bo66iQPTMpVOHZgANewpgGgFGGr4pVjd6VgLUO6qPe2EMAuNDBjUTxm8z6N28yhlUwEmKbrAV/m0k5qVzizwoxFwvyruMbuMx9kADFACSslcabxXl3/jDI4rfFnIsUVdzTLBgPF1hzwrE1f3lcdkBvUp+QgY+Pn3w5QuJmwsp/di8COzFemY89GgOHbLNqsrBsgR/ee2eXoJp0ZkKM4EcBK3HokqBzefLfgR02PnfNOdXwqTlhkSPW0TKiKGIYu3Bw7lSNrLd+q3+wEr7ZakqOQf0BVo3FMRhMHlVYgwUJzwi3ActyH2q6fuqGG1sS0B8Oa/prUpe5fmp3VaA3WpazioeHtrKF78JwCi6/nfQsrj/8ZtXGQOxlwEgvT1CIUaF+CdHY3biezrK0tRZNpkCtHnkPtF9lq2U7+UiKXSW9yzxT8P2b0M/Qh4IVdnw4rncQK/doYriAeOdrs1wjMEJnHWq9lAaEyipoxYcVr/z5+yaC6Gwxdg45p9X1vIAaYMf6IZxyFuua43SYi0Ls+IBk4VvpR2io7T0dCxHAr3WAo3D2dm0y8OsbM59"}
@@ -781,19 +766,17 @@ test "rest_json_1_query_with_input: lambda listFunctions runtime" {
         },
     });
     defer test_harness.deinit();
-    const options = try test_harness.start();
     const lambda = (Services(.{.lambda}){}).lambda;
     const call = try test_harness.client.call(lambda.list_functions.Request{
         .max_items = 1,
-    }, options);
+    }, test_harness.call_options.*);
     defer call.deinit();
-    test_harness.stop();
     // Request expectations
-    try std.testing.expectEqual(std.http.Method.GET, test_harness.request_options.request_method);
-    try std.testing.expectEqualStrings("/2015-03-31/functions?MaxItems=1", test_harness.request_options.request_target);
-    try std.testing.expectEqualStrings(
-        \\
-    , test_harness.request_options.request_body);
+    if (test_harness.request_actuals == null) return error.NoCallMade;
+    const req_actuals = test_harness.request_actuals.?;
+    try std.testing.expectEqual(std.http.Method.GET, req_actuals.request.method);
+    try std.testing.expectEqualStrings("https://lambda.us-west-2.amazonaws.com/2015-03-31/functions?MaxItems=1", req_actuals.request_uri);
+    try std.testing.expect(req_actuals.body == null); // should be sent bodiless, so harness will not even trigger
     // Response expectations
     try std.testing.expectEqualStrings("c4025199-226f-4a16-bb1f-48618e9d2ea6", call.response_metadata.request_id);
     try std.testing.expectEqual(@as(usize, 1), call.response.functions.?.len);
@@ -804,7 +787,7 @@ test "rest_json_1_query_with_input: lambda listFunctions runtime" {
 }
 test "rest_json_1_query_no_input: lambda listFunctions runtime" {
     const allocator = std.testing.allocator;
-    var test_harness = TestSetup.init(.{
+    var test_harness = try TestSetup.init(.{
         .allocator = allocator,
         .server_response = @embedFile("test_rest_json_1_query_no_input.response"),
         .server_response_headers = &.{
@@ -813,17 +796,15 @@ test "rest_json_1_query_no_input: lambda listFunctions runtime" {
         },
     });
     defer test_harness.deinit();
-    const options = try test_harness.start();
     const lambda = (Services(.{.lambda}){}).lambda;
-    const call = try test_harness.client.call(lambda.list_functions.Request{}, options);
+    const call = try test_harness.client.call(lambda.list_functions.Request{}, test_harness.call_options.*);
     defer call.deinit();
-    test_harness.stop();
     // Request expectations
-    try std.testing.expectEqual(std.http.Method.GET, test_harness.request_options.request_method);
-    try std.testing.expectEqualStrings("/2015-03-31/functions", test_harness.request_options.request_target);
-    try std.testing.expectEqualStrings(
-        \\
-    , test_harness.request_options.request_body);
+    if (test_harness.request_actuals == null) return error.NoCallMade;
+    const req_actuals = test_harness.request_actuals.?;
+    try std.testing.expectEqual(std.http.Method.GET, req_actuals.request.method);
+    try std.testing.expectEqualStrings("https://lambda.us-west-2.amazonaws.com/2015-03-31/functions", req_actuals.request_uri);
+    try std.testing.expect(req_actuals.body == null); // should be sent bodiless, so harness will not even trigger
     // Response expectations
     try std.testing.expectEqualStrings("b2aad11f-36fc-4d0d-ae92-fe0167fb0f40", call.response_metadata.request_id);
     try std.testing.expectEqual(@as(usize, 24), call.response.functions.?.len);
@@ -838,7 +819,7 @@ test "rest_json_1_query_no_input: lambda listFunctions runtime" {
 }
 test "rest_json_1_work_with_lambda: lambda tagResource (only), to excercise zig issue 17015" {
     const allocator = std.testing.allocator;
-    var test_harness = TestSetup.init(.{
+    var test_harness = try TestSetup.init(.{
         .allocator = allocator,
         .server_response = "",
         .server_response_status = .no_content,
@@ -848,35 +829,35 @@ test "rest_json_1_work_with_lambda: lambda tagResource (only), to excercise zig 
         },
     });
     defer test_harness.deinit();
-    const options = try test_harness.start();
     const lambda = (Services(.{.lambda}){}).lambda;
     var tags = try std.ArrayList(@typeInfo(try typeForField(lambda.tag_resource.Request, "tags")).pointer.child).initCapacity(allocator, 1);
     defer tags.deinit(allocator);
     tags.appendAssumeCapacity(.{ .key = "Foo", .value = "Bar" });
     const req = lambda.tag_resource.Request{ .resource = "arn:aws:lambda:us-west-2:550620852718:function:awsome-lambda-LambdaStackawsomeLambda", .tags = tags.items };
-    const call = try aws.Request(lambda.tag_resource).call(req, options);
+    const call = try aws.Request(lambda.tag_resource).call(req, test_harness.call_options.*);
     defer call.deinit();
-    test_harness.stop();
     // Request expectations
-    try std.testing.expectEqual(std.http.Method.POST, test_harness.request_options.request_method);
+    if (test_harness.request_actuals == null) return error.NoCallMade;
+    const req_actuals = test_harness.request_actuals.?;
+    try std.testing.expectEqual(std.http.Method.POST, req_actuals.request.method);
 
     const parsed_body = try std.json.parseFromSlice(struct {
         Tags: struct {
             Foo: []const u8,
         },
-    }, testing.allocator, test_harness.request_options.request_body, .{ .ignore_unknown_fields = true });
+    }, std.testing.allocator, req_actuals.body.?, .{ .ignore_unknown_fields = true });
     defer parsed_body.deinit();
 
-    try testing.expectEqualStrings("Bar", parsed_body.value.Tags.Foo);
+    try std.testing.expectEqualStrings("Bar", parsed_body.value.Tags.Foo);
 
     // Due to 17015, we see %253A instead of %3A
-    try std.testing.expectEqualStrings("/2017-03-31/tags/arn%3Aaws%3Alambda%3Aus-west-2%3A550620852718%3Afunction%3Aawsome-lambda-LambdaStackawsomeLambda", test_harness.request_options.request_target);
+    try std.testing.expectEqualStrings("https://lambda.us-west-2.amazonaws.com/2017-03-31/tags/arn%3Aaws%3Alambda%3Aus-west-2%3A550620852718%3Afunction%3Aawsome-lambda-LambdaStackawsomeLambda", req_actuals.request_uri);
     // Response expectations
     try std.testing.expectEqualStrings("a521e152-6e32-4e67-9fb3-abc94e34551b", call.response_metadata.request_id);
 }
 test "rest_json_1_url_parameters_not_in_request: lambda update_function_code" {
     const allocator = std.testing.allocator;
-    var test_harness = TestSetup.init(.{
+    var test_harness = try TestSetup.init(.{
         .allocator = allocator,
         .server_response = "{\"CodeSize\": 42}",
         .server_response_status = .ok,
@@ -886,7 +867,6 @@ test "rest_json_1_url_parameters_not_in_request: lambda update_function_code" {
         },
     });
     defer test_harness.deinit();
-    const options = try test_harness.start();
     const lambda = (Services(.{.lambda}){}).lambda;
     const architectures = [_][]const u8{"x86_64"};
     const arches: [][]const u8 = @constCast(architectures[0..]);
@@ -895,32 +875,33 @@ test "rest_json_1_url_parameters_not_in_request: lambda update_function_code" {
         .architectures = arches,
         .zip_file = "zipfile",
     };
-    const call = try aws.Request(lambda.update_function_code).call(req, options);
+    const call = try aws.Request(lambda.update_function_code).call(req, test_harness.call_options.*);
     defer call.deinit();
-    test_harness.stop();
     // Request expectations
-    try std.testing.expectEqual(std.http.Method.PUT, test_harness.request_options.request_method);
+    if (test_harness.request_actuals == null) return error.NoCallMade;
+    const req_actuals = test_harness.request_actuals.?;
+    try std.testing.expectEqual(std.http.Method.PUT, req_actuals.request.method);
 
     const parsed_body = try std.json.parseFromSlice(struct {
         ZipFile: []const u8,
         Architectures: [][]const u8,
-    }, testing.allocator, test_harness.request_options.request_body, .{
+    }, std.testing.allocator, req_actuals.body.?, .{
         .ignore_unknown_fields = true,
     });
     defer parsed_body.deinit();
 
-    try testing.expectEqualStrings("zipfile", parsed_body.value.ZipFile);
-    try testing.expectEqual(1, parsed_body.value.Architectures.len);
-    try testing.expectEqualStrings("x86_64", parsed_body.value.Architectures[0]);
+    try std.testing.expectEqualStrings("zipfile", parsed_body.value.ZipFile);
+    try std.testing.expectEqual(1, parsed_body.value.Architectures.len);
+    try std.testing.expectEqualStrings("x86_64", parsed_body.value.Architectures[0]);
 
     // Due to 17015, we see %253A instead of %3A
-    try std.testing.expectEqualStrings("/2015-03-31/functions/functionname/code", test_harness.request_options.request_target);
+    try std.testing.expectEqualStrings("https://lambda.us-west-2.amazonaws.com/2015-03-31/functions/functionname/code", req_actuals.request_uri);
     // Response expectations
     try std.testing.expectEqualStrings("a521e152-6e32-4e67-9fb3-abc94e34551b", call.response_metadata.request_id);
 }
 test "ec2_query_no_input: EC2 describe regions" {
     const allocator = std.testing.allocator;
-    var test_harness = TestSetup.init(.{
+    var test_harness = try TestSetup.init(.{
         .allocator = allocator,
         .server_response = @embedFile("test_ec2_query_no_input.response"),
         .server_response_headers = &.{
@@ -930,17 +911,17 @@ test "ec2_query_no_input: EC2 describe regions" {
         .server_response_transfer_encoding = .chunked,
     });
     defer test_harness.deinit();
-    const options = try test_harness.start();
     const ec2 = (Services(.{.ec2}){}).ec2;
-    const call = try test_harness.client.call(ec2.describe_regions.Request{}, options);
+    const call = try test_harness.client.call(ec2.describe_regions.Request{}, test_harness.call_options.*);
     defer call.deinit();
-    test_harness.stop();
     // Request expectations
-    try std.testing.expectEqual(std.http.Method.POST, test_harness.request_options.request_method);
-    try std.testing.expectEqualStrings("/?Action=DescribeRegions&Version=2016-11-15", test_harness.request_options.request_target);
+    if (test_harness.request_actuals == null) return error.NoCallMade;
+    const req_actuals = test_harness.request_actuals.?;
+    try std.testing.expectEqual(std.http.Method.POST, req_actuals.request.method);
+    try std.testing.expectEqualStrings("https://ec2.us-west-2.amazonaws.com/?Action=DescribeRegions&Version=2016-11-15", req_actuals.request_uri);
     try std.testing.expectEqualStrings(
         \\Action=DescribeRegions&Version=2016-11-15
-    , test_harness.request_options.request_body);
+    , req_actuals.body.?);
     // Response expectations
     try std.testing.expectEqualStrings("4cdbdd69-800c-49b5-8474-ae4c17709782", call.response_metadata.request_id);
     try std.testing.expectEqual(@as(usize, 17), call.response.regions.?.len);
@@ -952,7 +933,7 @@ test "ec2_query_no_input: EC2 describe regions" {
 test "ec2_query_with_input: EC2 describe instances" {
     if (builtin.cpu.arch == .riscv64 and builtin.os.tag == .linux) return error.SkipZigTest;
     const allocator = std.testing.allocator;
-    var test_harness = TestSetup.init(.{
+    var test_harness = try TestSetup.init(.{
         .allocator = allocator,
         .server_response = @embedFile("test_ec2_query_with_input.response"),
         .server_response_headers = &.{
@@ -961,19 +942,19 @@ test "ec2_query_with_input: EC2 describe instances" {
         },
     });
     defer test_harness.deinit();
-    const options = try test_harness.start();
     const ec2 = (Services(.{.ec2}){}).ec2;
     const call = try test_harness.client.call(ec2.describe_instances.Request{
         .max_results = 6,
-    }, options);
+    }, test_harness.call_options.*);
     defer call.deinit();
-    test_harness.stop();
     // Request expectations
-    try std.testing.expectEqual(std.http.Method.POST, test_harness.request_options.request_method);
-    try std.testing.expectEqualStrings("/?Action=DescribeInstances&Version=2016-11-15", test_harness.request_options.request_target);
+    if (test_harness.request_actuals == null) return error.NoCallMade;
+    const req_actuals = test_harness.request_actuals.?;
+    try std.testing.expectEqual(std.http.Method.POST, req_actuals.request.method);
+    try std.testing.expectEqualStrings("https://ec2.us-west-2.amazonaws.com/?Action=DescribeInstances&Version=2016-11-15", req_actuals.request_uri);
     try std.testing.expectEqualStrings(
         \\Action=DescribeInstances&Version=2016-11-15&MaxResults=6
-    , test_harness.request_options.request_body);
+    , req_actuals.body.?);
     // Response expectations
     try std.testing.expectEqualStrings("150a14cc-785d-476f-a4c9-2aa4d03b14e2", call.response_metadata.request_id);
     try std.testing.expectEqual(@as(usize, 6), call.response.reservations.?.len);
@@ -982,7 +963,7 @@ test "ec2_query_with_input: EC2 describe instances" {
 }
 test "rest_xml_with_input_s3: S3 create bucket" {
     const allocator = std.testing.allocator;
-    var test_harness = TestSetup.init(.{
+    var test_harness = try TestSetup.init(.{
         .allocator = allocator,
         .server_response =
         \\
@@ -994,24 +975,24 @@ test "rest_xml_with_input_s3: S3 create bucket" {
     });
     defer test_harness.deinit();
     errdefer test_harness.creds.deinit();
-    const options = try test_harness.start();
     const s3 = (Services(.{.s3}){}).s3;
     const call = try test_harness.client.call(s3.create_bucket.Request{
         .bucket = "",
         .create_bucket_configuration = .{
             .location_constraint = "us-west-2",
         },
-    }, options);
+    }, test_harness.call_options.*);
     defer call.deinit();
-    test_harness.stop();
     // Request expectations
-    try std.testing.expectEqual(std.http.Method.PUT, test_harness.request_options.request_method);
-    try std.testing.expectEqualStrings("/", test_harness.request_options.request_target);
+    if (test_harness.request_actuals == null) return error.NoCallMade;
+    const req_actuals = test_harness.request_actuals.?;
+    try std.testing.expectEqual(std.http.Method.PUT, req_actuals.request.method);
+    try std.testing.expectEqualStrings("https://s3.us-west-2.amazonaws.com/", req_actuals.request_uri);
     try std.testing.expectEqualStrings(
         \\<CreateBucketConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
         \\  <LocationConstraint>us-west-2</LocationConstraint>
         \\</CreateBucketConfiguration>
-    , test_harness.request_options.request_body);
+    , req_actuals.body.?);
     // Response expectations
     try std.testing.expectEqualStrings(
         "9PEYBAZ9J7TPRX43, host_id: u7lzgW0tIyRP15vSUsVOXxJ37OfVCO8lZmLIVuqeq5EE4tNp9qebb5fy+/kendlZpR4YQE+y4Xg=",
@@ -1020,7 +1001,7 @@ test "rest_xml_with_input_s3: S3 create bucket" {
 }
 test "rest_xml_no_input: S3 list buckets" {
     const allocator = std.testing.allocator;
-    var test_harness = TestSetup.init(.{
+    var test_harness = try TestSetup.init(.{
         .allocator = allocator,
         .server_response =
         \\<ListAllMyBucketsResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Owner><ID>3367189aa775bd98da38e55093705f2051443c1e775fc0971d6d77387a47c8d0</ID><DisplayName>emilerch+sub1</DisplayName></Owner><Buckets><Bucket><Name>550620852718-backup</Name><CreationDate>2020-06-17T16:26:51.000Z</CreationDate></Bucket><Bucket><Name>amplify-letmework-staging-185741-deployment</Name><CreationDate>2023-03-10T18:57:49.000Z</CreationDate></Bucket><Bucket><Name>aws-cloudtrail-logs-550620852718-224022a7</Name><CreationDate>2021-06-21T18:32:44.000Z</CreationDate></Bucket><Bucket><Name>aws-sam-cli-managed-default-samclisourcebucket-1gy0z00mj47xe</Name><CreationDate>2021-10-05T16:38:07.000Z</CreationDate></Bucket><Bucket><Name>awsomeprojectstack-pipelineartifactsbucketaea9a05-1uzwo6c86ecr</Name><CreationDate>2021-10-05T22:55:09.000Z</CreationDate></Bucket><Bucket><Name>cdk-hnb659fds-assets-550620852718-us-west-2</Name><CreationDate>2023-02-28T21:49:36.000Z</CreationDate></Bucket><Bucket><Name>cf-templates-12iy6putgdxtk-us-west-2</Name><CreationDate>2020-06-26T02:31:59.000Z</CreationDate></Bucket><Bucket><Name>codepipeline-us-west-2-46714083637</Name><CreationDate>2021-09-14T18:43:07.000Z</CreationDate></Bucket><Bucket><Name>elasticbeanstalk-us-west-2-550620852718</Name><CreationDate>2022-04-15T16:22:42.000Z</CreationDate></Bucket><Bucket><Name>lobo-west</Name><CreationDate>2021-06-21T17:17:22.000Z</CreationDate></Bucket><Bucket><Name>lobo-west-2</Name><CreationDate>2021-11-19T20:12:31.000Z</CreationDate></Bucket><Bucket><Name>logging-backup-550620852718-us-east-2</Name><CreationDate>2022-05-29T21:55:16.000Z</CreationDate></Bucket><Bucket><Name>mysfitszj3t6webstack-hostingbucketa91a61fe-1ep3ezkgwpxr0</Name><CreationDate>2023-03-01T04:53:55.000Z</CreationDate></Bucket></Buckets></ListAllMyBucketsResult>
@@ -1031,27 +1012,27 @@ test "rest_xml_no_input: S3 list buckets" {
         },
     });
     defer test_harness.deinit();
-    const options = try test_harness.start();
     const s3 = (Services(.{.s3}){}).s3;
-    const call = try test_harness.client.call(s3.list_buckets.Request{}, options);
+    const call = try test_harness.client.call(s3.list_buckets.Request{}, test_harness.call_options.*);
     defer call.deinit();
-    test_harness.stop();
     // Request expectations
-    try std.testing.expectEqual(std.http.Method.GET, test_harness.request_options.request_method);
+    if (test_harness.request_actuals == null) return error.NoCallMade;
+    const req_actuals = test_harness.request_actuals.?;
+    try std.testing.expectEqual(std.http.Method.GET, req_actuals.request.method);
     // This changed in rev 830202d722c904c7e3da40e8dde7b9338d08752c of the go sdk, and
     // contrary to the documentation, a query string argument was added. My guess is that
     // there is no functional reason, and that this is strictly for some AWS reporting function.
     // Alternatively, it could be to support some customization mechanism, as the commit
     // title of that commit is "Merge customizations for S3"
-    try std.testing.expectEqualStrings("/?x-id=ListBuckets", test_harness.request_options.request_target);
-    try std.testing.expectEqualStrings("", test_harness.request_options.request_body);
+    try std.testing.expectEqualStrings("https://s3.us-west-2.amazonaws.com/?x-id=ListBuckets", req_actuals.request_uri);
+    try std.testing.expect(req_actuals.body == null); // should be sent bodiless, so harness will not even trigger
     // Response expectations
     try std.testing.expectEqualStrings("9PEYBAZ9J7TPRX43", call.response_metadata.request_id);
     try std.testing.expectEqual(@as(usize, 13), call.response.buckets.?.len);
 }
 test "rest_xml_anything_but_s3: CloudFront list key groups" {
     const allocator = std.testing.allocator;
-    var test_harness = TestSetup.init(.{
+    var test_harness = try TestSetup.init(.{
         .allocator = allocator,
         .server_response =
         \\{"Items":null,"MaxItems":100,"NextMarker":null,"Quantity":0}
@@ -1062,15 +1043,15 @@ test "rest_xml_anything_but_s3: CloudFront list key groups" {
         },
     });
     defer test_harness.deinit();
-    const options = try test_harness.start();
     const cloudfront = (Services(.{.cloudfront}){}).cloudfront;
-    const call = try test_harness.client.call(cloudfront.list_key_groups.Request{}, options);
+    const call = try test_harness.client.call(cloudfront.list_key_groups.Request{}, test_harness.call_options.*);
     defer call.deinit();
-    test_harness.stop();
     // Request expectations
-    try std.testing.expectEqual(std.http.Method.GET, test_harness.request_options.request_method);
-    try std.testing.expectEqualStrings("/2020-05-31/key-group", test_harness.request_options.request_target);
-    try std.testing.expectEqualStrings("", test_harness.request_options.request_body);
+    if (test_harness.request_actuals == null) return error.NoCallMade;
+    const req_actuals = test_harness.request_actuals.?;
+    try std.testing.expectEqual(std.http.Method.GET, req_actuals.request.method);
+    try std.testing.expectEqualStrings("https://cloudfront.amazonaws.com/2020-05-31/key-group", req_actuals.request_uri);
+    try std.testing.expect(req_actuals.body == null); // should be sent bodiless, so harness will not even trigger
     // Response expectations
     try std.testing.expectEqualStrings("d3382082-5291-47a9-876b-8df3accbb7ea", call.response_metadata.request_id);
     try std.testing.expectEqual(@as(i64, 100), call.response.key_group_list.?.max_items);
@@ -1080,7 +1061,7 @@ test "rest_xml_with_input: S3 put object" {
     // defer std.testing.log_level = old;
     // std.testing.log_level = .debug;
     const allocator = std.testing.allocator;
-    var test_harness = TestSetup.init(.{
+    var test_harness = try TestSetup.init(.{
         .allocator = allocator,
         .server_response = "",
         .server_response_headers = &.{
@@ -1092,11 +1073,10 @@ test "rest_xml_with_input: S3 put object" {
         },
     });
     defer test_harness.deinit();
-    const options = try test_harness.start();
     const s3opts = aws.Options{
         .region = "us-west-2",
-        .client = options.client,
-        .signing_time = TestSetup.signing_time,
+        .client = test_harness.call_options.client,
+        .mock = test_harness.call_options.mock,
     };
     const s3 = (Services(.{.s3}){}).s3;
     const result = try aws.Request(s3.put_object).call(.{
@@ -1107,21 +1087,22 @@ test "rest_xml_with_input: S3 put object" {
         .storage_class = "STANDARD",
     }, s3opts);
     defer result.deinit();
-    for (test_harness.request_options.request_headers) |header| {
-        std.log.info("Request header: {s}: {s}", .{ header.name, header.value });
-    }
-    try test_harness.request_options.expectNoDuplicateHeaders();
-    std.log.info("PutObject Request id: {s}", .{result.response_metadata.request_id});
-    std.log.info("PutObject etag: {s}", .{result.response.e_tag.?});
+    if (test_harness.request_actuals == null) return error.NoCallMade;
+    const req_actuals = test_harness.request_actuals.?;
+    // for (test_harness.request_options.request_headers) |header| {
+    //     std.log.info("Request header: {s}: {s}", .{ header.name, header.value });
+    // }
+    try req_actuals.expectNoDuplicateHeaders(std.testing.allocator);
+    // std.log.info("PutObject Request id: {s}", .{result.response_metadata.request_id});
+    // std.log.info("PutObject etag: {s}", .{result.response.e_tag.?});
     //mysfitszj3t6webstack-hostingbucketa91a61fe-1ep3ezkgwpxr0.s3.us-west-2.amazonaws.com
-    test_harness.stop();
     // Request expectations
-    try std.testing.expectEqual(std.http.Method.PUT, test_harness.request_options.request_method);
+    try std.testing.expectEqual(std.http.Method.PUT, req_actuals.request.method);
     // I don't think this will work since we're overriding the url
-    // try test_harness.request_options.expectHeader("Host", "mysfitszj3t6webstack-hostingbucketa91a61fe-1ep3ezkgwpxr0.s3.us-west-2.amazonaws.com");
-    try test_harness.request_options.expectHeader("x-amz-storage-class", "STANDARD");
-    try std.testing.expectEqualStrings("/mysfitszj3t6webstack-hostingbucketa91a61fe-1ep3ezkgwpxr0/i/am/a/teapot/foo?x-id=PutObject", test_harness.request_options.request_target);
-    try std.testing.expectEqualStrings("bar", test_harness.request_options.request_body);
+    // try req_actuals.expectHeader("Host", "mysfitszj3t6webstack-hostingbucketa91a61fe-1ep3ezkgwpxr0.s3.us-west-2.amazonaws.com");
+    try req_actuals.expectHeader("x-amz-storage-class", "STANDARD");
+    try std.testing.expectEqualStrings("/mysfitszj3t6webstack-hostingbucketa91a61fe-1ep3ezkgwpxr0/i/am/a/teapot/foo?x-id=PutObject", req_actuals.request_uri);
+    try std.testing.expectEqualStrings("bar", req_actuals.body.?);
     // Response expectations
     try std.testing.expectEqualStrings("9PEYBAZ9J7TPRX43, host_id: jdRDo30t7Ge9lf6F+4WYpg+YKui8z0mz2+rwinL38xDZzvloJqrmpCAiKG375OSvHA9OBykJS44=", result.response_metadata.request_id);
     try std.testing.expectEqualStrings("AES256", result.response.server_side_encryption.?);
@@ -1154,7 +1135,7 @@ test "json_1_1: ECR timestamps" {
     // std.testing.log_level = .debug;
     const allocator = std.testing.allocator;
 
-    var test_harness = TestSetup.init(.{
+    var test_harness = try TestSetup.init(.{
         .allocator = allocator,
         .server_response =
         \\{"authorizationData":[{"authorizationToken":"***","expiresAt":"2022-05-17T06:56:13.652000+00:00","proxyEndpoint":"https://146325435496.dkr.ecr.us-west-2.amazonaws.com"}]}
@@ -1166,16 +1147,16 @@ test "json_1_1: ECR timestamps" {
         },
     });
     defer test_harness.deinit();
-    const options = try test_harness.start();
     const ecr = (Services(.{.ecr}){}).ecr;
     std.log.debug("Typeof response {}", .{@TypeOf(ecr.get_authorization_token.Response{})});
-    const call = try test_harness.client.call(ecr.get_authorization_token.Request{}, options);
+    const call = try test_harness.client.call(ecr.get_authorization_token.Request{}, test_harness.call_options.*);
     defer call.deinit();
-    test_harness.stop();
     // Request expectations
-    try std.testing.expectEqual(std.http.Method.POST, test_harness.request_options.request_method);
-    try std.testing.expectEqualStrings("/", test_harness.request_options.request_target);
-    try test_harness.request_options.expectHeader("X-Amz-Target", "AmazonEC2ContainerRegistry_V20150921.GetAuthorizationToken");
+    if (test_harness.request_actuals == null) return error.NoCallMade;
+    const req_actuals = test_harness.request_actuals.?;
+    try std.testing.expectEqual(std.http.Method.POST, req_actuals.request.method);
+    try std.testing.expectEqualStrings("https://api.ecr.us-west-2.amazonaws.com/", req_actuals.request_uri);
+    try req_actuals.expectHeader("X-Amz-Target", "AmazonEC2ContainerRegistry_V20150921.GetAuthorizationToken");
     // Response expectations
     try std.testing.expectEqualStrings("QBI72OUIN8U9M9AG6PCSADJL4JVV4KQNSO5AEMVJF66Q9ASUAAJG", call.response_metadata.request_id);
     try std.testing.expectEqual(@as(usize, 1), call.response.authorization_data.?.len);
@@ -1191,38 +1172,6 @@ test "json_1_1: ECR timestamps" {
 
     try std.testing.expectEqual(expected_ts, call.response.authorization_data.?[0].expires_at.?);
 }
-var test_error_log_enabled = true;
-test "test server timeout works" {
-    // const old = std.testing.log_level;
-    // defer std.testing.log_level = old;
-    // std.testing.log_level = .debug;
-    // defer std.testing.log_level = old;
-    // std.testing.log_level = .debug;
-    test_error_log_enabled = false;
-    defer test_error_log_enabled = true;
-    std.log.debug("test start", .{});
-    const allocator = std.testing.allocator;
-    var test_harness = TestSetup.init(.{
-        .allocator = allocator,
-        .server_response =
-        \\{}
-        ,
-        .server_response_headers = &.{
-            .{ .name = "Content-Type", .value = "application/json" },
-            .{ .name = "x-amzn-RequestId", .value = "QBI72OUIN8U9M9AG6PCSADJL4JVV4KQNSO5AEMVJF66Q9ASUAAJG" },
-        },
-    });
-    defer test_harness.deinit();
-    defer test_harness.creds.deinit(); // Usually this gets done during the call,
-    // but we're purposely not making a call
-    // here, so we have to deinit() manually
-    _ = try test_harness.start();
-    std.log.debug("harness started", .{});
-    test_harness.stop();
-    std.log.debug("test complete", .{});
-}
-
-const testing = std.testing;
 
 test "jsonStringify: structure + enums" {
     const media_convert = (Services(.{.media_convert}){}).media_convert;
@@ -1234,7 +1183,7 @@ test "jsonStringify: structure + enums" {
         },
     };
 
-    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
 
     const request_json = try std.fmt.allocPrint(std.testing.allocator, "{f}", .{std.json.fmt(request, .{})});
@@ -1246,12 +1195,12 @@ test "jsonStringify: structure + enums" {
             httpsInputs: []const u8,
             s3Inputs: []const u8,
         },
-    }, testing.allocator, request_json, .{});
+    }, std.testing.allocator, request_json, .{});
     defer parsed.deinit();
 
-    try testing.expectEqualStrings("foo", parsed.value.policy.httpInputs);
-    try testing.expectEqualStrings("bar", parsed.value.policy.httpsInputs);
-    try testing.expectEqualStrings("baz", parsed.value.policy.s3Inputs);
+    try std.testing.expectEqualStrings("foo", parsed.value.policy.httpInputs);
+    try std.testing.expectEqualStrings("bar", parsed.value.policy.httpsInputs);
+    try std.testing.expectEqualStrings("baz", parsed.value.policy.s3Inputs);
 }
 
 test "jsonStringify: strings" {
@@ -1260,13 +1209,13 @@ test "jsonStringify: strings" {
         .arn = "1234",
     };
 
-    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
 
     const request_json = try std.fmt.allocPrint(std.testing.allocator, "{f}", .{std.json.fmt(request, .{})});
     defer std.testing.allocator.free(request_json);
 
-    try testing.expectEqualStrings("{\"arn\":\"1234\"}", request_json);
+    try std.testing.expectEqualStrings("{\"arn\":\"1234\"}", request_json);
 }
 
 test "jsonStringify" {
@@ -1283,7 +1232,7 @@ test "jsonStringify" {
         .tags = &tags,
     };
 
-    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
 
     const request_json = try std.fmt.allocPrint(std.testing.allocator, "{f}", .{std.json.fmt(request, .{})});
@@ -1294,11 +1243,11 @@ test "jsonStringify" {
         tags: struct {
             foo: []const u8,
         },
-    }, testing.allocator, request_json, .{});
+    }, std.testing.allocator, request_json, .{});
     defer json_parsed.deinit();
 
-    try testing.expectEqualStrings("1234", json_parsed.value.arn);
-    try testing.expectEqualStrings("bar", json_parsed.value.tags.foo);
+    try std.testing.expectEqualStrings("1234", json_parsed.value.arn);
+    try std.testing.expectEqualStrings("bar", json_parsed.value.tags.foo);
 }
 
 test "jsonStringify nullable object" {
@@ -1324,13 +1273,13 @@ test "jsonStringify nullable object" {
             RoutingConfig: struct {
                 AdditionalVersionWeights: ?struct {},
             },
-        }, testing.allocator, request_json, .{ .ignore_unknown_fields = true });
+        }, std.testing.allocator, request_json, .{ .ignore_unknown_fields = true });
         defer json_parsed.deinit();
 
-        try testing.expectEqualStrings("foo", json_parsed.value.FunctionName);
-        try testing.expectEqualStrings("bar", json_parsed.value.FunctionVersion);
-        try testing.expectEqualStrings("baz", json_parsed.value.Name);
-        try testing.expectEqual(null, json_parsed.value.RoutingConfig.AdditionalVersionWeights);
+        try std.testing.expectEqualStrings("foo", json_parsed.value.FunctionName);
+        try std.testing.expectEqualStrings("bar", json_parsed.value.FunctionVersion);
+        try std.testing.expectEqualStrings("baz", json_parsed.value.Name);
+        try std.testing.expectEqual(null, json_parsed.value.RoutingConfig.AdditionalVersionWeights);
     }
 
     // structure is null
@@ -1347,10 +1296,10 @@ test "jsonStringify nullable object" {
         const json_parsed = try std.json.parseFromSlice(struct {
             KeyId: []const u8,
             CiphertextBlob: []const u8,
-        }, testing.allocator, request_json, .{ .ignore_unknown_fields = true });
+        }, std.testing.allocator, request_json, .{ .ignore_unknown_fields = true });
         defer json_parsed.deinit();
 
-        try testing.expectEqualStrings("foo", json_parsed.value.KeyId);
-        try testing.expectEqualStrings("bar", json_parsed.value.CiphertextBlob);
+        try std.testing.expectEqualStrings("foo", json_parsed.value.KeyId);
+        try std.testing.expectEqualStrings("bar", json_parsed.value.CiphertextBlob);
     }
 }

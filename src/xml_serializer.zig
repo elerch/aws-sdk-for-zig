@@ -413,7 +413,8 @@ test "stringify basic types" {
     {
         const result = try stringifyAlloc(allocator, 3.14, .{});
         defer allocator.free(result);
-        try testing.expectEqualStrings("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<root>3.14e0</root>", result);
+        // zig 0.14.x outputs 3.14e0, but zig 0.15.1 outputs 3.14. Either *should* be acceptable
+        try testing.expectEqualStrings("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<root>3.14</root>", result);
     }
 
     // Test string
