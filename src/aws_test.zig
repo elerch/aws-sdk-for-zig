@@ -1303,3 +1303,110 @@ test "jsonStringify nullable object" {
         try std.testing.expectEqualStrings("bar", json_parsed.value.CiphertextBlob);
     }
 }
+
+test "works against a live server" {
+    const Server = struct {
+        allocator: std.mem.Allocator,
+        ready: std.Thread.Semaphore = .{},
+        requests_received: usize = 0,
+        thread: ?std.Thread = null,
+        listening_uri: []const u8 = undefined,
+
+        const Server = @This();
+
+        const response =
+            \\{"GetCallerIdentityResponse":{"GetCallerIdentityResult":{"Account":"123456789012","Arn":"arn:aws:iam::123456789012:user/admin","UserId":"AIDAYAM4POHXHRVANDQBQ"},"ResponseMetadata":{"RequestId":"8f0d54da-1230-40f7-b4ac-95015c4b84cd"}}}
+        ;
+        const server_response_headers: []const std.http.Header = &[_]std.http.Header{
+            .{ .name = "Content-Type", .value = "application/json" },
+            .{ .name = "x-amzn-RequestId", .value = "8f0d54da-1230-40f7-b4ac-95015c4b84cd" },
+        };
+
+        pub fn start(self: *Server) !void {
+            if (self.thread) |_| return error.ThreadAlreadyStarted;
+            self.thread = try std.Thread.spawn(
+                .{},
+                threadMain,
+                .{self},
+            );
+            try self.ready.timedWait(1000 * std.time.ns_per_ms);
+            awshttp.endpoint_override = self.listening_uri;
+            if (awshttp.endpoint_override == null) return error.TestSetupStartFailure;
+            std.log.debug("endpoint override set to {?s}", .{awshttp.endpoint_override});
+        }
+
+        pub fn stop(self: *Server) !void {
+            if (self.thread == null) return; // thread  not started, nothing to do
+            // post stop message
+            var client = std.http.Client{ .allocator = self.allocator };
+            _ = try client.fetch(.{ // we ignore return because that should just shut down
+                .method = .POST,
+                .payload = "quit",
+                .location = .{ .url = self.listening_uri },
+            });
+            awshttp.endpoint_override = null;
+            self.thread.?.join();
+        }
+
+        fn threadMain(self: *Server) !void {
+            const address = try std.net.Address.parseIp("127.0.0.1", 0);
+            var server = try address.listen(.{});
+            defer server.deinit();
+            const server_port = server.listen_address.in.getPort();
+            self.listening_uri = try std.fmt.allocPrint(self.allocator, "http://127.0.0.1:{d}", .{server_port});
+            defer {
+                self.allocator.free(self.listening_uri);
+                self.listening_uri = undefined;
+            }
+            self.ready.post();
+            while (true) {
+                var connection = try server.accept();
+                defer connection.stream.close();
+                var recv_buffer: [4000]u8 = undefined;
+                var send_buffer: [4000]u8 = undefined;
+                var conn_reader = connection.stream.reader(&recv_buffer);
+                var conn_writer = connection.stream.writer(&send_buffer);
+                var http_server = std.http.Server.init(conn_reader.interface(), &conn_writer.interface);
+                var req = try http_server.receiveHead();
+                if (req.head.content_length) |l| {
+                    if (l == "quit".len) {
+                        try req.respond("okie dokie", .{});
+                        return; // We're done here
+                    }
+                    return error.UnexpectedRequest;
+                }
+                self.requests_received += 1;
+                try req.respond(response, .{ .extra_headers = server_response_headers });
+            }
+        }
+    };
+    const allocator = std.testing.allocator;
+    var server = Server{ .allocator = allocator };
+    try server.start();
+    var stopped = false;
+    defer if (!stopped) server.stop() catch log.err("error stopping server", .{});
+    const sts = (Services(.{.sts}){}).sts;
+    const client = aws.Client.init(std.testing.allocator, .{});
+    const call = try aws.Request(sts.get_caller_identity).call(.{}, .{ .client = client });
+    // const call = try client.call(services.sts.get_caller_identity.Request{}, options);
+    defer call.deinit();
+    try server.stop();
+    stopped = true;
+    // Request expectations
+    try std.testing.expectEqual(@as(usize, 1), server.requests_received);
+    // if (test_harness.request_actuals == null) return error.NoCallMade;
+    // const req_actuals = test_harness.request_actuals.?;
+    // try std.testing.expectEqual(std.http.Method.POST, req_actuals.request.method);
+    // try std.testing.expectEqualStrings("https://sts.us-west-2.amazonaws.com/", req_actuals.request_uri);
+    // try std.testing.expectEqualStrings(
+    //     \\Action=GetCallerIdentity&Version=2011-06-15
+    // , req_actuals.body.?);
+    // Response expectations
+    try std.testing.expectEqualStrings(
+        "arn:aws:iam::123456789012:user/admin",
+        call.response.arn.?,
+    );
+    try std.testing.expectEqualStrings("AIDAYAM4POHXHRVANDQBQ", call.response.user_id.?);
+    try std.testing.expectEqualStrings("123456789012", call.response.account.?);
+    try std.testing.expectEqualStrings("8f0d54da-1230-40f7-b4ac-95015c4b84cd", call.response_metadata.request_id);
+}
