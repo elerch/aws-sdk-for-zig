@@ -5,6 +5,8 @@ AWS SDK for Zig
 
 [![Build Status: Zig 0.15.1](https://git.lerch.org/lobo/aws-sdk-for-zig/actions/workflows/build.yaml/badge.svg)](https://git.lerch.org/lobo/aws-sdk-for-zig/actions?workflow=build.yaml&state=closed)
 
+**NOTE** While the build is succeeding, there remains a [bug](https://github.com/elerch/aws-sdk-for-zig/issues/28?issue=elerch%7Caws-sdk-for-zig%7C32) that will cause failures in live environments. Please watch that bug for actual status.
+
 [Nightly Zig](https://ziglang.org/download/):
 
 [![Build Status: Zig Nightly](https://git.lerch.org/lobo/aws-sdk-for-zig/actions/workflows/zig-nightly.yaml/badge.svg)](https://git.lerch.org/lobo/aws-sdk-for-zig/actions?workflow=zig-nightly.yaml&state=closed)
