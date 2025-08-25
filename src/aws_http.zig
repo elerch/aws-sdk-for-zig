@@ -262,9 +262,6 @@ pub const AwsHttp = struct {
         log.debug("Request url: {s}", .{url});
         // TODO: Fix this proxy stuff. This is all a kludge just to compile, but std.http.Client has it all built in now
         var cl = std.http.Client{ .allocator = self.allocator, .https_proxy = if (self.proxy) |*p| @constCast(p) else null };
-        // Not sure this if statement is correct here. deinit seems to assume
-        // that client.request was called at least once, but we don't do that
-        // if we're in a test harness
         defer cl.deinit(); // TODO: Connection pooling
         const method = std.meta.stringToEnum(std.http.Method, request_cp.method).?;
 
@@ -289,7 +286,7 @@ pub const AwsHttp = struct {
             try m.request(method, uri, req_options) // This will call the test harness
         else
             try cl.request(method, uri, req_options);
-
+        defer req.deinit();
         // TODO: Need to test for payloads > 2^14. I believe one of our tests does this, but not sure
         // if (request_cp.body.len > 0) {
         //     // Workaround for https://github.com/ziglang/zig/issues/15626
@@ -318,6 +315,7 @@ pub const AwsHttp = struct {
                 try req.sendBodyComplete(req_body);
         } else if (options.mock == null) try req.sendBodiless();
 
+        // if (options.mock == null) log.err("Request sent. Body len {d}, uri {f}", .{ request_cp.body.len, uri });
         var response = if (options.mock) |m| try m.receiveHead() else try req.receiveHead(&.{});
 
         // TODO: Timeout - is this now above us?

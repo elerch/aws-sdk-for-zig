@@ -5,6 +5,8 @@ const date = @import("date");
 const json = @import("json");
 
 const aws = @import("aws.zig");
+const aws_auth = @import("aws_authentication.zig");
+const aws_creds = @import("aws_credentials.zig");
 const awshttp = @import("aws_http.zig");
 
 const Services = aws.Services;
@@ -314,8 +316,6 @@ const TestSetup = struct {
     };
     const Self = @This();
 
-    const aws_creds = @import("aws_credentials.zig");
-    const aws_auth = @import("aws_authentication.zig");
     const signing_time =
         date.dateTimeToTimestamp(
             date.parseIso8601ToDateTime("20230908T170252Z") catch @compileError("Cannot parse date"),
@@ -477,6 +477,7 @@ const TestSetup = struct {
         self.allocator.destroy(self.call_options);
         self.call_options = undefined;
         self.allocator.destroy(self);
+        aws_creds.static_credentials = null;
     }
 };
 test "query_no_input: sts getCallerIdentity comptime" {
@@ -1367,16 +1368,26 @@ test "works against a live server" {
                 var conn_reader = connection.stream.reader(&recv_buffer);
                 var conn_writer = connection.stream.writer(&send_buffer);
                 var http_server = std.http.Server.init(conn_reader.interface(), &conn_writer.interface);
-                var req = try http_server.receiveHead();
-                if (req.head.content_length) |l| {
-                    if (l == "quit".len) {
-                        try req.respond("okie dokie", .{});
-                        return; // We're done here
+                while (http_server.reader.state == .ready) {
+                    var req = try http_server.receiveHead();
+                    if (req.head.content_length) |l| {
+                        if (l == "quit".len) {
+                            try req.respond("okie dokie", .{ .keep_alive = false });
+                            return; // We're done here
+                        }
+                        if (l == 43) {
+                            // log.err("Got Request", .{});
+                            self.requests_received += 1;
+                            try req.respond(response, .{
+                                .extra_headers = server_response_headers,
+                                .keep_alive = false,
+                            });
+                            continue;
+                        }
+                        return error.UnexpectedRequest;
                     }
-                    return error.UnexpectedRequest;
+                    return error.MustHaveBodyLength43;
                 }
-                self.requests_received += 1;
-                try req.respond(response, .{ .extra_headers = server_response_headers });
             }
         }
     };
@@ -1385,8 +1396,31 @@ test "works against a live server" {
     try server.start();
     var stopped = false;
     defer if (!stopped) server.stop() catch log.err("error stopping server", .{});
+
+    // {
+    //     // plain request to see if this is working generally
+    //     var client = std.http.Client{ .allocator = allocator };
+    //     _ = try client.fetch(.{ // we ignore return because that should just shut down
+    //         .method = .GET,
+    //         .location = .{ .url = server.listening_uri },
+    //     });
+    //
+    //     try server.stop();
+    //     stopped = true;
+    //     try std.testing.expectEqual(@as(usize, 1), server.requests_received);
+    //     if (true) return;
+    // }
+
     const sts = (Services(.{.sts}){}).sts;
     const client = aws.Client.init(std.testing.allocator, .{});
+    const creds = aws_auth.Credentials.init(
+        allocator,
+        try allocator.dupe(u8, "ACCESS"),
+        try allocator.dupe(u8, "SECRET"),
+        null,
+    );
+    aws_creds.static_credentials = creds;
+    defer aws_creds.static_credentials = null;
     const call = try aws.Request(sts.get_caller_identity).call(.{}, .{ .client = client });
     // const call = try client.call(services.sts.get_caller_identity.Request{}, options);
     defer call.deinit();
