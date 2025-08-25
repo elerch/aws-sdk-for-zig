@@ -15,10 +15,10 @@ pub fn main() anyerror!void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
-    const stdout_raw = std.io.getStdOut().writer();
-    var bw = std.io.bufferedWriter(stdout_raw);
-    defer bw.flush() catch unreachable;
-    const stdout = bw.writer();
+    var stdout_buffer: [1024]u8 = undefined;
+    var stdout_raw = std.fs.File.stdout().writer(&stdout_buffer);
+    const stdout = &stdout_raw.interface;
+    defer stdout.flush() catch unreachable;
 
     // To use a proxy, uncomment the following with your own configuration
     // const proxy = std.http.Proxy{
