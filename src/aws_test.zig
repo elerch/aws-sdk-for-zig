@@ -1101,7 +1101,7 @@ test "rest_xml_with_input: S3 put object" {
     // I don't think this will work since we're overriding the url
     // try req_actuals.expectHeader("Host", "mysfitszj3t6webstack-hostingbucketa91a61fe-1ep3ezkgwpxr0.s3.us-west-2.amazonaws.com");
     try req_actuals.expectHeader("x-amz-storage-class", "STANDARD");
-    try std.testing.expectEqualStrings("/mysfitszj3t6webstack-hostingbucketa91a61fe-1ep3ezkgwpxr0/i/am/a/teapot/foo?x-id=PutObject", req_actuals.request_uri);
+    try std.testing.expectEqualStrings("https://mysfitszj3t6webstack-hostingbucketa91a61fe-1ep3ezkgwpxr0.s3.us-west-2.amazonaws.com/i/am/a/teapot/foo?x-id=PutObject", req_actuals.request_uri);
     try std.testing.expectEqualStrings("bar", req_actuals.body.?);
     // Response expectations
     try std.testing.expectEqualStrings("9PEYBAZ9J7TPRX43, host_id: jdRDo30t7Ge9lf6F+4WYpg+YKui8z0mz2+rwinL38xDZzvloJqrmpCAiKG375OSvHA9OBykJS44=", result.response_metadata.request_id);

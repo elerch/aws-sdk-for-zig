@@ -898,11 +898,7 @@ fn generalAllocPrint(allocator: std.mem.Allocator, val: anytype) !?[]const u8 {
                 .one => return try std.fmt.allocPrint(allocator, "{s}", .{val}),
                 .many => return try std.fmt.allocPrint(allocator, "{s}", .{val}),
                 .slice => {
-                    log.warn(
-                        "printing object of type [][]const u8...pretty sure this is wrong: {any}",
-                        .{val},
-                    );
-                    return try std.fmt.allocPrint(allocator, "{any}", .{val});
+                    return try std.fmt.allocPrint(allocator, "{s}", .{val});
                 },
                 .c => return try std.fmt.allocPrint(allocator, "{s}", .{val}),
             },
