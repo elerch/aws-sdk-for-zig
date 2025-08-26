@@ -240,6 +240,10 @@ pub fn signRequest(allocator: std.mem.Allocator, request: base.Request, config: 
     // regardless of whether we're sticking the header on the request
     std.debug.assert(config.signed_body_header == .none or
         config.signed_body_header == .sha256);
+    log.debug(
+        "Request body len: {d}. First 5 bytes (max): {s}",
+        .{ request.body.len, request.body[0..@min(request.body.len, 5)] },
+    );
     const payload_hash = try hash(allocator, request.body, .sha256);
     if (config.signed_body_header == .sha256) {
         // From the AWS nitro enclaves SDK, it appears that there is no reason
@@ -348,10 +352,10 @@ pub fn freeSignedRequest(allocator: std.mem.Allocator, request: *base.Request, c
 
 pub const credentialsFn = *const fn ([]const u8) ?Credentials;
 
-pub fn verifyServerRequest(allocator: std.mem.Allocator, request: *std.http.Server.Request, credentials_fn: credentialsFn) !bool {
+pub fn verifyServerRequest(allocator: std.mem.Allocator, request: *std.http.Server.Request, request_body_reader: *std.Io.Reader, credentials_fn: credentialsFn) !bool {
     var unverified_request = try UnverifiedRequest.init(allocator, request);
     defer unverified_request.deinit();
-    return verify(allocator, unverified_request, credentials_fn);
+    return verify(allocator, unverified_request, request_body_reader, credentials_fn);
 }
 
 pub const UnverifiedRequest = struct {
@@ -389,7 +393,7 @@ pub const UnverifiedRequest = struct {
     }
 };
 
-pub fn verify(allocator: std.mem.Allocator, request: UnverifiedRequest, credentials_fn: credentialsFn) !bool {
+pub fn verify(allocator: std.mem.Allocator, request: UnverifiedRequest, request_body_reader: *std.Io.Reader, credentials_fn: credentialsFn) !bool {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
     const aa = arena.allocator();
@@ -425,6 +429,7 @@ pub fn verify(allocator: std.mem.Allocator, request: UnverifiedRequest, credenti
         credential.?,
         signed_headers.?,
         signature.?,
+        request_body_reader,
         credentials_fn,
     );
 }
@@ -435,6 +440,7 @@ fn verifyParsedAuthorization(
     credential: []const u8,
     signed_headers: []const u8,
     signature: []const u8,
+    request_body_reader: *std.Io.Reader,
     credentials_fn: credentialsFn,
 ) !bool {
     // AWS4-HMAC-SHA256
@@ -494,8 +500,7 @@ fn verifyParsedAuthorization(
         .content_type = request.getFirstHeaderValue("content-type").?,
     };
     signed_request.query = request.target[signed_request.path.len..]; // TODO: should this be +1? query here would include '?'
-    // TODO: This is almost certainly not what we want here long term, but will get tests working
-    signed_request.body = try request.raw.server.reader.in.allocRemaining(allocator, .unlimited);
+    signed_request.body = try request_body_reader.allocRemaining(allocator, .unlimited);
     defer allocator.free(signed_request.body);
     signed_request = try signRequest(allocator, signed_request, config);
     defer freeSignedRequest(allocator, &signed_request, config);
@@ -1167,6 +1172,7 @@ test "can verify server request" {
         "x-amz-content-sha256: fcde2b2edba56bf408601fb721fe9b5c338d10ee429ea04fae5511b68fbf8fb9\r\n" ++
         "Authorization: AWS4-HMAC-SHA256 Credential=ACCESS/20230908/us-west-2/s3/aws4_request, SignedHeaders=accept;content-length;content-type;host;x-amz-content-sha256;x-amz-date;x-amz-storage-class, Signature=fcc43ce73a34c9bd1ddf17e8a435f46a859812822f944f9eeb2aabcd64b03523\r\n\r\nbar";
     var reader = std.Io.Reader.fixed(req);
+    var body_reader = std.Io.Reader.fixed("bar");
     var server: std.http.Server = .{
         .out = undefined, // We're not sending a response here
         .reader = .{
@@ -1182,9 +1188,10 @@ test "can verify server request" {
         .head_buffer = req,
     };
 
+    // const old_level = std.testing.log_level;
     // std.testing.log_level = .debug;
-    if (true) return error.SkipZigTest;
-    try std.testing.expect(try verifyServerRequest(allocator, &request, struct {
+    // defer std.testing.log_level = old_level;
+    try std.testing.expect(try verifyServerRequest(allocator, &request, &body_reader, struct {
         cred: Credentials,
 
         const Self = @This();
@@ -1223,6 +1230,7 @@ test "can verify server request without x-amz-content-sha256" {
     var read_buffer: [2048]u8 = undefined;
     @memcpy(read_buffer[0..req_data.len], req_data);
     var reader = std.Io.Reader.fixed(&read_buffer);
+    var body_reader = std.Io.Reader.fixed(body);
     var server: std.http.Server = .{
         .out = undefined, // We're not sending a response here
         .reader = .{
@@ -1285,8 +1293,7 @@ test "can verify server request without x-amz-content-sha256" {
     }
 
     { // verification
-        if (true) return error.SkipZigTest;
-        try std.testing.expect(try verifyServerRequest(allocator, &request, struct {
+        try std.testing.expect(try verifyServerRequest(allocator, &request, &body_reader, struct {
             cred: Credentials,
 
             const Self = @This();
