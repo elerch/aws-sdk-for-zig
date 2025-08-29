@@ -2,4 +2,4 @@
 pre-commit = "latest"
 "ubi:DonIsaac/zlint" = "latest"
 zig = "0.15.1"
-zls = "0.14.0"
+zls = "0.15.0"
