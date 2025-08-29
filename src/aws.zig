@@ -888,6 +888,8 @@ fn parseInt(comptime T: type, val: []const u8) !T {
     return rc;
 }
 
+/// generalAllocPrint is specific to http headers, which are documented
+/// at  https://smithy.io/2.0/spec/http-bindings.html#httpheader-trait
 fn generalAllocPrint(allocator: std.mem.Allocator, val: anytype) !?[]const u8 {
     const T = @TypeOf(val);
     switch (@typeInfo(T)) {
@@ -898,6 +900,29 @@ fn generalAllocPrint(allocator: std.mem.Allocator, val: anytype) !?[]const u8 {
                 .one => return try std.fmt.allocPrint(allocator, "{s}", .{val}),
                 .many => return try std.fmt.allocPrint(allocator, "{s}", .{val}),
                 .slice => {
+                    if (T == [][]const u8) {
+                        // This would be a list type, which is the described on the first bullet
+                        // of httpHeader trait serialization rules. An example can be found
+                        // in S3 ListObjects API (see the OptionalObjectAttributes property)
+                        // https://smithy.io/2.0/spec/http-bindings.html#serialization-rules
+                        //
+                        // S3 ListObjects REST API: https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjects.html
+                        //
+                        // This also applies to v2, but I don't have usage example here, we're just
+                        // following the spec
+                        //
+                        // tl;dr below, we're putting commas between values
+                        //
+                        // TODO: we need a unit test for this
+                        var vals_len: usize = 0;
+                        for (val, 0..) |v, i| vals_len += v.len + if (i + 1 < v.len) @as(usize, 1) else @as(usize, 0);
+                        var aw = try std.Io.Writer.Allocating.initCapacity(allocator, vals_len);
+                        defer aw.deinit();
+                        const writer = &aw.writer;
+                        for (val, 0..) |v, i|
+                            try writer.print("{s}{s}", .{ v, if (i + 1 < v.len) "," else "" }); // change v to val to trigger compile error (when unit test is written)
+                        return try aw.toOwnedSlice();
+                    }
                     return try std.fmt.allocPrint(allocator, "{s}", .{val});
                 },
                 .c => return try std.fmt.allocPrint(allocator, "{s}", .{val}),

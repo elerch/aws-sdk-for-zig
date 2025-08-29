@@ -15,19 +15,16 @@ repos:
       - id: zig-build
   - repo: local
     hooks:
-      - id: zlint
+      - id: smoke-test
         name: Run zig build smoke-test
         entry: zig
         args: ["build", "--verbose", "smoke-test"]
         language: system
         types: [file]
         pass_filenames: false
-
-  # - repo: local
-  #   hooks:
-  #     - id: zlint
-  #       name: Run zlint
-  #       entry: zlint
-  #       args: ["--deny-warnings", "--fix"]
-  #       language: system
-  #       types: [zig]
+      - id: zlint
+        name: Run zlint
+        entry: zlint
+        args: ["--deny-warnings", "--fix"]
+        language: system
+        types: [zig]
