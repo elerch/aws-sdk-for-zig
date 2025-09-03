@@ -382,7 +382,7 @@ const TestSetup = struct {
         self.request_actuals = acts;
         return acts.request.*;
     }
-    fn sendBodyComplete(self_ptr: usize, body: []u8) std.io.Writer.Error!void {
+    fn sendBodyComplete(self_ptr: usize, body: []u8) std.Io.Writer.Error!void {
         const self: *Self = @ptrFromInt(self_ptr);
         if (self.request_actuals == null) return error.WriteFailed; // invalid state - must be called after request
         self.request_actuals.?.body = self.allocator.dupe(u8, body) catch return error.WriteFailed;

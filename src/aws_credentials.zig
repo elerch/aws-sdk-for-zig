@@ -463,7 +463,10 @@ const PartialCredentials = struct {
 };
 fn credsForFile(allocator: std.mem.Allocator, file: ?std.fs.File, profile: []const u8) !PartialCredentials {
     if (file == null) return PartialCredentials{};
-    const text = try file.?.readToEndAlloc(allocator, std.math.maxInt(usize));
+    var fbuf: [1024]u8 = undefined;
+    var freader = file.?.reader(&fbuf);
+    var reader = &freader.interface;
+    const text = try reader.allocRemaining(allocator, .unlimited);
     defer allocator.free(text);
     const partial_creds = try credsForText(text, profile);
     var ak: ?[]const u8 = null;

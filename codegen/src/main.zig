@@ -387,7 +387,10 @@ fn generateServices(
     file: std.fs.File,
     writer: *std.Io.Writer,
 ) ![][]const u8 {
-    const json = try file.readToEndAlloc(allocator, 1024 * 1024 * 1024);
+    var fbuf: [1024]u8 = undefined;
+    var freader = file.reader(&fbuf);
+    var reader = &freader.interface;
+    const json = try reader.allocRemaining(allocator, .limited(1024 * 1024 * 1024));
     defer allocator.free(json);
     const model = try smithy.parse(allocator, json);
     defer model.deinit();
