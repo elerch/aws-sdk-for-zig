@@ -1,5 +1,10 @@
 const std = @import("std");
 
+const next_version_str = "0.16.0-dev.164+bc7955306";
+const next_version = std.SemanticVersion.parse(next_version_str) catch unreachable;
+const zig_version = @import("builtin").zig_version;
+const is_next = zig_version.order(next_version) == .eq or zig_version.order(next_version) == .gt;
+
 // Although this function looks imperative, note that its job is to
 // declaratively construct a build graph that will be executed by an external
 // runner.
@@ -26,7 +31,8 @@ pub fn build(b: *std.Build) void {
         .root_module = mod_exe,
     });
 
-    const aws_dep = b.dependency("aws", .{
+    const aws = if (is_next) "nightly" else "aws";
+    const aws_dep = b.dependency(aws, .{
         // These are the two arguments to the dependency. It expects a target and optimization level.
         .target = target,
         .optimize = optimize,
