@@ -20,6 +20,11 @@ const MapShape = smt.MapShape;
 // manifest file 21k currently, but unbounded
 var manifest_buf: [1024 * 32]u8 = undefined;
 
+const next_version_str = "0.16.0-dev.164+bc7955306";
+const next_version = std.SemanticVersion.parse(next_version_str) catch unreachable;
+const zig_version = @import("builtin").zig_version;
+const is_next = zig_version.order(next_version) == .eq or zig_version.order(next_version) == .gt;
+
 pub fn main() anyerror!void {
     const root_progress_node = std.Progress.start(.{});
     defer root_progress_node.end();
@@ -114,8 +119,16 @@ fn processDirectories(models_dir: std.fs.Dir, output_dir: std.fs.Dir, parent_pro
     try thread_pool.init(.{ .allocator = allocator });
     defer thread_pool.deinit();
 
-    const count, var calculated_manifest = try calculateDigests(models_dir, output_dir, &thread_pool);
-    const output_stored_manifest = output_dir.readFileAlloc(allocator, "output_manifest.json", std.math.maxInt(usize)) catch null;
+    const count, var calculated_manifest =
+        try calculateDigests(
+            models_dir,
+            output_dir,
+            &thread_pool,
+        );
+    const output_stored_manifest = if (is_next)
+        output_dir.readFileAlloc("output_manifest.json", allocator, .unlimited) catch null
+    else
+        output_dir.readFileAlloc(allocator, "output_manifest.json", std.math.maxInt(usize)) catch null;
     if (output_stored_manifest) |o| {
         // we have a stored manifest. Parse it and compare to our calculations
         // we can leak as we're using an arena allocator
