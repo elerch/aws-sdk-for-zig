@@ -168,7 +168,7 @@ fn parseInternal(comptime T: type, element: *xml.Element, options: ParseOptions)
                         },
                     );
                     if (@errorReturnTrace()) |trace| {
-                        std.debug.dumpStackTrace(trace.*);
+                        std.debug.dumpStackTrace(trace);
                     }
                 }
                 return e;
@@ -193,7 +193,7 @@ fn parseInternal(comptime T: type, element: *xml.Element, options: ParseOptions)
                         },
                     );
                     if (@errorReturnTrace()) |trace| {
-                        std.debug.dumpStackTrace(trace.*);
+                        std.debug.dumpStackTrace(trace);
                     }
                 }
                 return e;

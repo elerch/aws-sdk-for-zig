@@ -334,7 +334,7 @@ pub fn freeSignedRequest(allocator: std.mem.Allocator, request: *base.Request, c
     validateConfig(config) catch |e| {
         log.err("Signing validation failed during signature free: {}", .{e});
         if (@errorReturnTrace()) |trace| {
-            std.debug.dumpStackTrace(trace.*);
+            std.debug.dumpStackTrace(trace);
         }
         return;
     };

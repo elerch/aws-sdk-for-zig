@@ -333,14 +333,14 @@ const TestSetup = struct {
             var stderr = std.fs.File.stderr().writer(&.{});
             stderr.interface.writeAll(r.trace) catch @panic("could not write to stderr");
             std.debug.print("Current stack trace:\n", .{});
-            std.debug.dumpCurrentStackTrace(null);
+            std.debug.dumpCurrentStackTrace(.{});
             return error.ConnectionRefused; // we should not be called twice
         }
         const acts = try self.allocator.create(RequestActuals);
         errdefer self.allocator.destroy(acts);
         var aw = std.Io.Writer.Allocating.init(self.allocator);
         defer aw.deinit();
-        std.debug.dumpCurrentStackTraceToWriter(null, &aw.writer) catch return error.OutOfMemory;
+        std.debug.writeCurrentStackTrace(.{}, &aw.writer, .no_color) catch return error.OutOfMemory;
         const req = try self.allocator.create(std.http.Client.Request);
         errdefer self.allocator.destroy(req);
         const reader = try self.allocator.create(std.Io.Reader);

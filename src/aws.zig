@@ -455,7 +455,7 @@ pub fn Request(comptime request_action: anytype) type {
                                 log.err("Could not set header value: Response header {s}. Field {s}. Value {s}", .{ header.name, f.?.name, header.value });
                                 log.err("Error: {}", .{e});
                                 if (@errorReturnTrace()) |trace| {
-                                    std.debug.dumpStackTrace(trace.*);
+                                    std.debug.dumpStackTrace(trace);
                                 }
                             };
 

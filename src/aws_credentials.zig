@@ -201,7 +201,7 @@ fn getContainerCredentials(allocator: std.mem.Allocator) !?auth.Credentials {
             log.err("Unexpected Json response from container credentials endpoint: {s}", .{aw.written()});
             log.err("Error parsing json: {}", .{e});
             if (@errorReturnTrace()) |trace| {
-                std.debug.dumpStackTrace(trace.*);
+                std.debug.dumpStackTrace(trace);
             }
 
             return null;
@@ -299,7 +299,7 @@ fn getImdsRoleName(allocator: std.mem.Allocator, client: *std.http.Client, imds_
         log.err("Unexpected Json response from IMDS endpoint: {s}", .{aw.written()});
         log.err("Error parsing json: {}", .{e});
         if (@errorReturnTrace()) |trace| {
-            std.debug.dumpStackTrace(trace.*);
+            std.debug.dumpStackTrace(trace);
         }
         return null;
     };
@@ -354,7 +354,7 @@ fn getImdsCredentials(allocator: std.mem.Allocator, client: *std.http.Client, ro
         log.err("Unexpected Json response from IMDS endpoint: {s}", .{aw.written()});
         log.err("Error parsing json: {}", .{e});
         if (@errorReturnTrace()) |trace| {
-            std.debug.dumpStackTrace(trace.*);
+            std.debug.dumpStackTrace(trace);
         }
 
         return null;
