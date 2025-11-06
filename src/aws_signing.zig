@@ -157,7 +157,7 @@ pub const SigningError = error{
     XAmzExpiresHeaderInRequest,
     /// Used if the request headers already includes x-amz-region-set
     XAmzRegionSetHeaderInRequest,
-} || error{OutOfMemory};
+} || error{OutOfMemory} || std.Io.Clock.Error;
 
 const forbidden_headers = .{
     .{ .name = "x-amz-content-sha256", .err = SigningError.XAmzContentSha256HeaderInRequest },
@@ -185,7 +185,7 @@ const skipped_headers = .{
 /// Signs a request. Only header signing is currently supported. Note that
 /// This adds two headers to the request, which will need to be freed by the
 /// caller. Use freeSignedRequest with the same parameters to free
-pub fn signRequest(allocator: std.mem.Allocator, request: base.Request, config: Config) SigningError!base.Request {
+pub fn signRequest(allocator: std.mem.Allocator, io: std.Io, request: base.Request, config: Config) SigningError!base.Request {
     try validateConfig(config);
     for (request.headers) |h| {
         inline for (forbidden_headers) |f| {
@@ -195,7 +195,10 @@ pub fn signRequest(allocator: std.mem.Allocator, request: base.Request, config: 
     }
     var rc = request;
 
-    const signing_time = config.signing_time orelse std.time.timestamp();
+    const signing_time = config.signing_time orelse blk: {
+        const now = try std.Io.Clock.Timestamp.now(io, .awake);
+        break :blk @as(i64, @intCast(@divFloor(now.raw.nanoseconds, std.time.ns_per_s)));
+    };
 
     const signed_date = date.timestampToDateTime(signing_time);
 
@@ -352,10 +355,10 @@ pub fn freeSignedRequest(allocator: std.mem.Allocator, request: *base.Request, c
 
 pub const credentialsFn = *const fn ([]const u8) ?Credentials;
 
-pub fn verifyServerRequest(allocator: std.mem.Allocator, request: *std.http.Server.Request, request_body_reader: *std.Io.Reader, credentials_fn: credentialsFn) !bool {
+pub fn verifyServerRequest(allocator: std.mem.Allocator, io: std.Io, request: *std.http.Server.Request, request_body_reader: *std.Io.Reader, credentials_fn: credentialsFn) !bool {
     var unverified_request = try UnverifiedRequest.init(allocator, request);
     defer unverified_request.deinit();
-    return verify(allocator, unverified_request, request_body_reader, credentials_fn);
+    return verify(allocator, io, unverified_request, request_body_reader, credentials_fn);
 }
 
 pub const UnverifiedRequest = struct {
@@ -393,7 +396,7 @@ pub const UnverifiedRequest = struct {
     }
 };
 
-pub fn verify(allocator: std.mem.Allocator, request: UnverifiedRequest, request_body_reader: *std.Io.Reader, credentials_fn: credentialsFn) !bool {
+pub fn verify(allocator: std.mem.Allocator, io: std.Io, request: UnverifiedRequest, request_body_reader: *std.Io.Reader, credentials_fn: credentialsFn) !bool {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
     const aa = arena.allocator();
@@ -425,6 +428,7 @@ pub fn verify(allocator: std.mem.Allocator, request: UnverifiedRequest, request_
     if (signature == null) return error.AuthorizationHeaderMissingSignature;
     return verifyParsedAuthorization(
         aa,
+        io,
         request,
         credential.?,
         signed_headers.?,
@@ -436,6 +440,7 @@ pub fn verify(allocator: std.mem.Allocator, request: UnverifiedRequest, request_
 
 fn verifyParsedAuthorization(
     allocator: std.mem.Allocator,
+    io: std.Io,
     request: UnverifiedRequest,
     credential: []const u8,
     signed_headers: []const u8,
@@ -502,7 +507,7 @@ fn verifyParsedAuthorization(
     signed_request.query = request.target[signed_request.path.len..]; // TODO: should this be +1? query here would include '?'
     signed_request.body = try request_body_reader.allocRemaining(allocator, .unlimited);
     defer allocator.free(signed_request.body);
-    signed_request = try signRequest(allocator, signed_request, config);
+    signed_request = try signRequest(allocator, io, signed_request, config);
     defer freeSignedRequest(allocator, &signed_request, config);
     return verifySignedRequest(signed_request, signature);
 }
@@ -1100,6 +1105,9 @@ test "can sign" {
     // [debug] (awshttp):      Content-Length: 43
 
     const allocator = std.testing.allocator;
+    var threaded: std.Io.Threaded = .init(allocator);
+    defer threaded.deinit();
+    const io = threaded.io();
     var headers = try std.ArrayList(std.http.Header).initCapacity(allocator, 5);
     defer headers.deinit(allocator);
     try headers.append(allocator, .{ .name = "Content-Type", .value = "application/x-www-form-urlencoded; charset=utf-8" });
@@ -1131,7 +1139,7 @@ test "can sign" {
         .signing_time = 1440938160, // 20150830T123600Z
     };
     // TODO: There is an x-amz-content-sha256. Investigate
-    var signed_req = try signRequest(allocator, req, config);
+    var signed_req = try signRequest(allocator, io, req, config);
 
     defer freeSignedRequest(allocator, &signed_req, config);
     try std.testing.expectEqualStrings("X-Amz-Date", signed_req.headers[signed_req.headers.len - 3].name);
@@ -1151,6 +1159,9 @@ test "can sign" {
 var test_credential: ?Credentials = null;
 test "can verify server request" {
     const allocator = std.testing.allocator;
+    var threaded: std.Io.Threaded = .init(allocator);
+    defer threaded.deinit();
+    const io = threaded.io();
 
     const access_key = try allocator.dupe(u8, "ACCESS");
     const secret_key = try allocator.dupe(u8, "SECRET");
@@ -1191,7 +1202,7 @@ test "can verify server request" {
     // const old_level = std.testing.log_level;
     // std.testing.log_level = .debug;
     // defer std.testing.log_level = old_level;
-    try std.testing.expect(try verifyServerRequest(allocator, &request, &body_reader, struct {
+    try std.testing.expect(try verifyServerRequest(allocator, io, &request, &body_reader, struct {
         cred: Credentials,
 
         const Self = @This();
@@ -1203,6 +1214,9 @@ test "can verify server request" {
 }
 test "can verify server request without x-amz-content-sha256" {
     const allocator = std.testing.allocator;
+    var threaded: std.Io.Threaded = .init(allocator);
+    defer threaded.deinit();
+    const io = threaded.io();
 
     const access_key = try allocator.dupe(u8, "ACCESS");
     const secret_key = try allocator.dupe(u8, "SECRET");
@@ -1293,7 +1307,7 @@ test "can verify server request without x-amz-content-sha256" {
     }
 
     { // verification
-        try std.testing.expect(try verifyServerRequest(allocator, &request, &body_reader, struct {
+        try std.testing.expect(try verifyServerRequest(allocator, io, &request, &body_reader, struct {
             cred: Credentials,
 
             const Self = @This();

@@ -254,6 +254,8 @@ const TestOptions = struct {
 };
 const TestSetup = struct {
     allocator: std.mem.Allocator,
+    threaded: std.Io.Threaded,
+    io: std.Io,
     options: TestOptions,
     creds: aws_auth.Credentials,
     client: aws.Client,
@@ -306,6 +308,7 @@ const TestSetup = struct {
             allocator.free(self.trace);
             allocator.free(self.request_uri);
             allocator.destroy(self.request.reader.in);
+            allocator.destroy(self.request.client);
             allocator.destroy(self.request);
         }
     };
@@ -346,9 +349,19 @@ const TestSetup = struct {
         const reader = try self.allocator.create(std.Io.Reader);
         errdefer self.allocator.destroy(reader);
         reader.* = .fixed(self.options.server_response);
+        // Create a minimal mock client that only provides io for deinit
+        // By creating it with the allocator, we leave critical fields like
+        // connection_pool as undefined, which will fail spectacularly if
+        // a real request were to be attempted
+        const mock_client = try self.allocator.create(std.http.Client);
+        errdefer self.allocator.destroy(mock_client);
+        mock_client.* = .{
+            .allocator = self.allocator,
+            .io = self.io,
+        };
         req.* = .{
             .uri = uri,
-            .client = undefined,
+            .client = mock_client,
             .connection = options.connection,
             .reader = .{
                 .in = reader,
@@ -433,7 +446,9 @@ const TestSetup = struct {
         return self.request_actuals.?.request.reader.in;
     }
     fn init(options: TestOptions) !*Self {
-        const client = aws.Client.init(options.allocator, .{});
+        var threaded: std.Io.Threaded = .init(options.allocator);
+        const io = threaded.io();
+        const client = aws.Client.init(options.allocator, .{ .io = io });
         const call_options = try options.allocator.create(aws.Options);
         const self = try options.allocator.create(Self);
         call_options.* = .{
@@ -453,6 +468,8 @@ const TestSetup = struct {
         self.* = .{
             .options = options,
             .allocator = options.allocator,
+            .threaded = threaded,
+            .io = io,
             .creds = aws_auth.Credentials.init(
                 options.allocator,
                 try options.allocator.dupe(u8, "ACCESS"),
@@ -476,6 +493,7 @@ const TestSetup = struct {
         }
         self.allocator.destroy(self.call_options);
         self.call_options = undefined;
+        self.threaded.deinit();
         self.allocator.destroy(self);
         aws_creds.static_credentials = null;
     }
@@ -1308,6 +1326,7 @@ test "jsonStringify nullable object" {
 test "works against a live server" {
     const Server = struct {
         allocator: std.mem.Allocator,
+        io: std.Io,
         ready: std.Thread.Semaphore = .{},
         requests_received: usize = 0,
         thread: ?std.Thread = null,
@@ -1339,7 +1358,7 @@ test "works against a live server" {
         pub fn stop(self: *Server) !void {
             if (self.thread == null) return; // thread  not started, nothing to do
             // post stop message
-            var client = std.http.Client{ .allocator = self.allocator };
+            var client = std.http.Client{ .allocator = self.allocator, .io = self.io };
             _ = try client.fetch(.{ // we ignore return because that should just shut down
                 .method = .POST,
                 .payload = "quit",
@@ -1350,10 +1369,10 @@ test "works against a live server" {
         }
 
         fn threadMain(self: *Server) !void {
-            const address = try std.net.Address.parseIp("127.0.0.1", 0);
-            var server = try address.listen(.{});
-            defer server.deinit();
-            const server_port = server.listen_address.in.getPort();
+            const address = try std.Io.net.IpAddress.parseLiteral("127.0.0.1:0");
+            var server = try address.listen(self.io, .{});
+            defer server.deinit(self.io);
+            const server_port = server.socket.address.getPort();
             self.listening_uri = try std.fmt.allocPrint(self.allocator, "http://127.0.0.1:{d}", .{server_port});
             defer {
                 self.allocator.free(self.listening_uri);
@@ -1361,13 +1380,13 @@ test "works against a live server" {
             }
             self.ready.post();
             while (true) {
-                var connection = try server.accept();
-                defer connection.stream.close();
+                var connection = try server.accept(self.io);
+                defer connection.close(self.io);
                 var recv_buffer: [4000]u8 = undefined;
                 var send_buffer: [4000]u8 = undefined;
-                var conn_reader = connection.stream.reader(&recv_buffer);
-                var conn_writer = connection.stream.writer(&send_buffer);
-                var http_server = std.http.Server.init(conn_reader.interface(), &conn_writer.interface);
+                var conn_reader = connection.reader(self.io, &recv_buffer);
+                var conn_writer = connection.writer(self.io, &send_buffer);
+                var http_server = std.http.Server.init(&conn_reader.interface, &conn_writer.interface);
                 while (http_server.reader.state == .ready) {
                     var req = try http_server.receiveHead();
                     if (req.head.content_length) |l| {
@@ -1392,7 +1411,10 @@ test "works against a live server" {
         }
     };
     const allocator = std.testing.allocator;
-    var server = Server{ .allocator = allocator };
+    var threaded: std.Io.Threaded = .init(allocator);
+    defer threaded.deinit();
+    const io = threaded.io();
+    var server = Server{ .allocator = allocator, .io = io };
     try server.start();
     var stopped = false;
     defer if (!stopped) server.stop() catch log.err("error stopping server", .{});
@@ -1412,7 +1434,7 @@ test "works against a live server" {
     // }
 
     const sts = (Services(.{.sts}){}).sts;
-    const client = aws.Client.init(std.testing.allocator, .{});
+    const client = aws.Client.init(std.testing.allocator, .{ .io = io });
     const creds = aws_auth.Credentials.init(
         allocator,
         try allocator.dupe(u8, "ACCESS"),

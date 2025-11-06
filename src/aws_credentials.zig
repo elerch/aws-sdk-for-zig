@@ -77,7 +77,7 @@ pub const Options = struct {
 
 pub var static_credentials: ?auth.Credentials = null;
 
-pub fn getCredentials(allocator: std.mem.Allocator, options: Options) !auth.Credentials {
+pub fn getCredentials(allocator: std.mem.Allocator, io: std.Io, options: Options) !auth.Credentials {
     if (static_credentials) |c| return c;
     if (try getEnvironmentCredentials(allocator)) |cred| {
         log.debug("Found credentials in environment. Access key: {s}", .{cred.access_key});
@@ -87,11 +87,11 @@ pub fn getCredentials(allocator: std.mem.Allocator, options: Options) !auth.Cred
     // GetWebIdentity is not currently implemented. The rest are tested and gtg
     // Note: Lambda just sets environment variables
     if (try getWebIdentityToken(allocator)) |cred| return cred;
-    if (try getProfileCredentials(allocator, options.profile)) |cred| return cred;
+    if (try getProfileCredentials(allocator, io, options.profile)) |cred| return cred;
 
-    if (try getContainerCredentials(allocator)) |cred| return cred;
+    if (try getContainerCredentials(allocator, io)) |cred| return cred;
     // I don't think we need v1 at all?
-    if (try getImdsv2Credentials(allocator)) |cred| return cred;
+    if (try getImdsv2Credentials(allocator, io)) |cred| return cred;
     return error.CredentialsNotFound;
 }
 
@@ -125,7 +125,7 @@ fn getWebIdentityToken(allocator: std.mem.Allocator) !?auth.Credentials {
     // TODO: implement
     return null;
 }
-fn getContainerCredentials(allocator: std.mem.Allocator) !?auth.Credentials {
+fn getContainerCredentials(allocator: std.mem.Allocator, io: std.Io) !?auth.Credentials {
     // A note on testing: The best way I have found to test this process is
     // the following. Setup an ECS Fargate cluster and create a task definition
     // with the command  ["/bin/bash","-c","while true; do sleep 10; done"].
@@ -171,7 +171,7 @@ fn getContainerCredentials(allocator: std.mem.Allocator) !?auth.Credentials {
     const container_uri = try std.fmt.allocPrint(allocator, "http://169.254.170.2{s}", .{container_relative_uri});
     defer allocator.free(container_uri);
 
-    var cl = std.http.Client{ .allocator = allocator };
+    var cl = std.http.Client{ .allocator = allocator, .io = io };
     defer cl.deinit(); // I don't belive connection pooling would help much here as it's non-ssl and local
     var aw: std.Io.Writer.Allocating = .init(allocator);
     defer aw.deinit();
@@ -218,10 +218,10 @@ fn getContainerCredentials(allocator: std.mem.Allocator) !?auth.Credentials {
     );
 }
 
-fn getImdsv2Credentials(allocator: std.mem.Allocator) !?auth.Credentials {
+fn getImdsv2Credentials(allocator: std.mem.Allocator, io: std.Io) !?auth.Credentials {
     var token: ?[]u8 = null;
     defer if (token) |t| allocator.free(t);
-    var cl = std.http.Client{ .allocator = allocator };
+    var cl = std.http.Client{ .allocator = allocator, .io = io };
     defer cl.deinit(); // I don't belive connection pooling would help much here as it's non-ssl and local
     // Get token
     {
@@ -383,7 +383,7 @@ fn getImdsCredentials(allocator: std.mem.Allocator, client: *std.http.Client, ro
 
 }
 
-fn getProfileCredentials(allocator: std.mem.Allocator, options: Profile) !?auth.Credentials {
+fn getProfileCredentials(allocator: std.mem.Allocator, io: std.Io, options: Profile) !?auth.Credentials {
     var default_path: ?[]const u8 = null;
     defer if (default_path) |p| allocator.free(p);
 
@@ -416,13 +416,13 @@ fn getProfileCredentials(allocator: std.mem.Allocator, options: Profile) !?auth.
     defer if (credentials_file) |f| f.close();
     // It's much more likely that we'll find credentials in the credentials file
     // so we'll try that first
-    const creds_file_creds = try credsForFile(allocator, credentials_file, profile);
+    const creds_file_creds = try credsForFile(allocator, io, credentials_file, profile);
     var conf_file_creds = PartialCredentials{};
     if (creds_file_creds.access_key == null or creds_file_creds.secret_key == null) {
         log.debug("Checking config file: {s}", .{config_file_path.evaluated_path});
         const config_file = std.fs.openFileAbsolute(creds_file_path.evaluated_path, .{}) catch null;
         defer if (config_file) |f| f.close();
-        conf_file_creds = try credsForFile(allocator, config_file, profile);
+        conf_file_creds = try credsForFile(allocator, io, config_file, profile);
     }
     const access_key = keyFrom(allocator, creds_file_creds.access_key, conf_file_creds.access_key);
     const secret_key = keyFrom(allocator, creds_file_creds.secret_key, conf_file_creds.secret_key);
@@ -461,10 +461,10 @@ const PartialCredentials = struct {
     access_key: ?[]const u8 = null,
     secret_key: ?[]const u8 = null,
 };
-fn credsForFile(allocator: std.mem.Allocator, file: ?std.fs.File, profile: []const u8) !PartialCredentials {
+fn credsForFile(allocator: std.mem.Allocator, io: std.Io, file: ?std.fs.File, profile: []const u8) !PartialCredentials {
     if (file == null) return PartialCredentials{};
     var fbuf: [1024]u8 = undefined;
-    var freader = file.?.reader(&fbuf);
+    var freader = file.?.reader(io, &fbuf);
     var reader = &freader.interface;
     const text = try reader.allocRemaining(allocator, .unlimited);
     defer allocator.free(text);
@@ -629,7 +629,7 @@ fn getHomeDir(allocator: std.mem.Allocator) ![]const u8 {
                 else => return error.HomeDirUnavailable,
             };
         },
-        .macos, .linux, .freebsd, .netbsd, .dragonfly, .openbsd, .solaris => {
+        .macos, .linux, .freebsd, .netbsd, .dragonfly, .openbsd, .illumos => {
             const home_dir = std.posix.getenv("HOME") orelse {
                 // TODO look in /etc/passwd
                 return error.HomeDirUnavailable;

@@ -144,13 +144,15 @@ const EndPoint = struct {
 pub const AwsHttp = struct {
     allocator: std.mem.Allocator,
     proxy: ?std.http.Client.Proxy,
+    io: std.Io,
 
     const Self = @This();
 
-    pub fn init(allocator: std.mem.Allocator, proxy: ?std.http.Client.Proxy) Self {
+    pub fn init(allocator: std.mem.Allocator, io: std.Io, proxy: ?std.http.Client.Proxy) Self {
         return Self{
             .allocator = allocator,
             .proxy = proxy,
+            .io = io,
             // .credentialsProvider = // creds provider could be useful
         };
     }
@@ -186,7 +188,7 @@ pub const AwsHttp = struct {
         defer endpoint.deinit();
         log.debug("Calling endpoint {s}", .{endpoint.uri});
         // TODO: Should we allow customization here?
-        const creds = try credentials.getCredentials(self.allocator, .{});
+        const creds = try credentials.getCredentials(self.allocator, self.io, .{});
         defer creds.deinit();
         const signing_config: signing.Config = .{
             .region = getRegion(service, options.region),
@@ -241,7 +243,7 @@ pub const AwsHttp = struct {
         defer if (len) |l| self.allocator.free(l);
         request_cp.headers = request_headers.items;
 
-        if (signing_config) |opts| request_cp = try signing.signRequest(self.allocator, request_cp, opts);
+        if (signing_config) |opts| request_cp = try signing.signRequest(self.allocator, self.io, request_cp, opts);
         defer {
             if (signing_config) |opts| {
                 signing.freeSignedRequest(self.allocator, &request_cp, opts);
@@ -261,7 +263,7 @@ pub const AwsHttp = struct {
         defer self.allocator.free(url);
         log.debug("Request url: {s}", .{url});
         // TODO: Fix this proxy stuff. This is all a kludge just to compile, but std.http.Client has it all built in now
-        var cl = std.http.Client{ .allocator = self.allocator, .https_proxy = if (self.proxy) |*p| @constCast(p) else null };
+        var cl = std.http.Client{ .allocator = self.allocator, .io = self.io, .https_proxy = if (self.proxy) |*p| @constCast(p) else null };
         defer cl.deinit(); // TODO: Connection pooling
         const method = std.meta.stringToEnum(std.http.Method, request_cp.method).?;
 

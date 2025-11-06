@@ -111,7 +111,10 @@ pub fn main() anyerror!void {
     }
 
     std.log.info("Start\n", .{});
-    const client_options = aws.ClientOptions{ .proxy = proxy };
+    var threaded: std.Io.Threaded = .init(allocator);
+    defer threaded.deinit();
+    const io = threaded.io();
+    const client_options = aws.ClientOptions{ .proxy = proxy, .io = io };
     var client = aws.Client.init(allocator, client_options);
     const options = aws.Options{
         .region = "us-west-2",
@@ -373,7 +376,8 @@ fn proxyFromString(string: []const u8) !std.http.Client.Proxy {
         rc.protocol = .tls;
     } else return error.InvalidScheme;
     var split_iterator = std.mem.splitScalar(u8, remaining, ':');
-    rc.host = std.mem.trimRight(u8, split_iterator.first(), "/");
+    const host_str = std.mem.trimRight(u8, split_iterator.first(), "/");
+    rc.host = try std.Io.net.HostName.init(host_str);
     if (split_iterator.next()) |port|
         rc.port = try std.fmt.parseInt(u16, port, 10);
     return rc;

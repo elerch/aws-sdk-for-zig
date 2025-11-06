@@ -83,8 +83,10 @@ fn printDateTime(dt: DateTime) void {
     });
 }
 
-pub fn printNowUtc() void {
-    printDateTime(timestampToDateTime(std.time.timestamp()));
+pub fn printNowUtc(io: std.Io) void {
+    const now = std.Io.Clock.Timestamp.now(io, .awake) catch return;
+    const timestamp = @as(i64, @intCast(@divFloor(now.raw.nanoseconds, std.time.ns_per_s)));
+    printDateTime(timestampToDateTime(timestamp));
 }
 
 test "Convert timestamp to datetime" {

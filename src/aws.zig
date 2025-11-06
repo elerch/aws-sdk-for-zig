@@ -113,6 +113,7 @@ pub const Services = servicemodel.Services;
 
 pub const ClientOptions = struct {
     proxy: ?std.http.Client.Proxy = null,
+    io: std.Io,
 };
 pub const Client = struct {
     allocator: std.mem.Allocator,
@@ -123,7 +124,7 @@ pub const Client = struct {
     pub fn init(allocator: std.mem.Allocator, options: ClientOptions) Self {
         return Self{
             .allocator = allocator,
-            .aws_http = awshttp.AwsHttp.init(allocator, options.proxy),
+            .aws_http = awshttp.AwsHttp.init(allocator, options.io, options.proxy),
         };
     }
     pub fn deinit(self: *Client) void {

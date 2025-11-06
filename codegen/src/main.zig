@@ -33,6 +33,10 @@ pub fn main() anyerror!void {
     defer arena.deinit();
     const allocator = arena.allocator();
 
+    var threaded: std.Io.Threaded = .init(allocator);
+    defer threaded.deinit();
+    const io = threaded.io();
+
     const args = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, args);
     var stdout_writer = std.fs.File.stdout().writer(&.{});
@@ -79,7 +83,7 @@ pub fn main() anyerror!void {
             skip_next = true;
             continue;
         }
-        try processFile(arg, output_dir, &manifest);
+        try processFile(io, arg, output_dir, &manifest);
         files_processed += 1;
     }
     if (files_processed == 0) {
@@ -93,12 +97,12 @@ pub fn main() anyerror!void {
             defer cwd.setAsCwd() catch unreachable;
 
             try m.setAsCwd();
-            try processDirectories(m, output_dir, &root_progress_node);
+            try processDirectories(io, m, output_dir, &root_progress_node);
         }
     }
 
     if (args.len == 0)
-        _ = try generateServices(allocator, ";", std.fs.File.stdin(), stdout);
+        _ = try generateServices(allocator, io, ";", std.fs.File.stdin(), stdout);
 
     if (verbose) {
         const output_path = try output_dir.realpathAlloc(allocator, ".");
@@ -110,7 +114,7 @@ const OutputManifest = struct {
     model_dir_hash_digest: [Hasher.hex_multihash_len]u8,
     output_dir_hash_digest: [Hasher.hex_multihash_len]u8,
 };
-fn processDirectories(models_dir: std.fs.Dir, output_dir: std.fs.Dir, parent_progress: *const std.Progress.Node) !void {
+fn processDirectories(io: std.Io, models_dir: std.fs.Dir, output_dir: std.fs.Dir, parent_progress: *const std.Progress.Node) !void {
     // Let's get ready to hash!!
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
@@ -154,7 +158,7 @@ fn processDirectories(models_dir: std.fs.Dir, output_dir: std.fs.Dir, parent_pro
 
     while (try mi.next()) |e| {
         if ((e.kind == .file or e.kind == .sym_link) and std.mem.endsWith(u8, e.name, ".json")) {
-            try processFile(e.name, output_dir, &manifest.interface);
+            try processFile(io, e.name, output_dir, &manifest.interface);
             generating_models_progress.completeOne();
         }
     }
@@ -210,7 +214,7 @@ fn calculateDigests(models_dir: std.fs.Dir, output_dir: std.fs.Dir, thread_pool:
         },
     };
 }
-fn processFile(file_name: []const u8, output_dir: std.fs.Dir, manifest: *std.Io.Writer) !void {
+fn processFile(io: std.Io, file_name: []const u8, output_dir: std.fs.Dir, manifest: *std.Io.Writer) !void {
     // It's probably best to create our own allocator here so we can deint at the end and
     // toss all allocations related to the services in this file
     // I can't guarantee we're not leaking something, and at the end of the
@@ -237,6 +241,7 @@ fn processFile(file_name: []const u8, output_dir: std.fs.Dir, manifest: *std.Io.
 
     const service_names = generateServicesForFilePath(
         allocator,
+        io,
         ";",
         file_name,
         writer,
@@ -288,13 +293,14 @@ fn zigFmt(allocator: std.mem.Allocator, buffer: [:0]const u8) ![]const u8 {
 
 fn generateServicesForFilePath(
     allocator: std.mem.Allocator,
+    io: std.Io,
     comptime terminator: []const u8,
     path: []const u8,
     writer: *std.Io.Writer,
 ) ![][]const u8 {
     const file = try std.fs.cwd().openFile(path, .{});
     defer file.close();
-    return try generateServices(allocator, terminator, file, writer);
+    return try generateServices(allocator, io, terminator, file, writer);
 }
 
 fn addReference(id: []const u8, map: *std.StringHashMap(u64)) !void {
@@ -396,12 +402,13 @@ fn countReferences(
 
 fn generateServices(
     allocator: std.mem.Allocator,
+    io: std.Io,
     comptime _: []const u8,
     file: std.fs.File,
     writer: *std.Io.Writer,
 ) ![][]const u8 {
     var fbuf: [1024]u8 = undefined;
-    var freader = file.reader(&fbuf);
+    var freader = file.reader(io, &fbuf);
     var reader = &freader.interface;
     const json = try reader.allocRemaining(allocator, .limited(1024 * 1024 * 1024));
     defer allocator.free(json);

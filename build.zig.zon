@@ -22,10 +22,6 @@
             .url = "https://github.com/aws/aws-sdk-go-v2/archive/refs/tags/release-2025-05-05.tar.gz",
             .hash = "N-V-__8AAKWdeiawujEcrfukQbb8lLAiQIRT0uG5gCcm4b7W",
         },
-        .zeit = .{
-            .url = "git+https://github.com/rockorager/zeit?ref=zig-0.15#ed2ca60db118414bda2b12df2039e33bad3b0b88",
-            .hash = "zeit-0.6.0-5I6bk0J9AgCVa0nnyL0lNY9Xa9F68hHq-ZarhuXNV-Jb",
-        },
         .date = .{
             .path = "lib/date",
         },
@@ -35,6 +31,10 @@
         .case = .{
             .url = "git+https://github.com/travisstaloch/case.git#f8003fe5f93b65f673d10d41323e347225e8cb87",
             .hash = "case-0.0.1-chGYqx_EAADaGJjmoln5M1iMBDTrMdd8to5wdEVpfXm4",
+        },
+        .zeit = .{
+            .url = "git+https://github.com/elerch/zeit#8190461dc1f892f6370fa9d5cd76690aac0e1c71",
+            .hash = "zeit-0.6.0-5I6bk99-AgDNMIDuw2Zcoe_9QYIpzwZJqeqMpU54egTd",
         },
     },
 }
