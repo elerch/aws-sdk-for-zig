@@ -28,7 +28,10 @@ pub fn main() anyerror!void {
     // };
     //
     // var client = aws.Client.init(allocator, .{ .proxy = proxy });
-    var client = aws.Client.init(allocator, .{});
+    var threaded: std.Io.Threaded = .init(allocator);
+    defer threaded.deinit();
+    const io = threaded.io();
+    var client = aws.Client.init(allocator, .{ .io = io });
     defer client.deinit();
 
     const options = aws.Options{
