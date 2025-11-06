@@ -9,6 +9,8 @@ AWS SDK for Zig
 
 [![Build Status: Zig Nightly](https://git.lerch.org/lobo/aws-sdk-for-zig/actions/workflows/zig-nightly.yaml/badge.svg)](https://git.lerch.org/lobo/aws-sdk-for-zig/actions?workflow=zig-nightly.yaml&state=closed)
 
+**NOTE**: Nightly should be working currently, but a [bug in the http Client](https://github.com/ziglang/zig/issues/25811) is breaking the example
+
 [Zig 0.14.1](https://ziglang.org/download/#release-0.14.1):
 
 [![Build Status: Zig 0.14.x](https://git.lerch.org/lobo/aws-sdk-for-zig/actions/workflows/zig-previous.yaml/badge.svg)](https://git.lerch.org/lobo/aws-sdk-for-zig/actions?workflow=zig-previous.yaml&state=closed)
