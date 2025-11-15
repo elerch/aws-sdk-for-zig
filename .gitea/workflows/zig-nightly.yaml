@@ -15,8 +15,7 @@ jobs:
       # TODO: Remove this after https://github.com/ziglang/zig/issues/21815 is
       # addressed
       options: --cap-add CAP_SYS_PTRACE
-    #runs-on: ubuntu-latest
-    runs-on: ubuntu-latest-with-hsm
+    runs-on: ubuntu-latest
     # Need to use the default container with node and all that, so we can
     # use JS-based actions like actions/checkout@v3...
     # container:
