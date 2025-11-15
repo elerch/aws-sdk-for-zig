@@ -15,8 +15,8 @@
 
     .dependencies = .{
         .smithy = .{
-            .url = "git+https://github.com/elerch/smithy.git#5882330451ac6379829af16dd87b66f9fbae6f24",
-            .hash = "smithy-1.0.0-uAyBgV7TAgBIOKSaTb0Bvy6ndj0qFn9mAD375E_3F4yR",
+            .url = "git+https://git.lerch.org/lobo/smithy.git#09c0a618877ebaf8e15fbfc505983876f4e063d5",
+            .hash = "smithy-1.0.0-uAyBgTnTAgBp2v6vypGcK5-YOCtxs2iEqR-4LfC5FTlS",
         },
         .models = .{
             .url = "https://github.com/aws/aws-sdk-go-v2/archive/refs/tags/release-2025-05-05.tar.gz",
