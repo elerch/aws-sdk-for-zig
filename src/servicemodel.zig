@@ -1,32 +1,27 @@
 const std = @import("std");
 const service_list = @import("service_manifest");
-const expectEqualStrings = std.testing.expectEqualStrings;
 
 pub fn Services(comptime service_imports: anytype) type {
     if (service_imports.len == 0) return services;
     // From here, the fields of our structure can be generated at comptime...
-    var fields: [serviceCount(service_imports)]std.builtin.Type.StructField = undefined;
+    const fields_len = serviceCount(service_imports);
+    var field_names: [fields_len][]const u8 = undefined;
+    var field_types: [fields_len]type = undefined;
+    var field_attrs: [fields_len]std.builtin.Type.StructField.Attributes = undefined;
 
-    for (&fields, 0..) |*item, i| {
+    for (0..fields_len) |i| {
         const import_field = @field(service_list, @tagName(service_imports[i]));
-        item.* = .{
-            .name = @tagName(service_imports[i]),
-            .type = @TypeOf(import_field),
+        field_names[i] = @tagName(service_imports[i]);
+        field_types[i] = @TypeOf(import_field);
+        field_attrs[i] = .{
             .default_value_ptr = &import_field,
-            .is_comptime = false,
-            .alignment = std.meta.alignment(@TypeOf(import_field)),
+            .@"comptime" = false,
+            .@"align" = std.meta.alignment(field_types[i]),
         };
     }
 
     // finally, generate the type
-    return @Type(.{
-        .@"struct" = .{
-            .layout = .auto,
-            .fields = &fields,
-            .decls = &[_]std.builtin.Type.Declaration{},
-            .is_tuple = false,
-        },
-    });
+    return @Struct(.auto, null, &field_names, &field_types, &field_attrs);
 }
 
 fn serviceCount(desired_services: anytype) usize {
@@ -39,17 +34,23 @@ fn serviceCount(desired_services: anytype) usize {
 pub const services = service_list;
 
 test "services includes sts" {
-    try expectEqualStrings("2011-06-15", services.sts.version.?);
+    try std.testing.expectEqualStrings("2011-06-15", services.sts.version.?);
 }
 test "sts includes get_caller_identity" {
-    try expectEqualStrings("GetCallerIdentity", services.sts.get_caller_identity.action_name);
+    try std.testing.expectEqualStrings("GetCallerIdentity", services.sts.get_caller_identity.action_name);
 }
 test "can get service and action name from request" {
     // get request object. This call doesn't have parameters
     const metadata = services.sts.get_caller_identity.Request.metaInfo();
-    try expectEqualStrings("2011-06-15", metadata.service_metadata.version.?);
+    try std.testing.expectEqualStrings("2011-06-15", metadata.service_metadata.version.?);
 }
 test "can filter services" {
     const filtered_services = Services(.{ .sts, .wafv2 }){};
-    try expectEqualStrings("2011-06-15", filtered_services.sts.version.?);
+    try std.testing.expectEqualStrings("2011-06-15", filtered_services.sts.version.?);
+}
+test "can reify type" {
+    const F = Services(.{.lambda});
+    const info = @typeInfo(F).@"struct";
+    try std.testing.expectEqual(@as(usize, 1), info.fields.len);
+    try std.testing.expectEqualStrings("lambda", info.fields[0].name);
 }

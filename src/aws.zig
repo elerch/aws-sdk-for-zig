@@ -1057,45 +1057,37 @@ fn ServerResponse(comptime action: anytype) type {
     const ResponseMetadata = struct {
         RequestId: []u8,
     };
-    const Result = @Type(.{
-        .@"struct" = .{
-            .layout = .auto,
-            .fields = &[_]std.builtin.Type.StructField{
-                .{
-                    .name = action.action_name ++ "Result",
-                    .type = T,
-                    .default_value_ptr = null,
-                    .is_comptime = false,
-                    .alignment = std.meta.alignment(T),
-                },
-                .{
-                    .name = "ResponseMetadata",
-                    .type = ResponseMetadata,
-                    .default_value_ptr = null,
-                    .is_comptime = false,
-                    .alignment = std.meta.alignment(ResponseMetadata),
-                },
+    const Result = @Struct(
+        .auto,
+        null,
+        &[_][]const u8{ action.action_name ++ "Result", "ResponseMetadata" },
+        &[_]type{ T, ResponseMetadata },
+        &[_]std.builtin.Type.StructField.Attributes{
+            .{
+                .default_value_ptr = null,
+                .@"comptime" = false,
+                .@"align" = std.meta.alignment(T),
             },
-            .decls = &[_]std.builtin.Type.Declaration{},
-            .is_tuple = false,
-        },
-    });
-    return @Type(.{
-        .@"struct" = .{
-            .layout = .auto,
-            .fields = &[_]std.builtin.Type.StructField{
-                .{
-                    .name = action.action_name ++ "Response",
-                    .type = Result,
-                    .default_value_ptr = null,
-                    .is_comptime = false,
-                    .alignment = std.meta.alignment(Result),
-                },
+            .{
+                .default_value_ptr = null,
+                .@"comptime" = false,
+                .@"align" = std.meta.alignment(ResponseMetadata),
             },
-            .decls = &[_]std.builtin.Type.Declaration{},
-            .is_tuple = false,
         },
-    });
+    );
+    return @Struct(
+        .auto,
+        null,
+        &[_][]const u8{action.action_name ++ "Response"},
+        &[_]type{Result},
+        &[_]std.builtin.Type.StructField.Attributes{
+            .{
+                .default_value_ptr = null,
+                .@"comptime" = false,
+                .@"align" = std.meta.alignment(Result),
+            },
+        },
+    );
 }
 fn FullResponse(comptime action: anytype) type {
     return struct {
@@ -1413,6 +1405,7 @@ fn reportTraffic(
 
 test {
     _ = @import("aws_test.zig");
+    _ = @import("servicemodel.zig");
 }
 
 // buildQuery/buildPath tests, which are here as they are a) generic and b) private
