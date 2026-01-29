@@ -212,6 +212,13 @@ pub fn build(b: *Builder) !void {
     } else {
         b.installArtifact(exe);
     }
+
+    // Package step - creates distribution source directory
+    const pkg_step = PackageStep.create(b, cg_output_dir);
+    pkg_step.step.dependOn(cg);
+
+    const package = b.step("package", "Copy code to zig-out/package with generated models");
+    package.dependOn(&pkg_step.step);
 }
 
 fn configure(compile: *std.Build.Module, modules: std.StringHashMap(*std.Build.Module), include_time: bool) void {
@@ -251,3 +258,138 @@ fn getDependencyModules(b: *std.Build, args: anytype) !std.StringHashMap(*std.Bu
 
     return result;
 }
+
+/// Custom build step that creates a distribution source directory
+/// This copies all source files plus the generated service models into a
+/// package directory suitable for distribution
+const PackageStep = struct {
+    step: std.Build.Step,
+    cg_output_dir: std.Build.LazyPath,
+
+    const base_id: std.Build.Step.Id = .custom;
+
+    /// Files to include in the package (relative to build root)
+    const package_files = [_][]const u8{
+        "build.zig",
+        "build.zig.zon",
+        "README.md",
+        "LICENSE",
+    };
+
+    /// Directories to include in the package (relative to build root)
+    const package_dirs = [_][]const u8{
+        "src",
+        "lib",
+    };
+
+    pub fn create(owner: *std.Build, cg_output_dir: std.Build.LazyPath) *PackageStep {
+        const self = owner.allocator.create(PackageStep) catch @panic("OOM");
+        self.* = .{
+            .step = std.Build.Step.init(.{
+                .id = base_id,
+                .name = "copy generated files",
+                .owner = owner,
+                .makeFn = make,
+            }),
+            .cg_output_dir = cg_output_dir,
+        };
+        return self;
+    }
+
+    fn make(step: *std.Build.Step, options: std.Build.Step.MakeOptions) anyerror!void {
+        _ = options;
+        const self: *PackageStep = @fieldParentPtr("step", step);
+        const b = step.owner;
+
+        // Get the path to generated models
+        const models_path = self.cg_output_dir.getPath2(b, &self.step);
+
+        // Create output directory for packaging
+        const package_dir = b.pathJoin(&.{ "zig-out", "package" });
+        const models_dest_dir = b.pathJoin(&.{ package_dir, "src", "models" });
+        std.fs.cwd().makePath(models_dest_dir) catch |err| {
+            return step.fail("Failed to create package directory: {}", .{err});
+        };
+
+        // Copy all source files to package directory
+        for (package_files) |file_name|
+            copyFile(b, b.build_root.handle, file_name, package_dir) catch {};
+
+        // Copy directories
+        for (package_dirs) |dir_name|
+            copyDirRecursive(b, b.build_root.handle, dir_name, package_dir) catch |err| {
+                return step.fail("Failed to copy directory '{s}': {}", .{ dir_name, err });
+            };
+
+        // Copy generated models to src/models/
+        copyGeneratedModels(b, models_path, models_dest_dir) catch |err| {
+            return step.fail("Failed to copy generated models: {}", .{err});
+        };
+
+        step.result_cached = false;
+    }
+
+    fn copyFile(b: *std.Build, src_dir: std.fs.Dir, file_path: []const u8, dest_prefix: []const u8) !void {
+        const dest_path = b.pathJoin(&.{ dest_prefix, file_path });
+
+        // Ensure parent directory exists
+        if (std.fs.path.dirname(dest_path)) |parent|
+            std.fs.cwd().makePath(parent) catch {};
+
+        src_dir.copyFile(file_path, std.fs.cwd(), dest_path, .{}) catch return;
+    }
+
+    fn copyDirRecursive(b: *std.Build, src_base: std.fs.Dir, dir_path: []const u8, dest_prefix: []const u8) !void {
+        var src_dir = src_base.openDir(dir_path, .{ .iterate = true }) catch return;
+        defer src_dir.close();
+
+        var walker = try src_dir.walk(b.allocator);
+        defer walker.deinit();
+
+        while (try walker.next()) |entry| {
+            // Skip zig build artifact directories
+            if (std.mem.indexOf(u8, entry.path, "zig-out") != null or
+                std.mem.indexOf(u8, entry.path, ".zig-cache") != null or
+                std.mem.indexOf(u8, entry.path, "zig-cache") != null)
+                continue;
+
+            const src_path = b.pathJoin(&.{ dir_path, entry.path });
+            const dest_path = b.pathJoin(&.{ dest_prefix, dir_path, entry.path });
+
+            switch (entry.kind) {
+                .directory => std.fs.cwd().makePath(dest_path) catch {},
+                .file => {
+                    // Ensure parent directory exists
+                    if (std.fs.path.dirname(dest_path)) |parent| {
+                        std.fs.cwd().makePath(parent) catch {};
+                    }
+                    src_base.copyFile(src_path, std.fs.cwd(), dest_path, .{}) catch {};
+                },
+                .sym_link => {
+                    var link_buf: [std.fs.max_path_bytes]u8 = undefined;
+                    const link_target = entry.dir.readLink(entry.basename, &link_buf) catch continue;
+                    // Ensure parent directory exists
+                    if (std.fs.path.dirname(dest_path)) |parent| {
+                        std.fs.cwd().makePath(parent) catch {};
+                    }
+                    std.fs.cwd().symLink(link_target, dest_path, .{}) catch {};
+                },
+                else => {},
+            }
+        }
+    }
+
+    fn copyGeneratedModels(b: *std.Build, models_path: []const u8, models_dest_dir: []const u8) !void {
+        var models_dir = std.fs.cwd().openDir(models_path, .{ .iterate = true }) catch
+            return error.ModelsNotFound;
+        defer models_dir.close();
+
+        var iter = models_dir.iterate();
+        while (try iter.next()) |entry| {
+            if (entry.kind != .file) continue;
+
+            const dest_path = b.pathJoin(&.{ models_dest_dir, entry.name });
+            models_dir.copyFile(entry.name, std.fs.cwd(), dest_path, .{}) catch continue;
+        }
+    }
+};

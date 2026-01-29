@@ -44,11 +44,11 @@ jobs:
       # should be using git archive, but we need our generated code to be part of it
       - name: Package source code with generated models
         run: |
-          sed -i 's#// UNCOMMENT AFTER MODEL GEN TO USE IN BUILD SCRIPTS //##' build.zig
+          zig build package
           tar -czf ${{ runner.temp }}/${{ github.sha }}-with-models.tar.gz \
             --format ustar \
-            --exclude 'zig-*' \
-            *
+            -C zig-out/package \
+            .
       # Something in this PR broke this transform. I don't mind removing it, but
       # the PR attempts to handle situations with or without a prefix, but it
       # doesn't. I have not yet determined what the problem is, though
