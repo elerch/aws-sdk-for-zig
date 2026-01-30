@@ -45,10 +45,7 @@ jobs:
       - name: Package source code with generated models
         run: |
           zig build package
-          tar -czf ${{ runner.temp }}/${{ github.sha }}-with-models.tar.gz \
-            --format ustar \
-            -C zig-out/package \
-            *
+          (cd zig-out/package && tar -czf ${{ runner.temp }}/${{ github.sha }}-with-models.tar.gz --format ustar *)
       # Something in this PR broke this transform. I don't mind removing it, but
       # the PR attempts to handle situations with or without a prefix, but it
       # doesn't. I have not yet determined what the problem is, though
