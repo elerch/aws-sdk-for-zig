@@ -129,7 +129,7 @@ test "proper serialization for kms" {
         const parsed_body = try std.json.parseFromSlice(struct {
             KeyId: []const u8,
             Plaintext: []const u8,
-            EncryptionContext: ?struct {},
+            EncryptionContext: ?struct {} = null,
             GrantTokens: [][]const u8,
             EncryptionAlgorithm: []const u8,
             DryRun: bool,
@@ -166,7 +166,6 @@ test "basic json request serialization" {
     try buffer.writer.print("{f}", .{std.json.fmt(request, .{ .whitespace = .indent_4 })});
     try std.testing.expectEqualStrings(
         \\{
-        \\    "ExclusiveStartTableName": null,
         \\    "Limit": 1
         \\}
     , buffer.written());
@@ -632,7 +631,7 @@ test "json_1_0_query_with_input: dynamodb listTables runtime" {
     try req_actuals.expectHeader("X-Amz-Target", "DynamoDB_20120810.ListTables");
 
     const parsed_body = try std.json.parseFromSlice(struct {
-        ExclusiveStartTableName: ?[]const u8,
+        ExclusiveStartTableName: ?[]const u8 = null,
         Limit: u8,
     }, std.testing.allocator, req_actuals.body.?, .{});
     defer parsed_body.deinit();
@@ -701,7 +700,7 @@ test "json_1_1_query_with_input: ecs listClusters runtime" {
     try req_actuals.expectHeader("X-Amz-Target", "AmazonEC2ContainerServiceV20141113.ListClusters");
 
     const parsed_body = try std.json.parseFromSlice(struct {
-        nextToken: ?[]const u8,
+        nextToken: ?[]const u8 = null,
         maxResults: u8,
     }, std.testing.allocator, req_actuals.body.?, .{});
     defer parsed_body.deinit();
@@ -741,8 +740,8 @@ test "json_1_1_query_no_input: ecs listClusters runtime" {
     try req_actuals.expectHeader("X-Amz-Target", "AmazonEC2ContainerServiceV20141113.ListClusters");
 
     const parsed_body = try std.json.parseFromSlice(struct {
-        nextToken: ?[]const u8,
-        maxResults: ?u8,
+        nextToken: ?[]const u8 = null,
+        maxResults: ?u8 = null,
     }, std.testing.allocator, req_actuals.body.?, .{});
     defer parsed_body.deinit();
 
@@ -1250,6 +1249,20 @@ test "jsonStringify" {
     try std.testing.expectEqualStrings("1234", json_parsed.value.arn);
     try std.testing.expectEqualStrings("bar", json_parsed.value.tags.foo);
 }
+test "jsonStringify does not emit null values on serialization" {
+    {
+        const lambda = (Services(.{.lambda}){}).lambda;
+        const request = lambda.CreateFunctionRequest{
+            .function_name = "foo",
+            .role = "bar",
+            .code = .{},
+        };
+
+        const request_json = try std.fmt.allocPrint(std.testing.allocator, "{f}", .{std.json.fmt(request, .{})});
+        defer std.testing.allocator.free(request_json);
+        try std.testing.expect(std.mem.indexOf(u8, request_json, "null") == null);
+    }
+}
 
 test "jsonStringify nullable object" {
     // structure is not null
@@ -1272,7 +1285,7 @@ test "jsonStringify nullable object" {
             FunctionVersion: []const u8,
             Name: []const u8,
             RoutingConfig: struct {
-                AdditionalVersionWeights: ?struct {},
+                AdditionalVersionWeights: ?struct {} = null,
             },
         }, std.testing.allocator, request_json, .{ .ignore_unknown_fields = true });
         defer json_parsed.deinit();

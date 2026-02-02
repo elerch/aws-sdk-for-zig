@@ -231,8 +231,18 @@ pub fn Request(comptime request_action: anytype) type {
             var buffer = std.Io.Writer.Allocating.init(options.client.allocator);
             defer buffer.deinit();
             if (Self.service_meta.aws_protocol == .rest_json_1) {
-                if (std.mem.eql(u8, "PUT", aws_request.method) or std.mem.eql(u8, "POST", aws_request.method))
-                    try buffer.writer.print("{f}", .{std.json.fmt(request, .{ .whitespace = .indent_4 })});
+                if (std.mem.eql(u8, "PUT", aws_request.method) or std.mem.eql(u8, "POST", aws_request.method)) {
+                    // Buried in the tests are our answer here:
+                    // https://github.com/smithy-lang/smithy/blob/main/smithy-aws-protocol-tests/model/restJson1/json-structs.smithy#L71C24-L71C78
+                    //  documentation: "Rest Json should not serialize null structure values",
+                    try buffer.writer.print(
+                        "{f}",
+                        .{std.json.fmt(request, .{
+                            .whitespace = .indent_4,
+                            .emit_null_optional_fields = false,
+                        })},
+                    );
+                }
             }
             aws_request.body = buffer.written();
             var rest_xml_body: ?[]const u8 = null;
@@ -320,11 +330,20 @@ pub fn Request(comptime request_action: anytype) type {
             //       smithy spec, "A null value MAY be provided or omitted
             //       for a boxed member with no observable difference." But we're
             //       seeing a lot of differences here between spec and reality
+            //
+            //       This is deliciously unclear:
+            //       https://github.com/smithy-lang/smithy/blob/main/smithy-aws-protocol-tests/model/awsJson1_1/null.smithy#L36
+            //
+            //       It looks like struct nulls are meant to be dropped, but sparse
+            //       lists/maps included. We'll err here on the side of eliminating them
 
             const body = try std.fmt.allocPrint(
                 options.client.allocator,
                 "{f}",
-                .{std.json.fmt(request, .{ .whitespace = .indent_4 })},
+                .{std.json.fmt(request, .{
+                    .whitespace = .indent_4,
+                    .emit_null_optional_fields = false,
+                })},
             );
             defer options.client.allocator.free(body);
 
@@ -1193,7 +1212,10 @@ fn buildPath(
                             "{f}",
                             .{std.json.fmt(
                                 @field(request, field.name),
-                                .{ .whitespace = .indent_4 },
+                                .{
+                                    .whitespace = .indent_4,
+                                    .emit_null_optional_fields = false,
+                                },
                             )},
                         );
                         const trimmed_replacement_val = std.mem.trim(u8, replacement_buffer.written(), "\"");

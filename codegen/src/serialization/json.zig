@@ -34,9 +34,9 @@ pub fn generateToJsonFunction(shape_id: []const u8, writer: *std.Io.Writer, stat
                 const member_value = try getMemberValueJson(allocator, "self", member);
                 defer allocator.free(member_value);
 
-                try writer.print("try jw.objectField(\"{s}\");\n", .{member.json_key});
                 try writeMemberJson(
                     .{
+                        .object_field_name = member.json_key,
                         .shape_id = member.target,
                         .field_name = member.field_name,
                         .field_value = member_value,
@@ -146,6 +146,8 @@ fn writeMemberValue(
 }
 
 const WriteMemberJsonParams = struct {
+    object_field_name: []const u8,
+    quote_object_field_name: bool = true,
     shape_id: []const u8,
     field_name: []const u8,
     field_value: []const u8,
@@ -196,9 +198,9 @@ fn writeStructureJson(params: WriteMemberJsonParams, writer: *std.Io.Writer) !vo
                 const member_value = try getMemberValueJson(allocator, object_value, member);
                 defer allocator.free(member_value);
 
-                try writer.print("try jw.objectField(\"{s}\");\n", .{member.json_key});
                 try writeMemberJson(
                     .{
+                        .object_field_name = member.json_key,
                         .shape_id = member.target,
                         .field_name = member.field_name,
                         .field_value = member_value,
@@ -214,7 +216,7 @@ fn writeStructureJson(params: WriteMemberJsonParams, writer: *std.Io.Writer) !vo
 
             if (is_optional) {
                 try writer.writeAll("} else {\n");
-                try writer.writeAll("try jw.write(null);\n");
+                try writer.writeAll("//try jw.write(null);\n");
                 try writer.writeAll("}\n");
             }
         }
@@ -268,7 +270,7 @@ fn writeListJson(list: smithy_tools.ListShape, params: WriteMemberJsonParams, wr
 
         if (list_is_optional) {
             try writer.writeAll("} else {\n");
-            try writer.writeAll("try jw.write(null);\n");
+            try writer.writeAll("//try jw.write(null);\n");
             try writer.writeAll("}\n");
         }
     }
@@ -327,9 +329,10 @@ fn writeMapJson(map: smithy_tools.MapShape, params: WriteMemberJsonParams, write
         // start loop
         try writer.print("for ({s}) |{s}|", .{ map_value, map_value_capture });
         try writer.writeAll("{\n");
-        try writer.print("try jw.objectField({s});\n", .{map_capture_key});
 
         try writeMemberJson(.{
+            .object_field_name = map_capture_key,
+            .quote_object_field_name = false,
             .shape_id = map.value,
             .field_name = "value",
             .field_value = map_capture_value,
@@ -345,7 +348,7 @@ fn writeMapJson(map: smithy_tools.MapShape, params: WriteMemberJsonParams, write
 
         if (map_is_optional) {
             try writer.writeAll("} else {\n");
-            try writer.writeAll("try jw.write(null);\n");
+            try writer.writeAll("//try jw.write(null);\n");
             try writer.writeAll("}\n");
         }
     }
@@ -361,7 +364,16 @@ fn writeMemberJson(params: WriteMemberJsonParams, writer: *std.Io.Writer) anyerr
     const shape_info = try smithy_tools.getShapeInfo(shape_id, state.file_state.shapes);
     const shape = shape_info.shape;
 
+    const quote = if (params.quote_object_field_name) "\"" else "";
+    const is_optional = smithy_tools.shapeIsOptional(params.member.traits);
+    if (is_optional) {
+        try writer.print("if ({s}) |_|\n", .{params.field_value});
+        try writer.writeAll("{\n");
+    }
+    try writer.print("try jw.objectField({s}{s}{s});\n", .{ quote, params.object_field_name, quote });
+
     if (state.getTypeRecurrenceCount(shape_id) > 2) {
+        if (is_optional) try writer.writeAll("\n}\n");
         return;
     }
 
@@ -389,4 +401,5 @@ fn writeMemberJson(params: WriteMemberJsonParams, writer: *std.Io.Writer) anyerr
         .short => try writeScalarJson("short", params, writer),
         .service, .resource, .operation, .member, .set => std.debug.panic("Shape type not supported: {}", .{shape}),
     }
+    if (is_optional) try writer.writeAll("\n}\n");
 }
