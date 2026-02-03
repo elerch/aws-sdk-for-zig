@@ -412,8 +412,8 @@ fn getProfileCredentials(allocator: std.mem.Allocator, options: Profile) !?auth.
     default_path = default_path orelse creds_file_path.home;
     const config_file_path = try filePath(
         allocator,
-        options.credential_file,
-        "AWS_SHARED_CREDENTIALS_FILE",
+        options.config_file,
+        "AWS_CONFIG_FILE",
         default_path,
         "config",
     );
