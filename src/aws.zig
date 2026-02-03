@@ -417,11 +417,21 @@ pub fn Request(comptime request_action: anytype) type {
             defer response.deinit();
 
             if (response.response_code != options.success_http_code and response.response_code != 404) {
-                try reportTraffic(options.client.allocator, "Call Failed", aws_request, response, log.err);
+                // If the consumer prrovided diagnostics, they are likely handling
+                // this error themselves. We'll not spam them with log.err
+                // output. Note that we may need to add additional information
+                // in diagnostics, as reportTraffic provides more information
+                // than what exists in the diagnostics data
                 if (options.diagnostics) |d| {
                     d.http_code = response.response_code;
                     d.response_body = try d.allocator.dupe(u8, response.body);
-                }
+                } else try reportTraffic(
+                    options.client.allocator,
+                    "Call Failed",
+                    aws_request,
+                    response,
+                    log.err,
+                );
                 return error.HttpFailure;
             }
 
