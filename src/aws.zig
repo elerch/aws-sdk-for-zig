@@ -304,14 +304,9 @@ pub fn Request(comptime request_action: anytype) type {
                 }
             }
 
-            return try Self.callAws(aws_request, .{
-                .success_http_code = Action.http_config.success_code,
-                .region = options.region,
-                .dualstack = options.dualstack,
-                .client = options.client,
-                .diagnostics = options.diagnostics,
-                .mock = options.mock,
-            });
+            var rest_options = options;
+            rest_options.success_http_code = Action.http_config.success_code;
+            return try Self.callAws(aws_request, rest_options);
         }
 
         /// Calls using one of the json protocols (json_1_0, json_1_1)
