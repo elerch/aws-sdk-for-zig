@@ -408,7 +408,7 @@ fn getProfileCredentials(allocator: std.mem.Allocator, options: Profile) !?auth.
 
     // Get active profile
     const profile = (try getEnvironmentVariable(allocator, "AWS_PROFILE")) orelse
-        try allocator.dupe(u8, "default");
+        try allocator.dupe(u8, options.profile_name orelse "default");
     defer allocator.free(profile);
     log.debug("Looking for file credentials using profile '{s}'", .{profile});
     log.debug("Checking credentials file: {s}", .{creds_file_path.evaluated_path});
