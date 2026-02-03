@@ -90,6 +90,8 @@ pub const Options = struct {
     dualstack: bool = false,
     sigv4_service_name: ?[]const u8 = null,
 
+    credential_options: credentials.Options = .{},
+
     mock: ?Mock = null,
 };
 
@@ -186,7 +188,7 @@ pub const AwsHttp = struct {
         defer endpoint.deinit();
         log.debug("Calling endpoint {s}", .{endpoint.uri});
         // TODO: Should we allow customization here?
-        const creds = try credentials.getCredentials(self.allocator, .{});
+        const creds = try credentials.getCredentials(self.allocator, options.credential_options);
         defer creds.deinit();
         const signing_config: signing.Config = .{
             .region = getRegion(service, options.region),

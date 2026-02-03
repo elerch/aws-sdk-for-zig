@@ -6,6 +6,7 @@ const date = @import("date");
 const json = @import("json");
 const zeit = @import("zeit");
 
+const credentials = @import("aws_credentials.zig");
 const awshttp = @import("aws_http.zig");
 const url = @import("url.zig");
 const servicemodel = @import("servicemodel.zig");
@@ -19,7 +20,6 @@ const scoped_log = std.log.scoped(.aws);
 /// controls are insufficient (e.g. use in build script)
 pub fn globalLogControl(aws_level: std.log.Level, http_level: std.log.Level, signing_level: std.log.Level, off: bool) void {
     const signing = @import("aws_signing.zig");
-    const credentials = @import("aws_credentials.zig");
     logs_off = off;
     signing.logs_off = off;
     credentials.logs_off = off;
@@ -84,6 +84,7 @@ pub const Options = struct {
     dualstack: bool = false,
     success_http_code: i64 = 200,
     client: Client,
+    credential_options: credentials.Options = .{},
 
     diagnostics: ?*Diagnostics = null,
 
@@ -415,6 +416,7 @@ pub fn Request(comptime request_action: anytype) type {
                     .dualstack = options.dualstack,
                     .sigv4_service_name = Self.service_meta.sigv4_name,
                     .mock = options.mock,
+                    .credential_options = options.credential_options,
                 },
             );
             defer response.deinit();
