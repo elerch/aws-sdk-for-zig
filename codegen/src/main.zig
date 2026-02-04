@@ -645,7 +645,7 @@ fn generateOperation(allocator: std.mem.Allocator, operation: smithy.ShapeInfo, 
             try outputIndent(child_state, writer);
             try writer.print(".uri = \"{s}\",\n", .{trait.http.uri});
             try outputIndent(child_state, writer);
-            try writer.print(".success_code = {d},\n", .{trait.http.code});
+            try writer.print(".success_code = @as(u10, {d}),\n", .{trait.http.code});
             try outputIndent(state, writer);
             _ = try writer.write("};\n\n");
         }

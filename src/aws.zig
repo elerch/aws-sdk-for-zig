@@ -82,7 +82,7 @@ const log = struct {
 pub const Options = struct {
     region: []const u8 = "aws-global",
     dualstack: bool = false,
-    success_http_code: i64 = 200,
+    success_http_status: std.http.Status = .ok,
     client: Client,
     credential_options: credentials.Options = .{},
 
@@ -92,7 +92,7 @@ pub const Options = struct {
 };
 
 pub const Diagnostics = struct {
-    http_code: i64,
+    response_status: std.http.Status,
     response_body: []const u8,
     allocator: std.mem.Allocator,
 
@@ -305,7 +305,7 @@ pub fn Request(comptime request_action: anytype) type {
             }
 
             var rest_options = options;
-            rest_options.success_http_code = Action.http_config.success_code;
+            rest_options.success_http_status = @enumFromInt(Action.http_config.success_code);
             return try Self.callAws(aws_request, rest_options);
         }
 
@@ -416,14 +416,14 @@ pub fn Request(comptime request_action: anytype) type {
             );
             defer response.deinit();
 
-            if (response.response_code != options.success_http_code and response.response_code != 404) {
+            if (response.response_code != options.success_http_status and response.response_code != .not_found) {
                 // If the consumer prrovided diagnostics, they are likely handling
                 // this error themselves. We'll not spam them with log.err
                 // output. Note that we may need to add additional information
                 // in diagnostics, as reportTraffic provides more information
                 // than what exists in the diagnostics data
                 if (options.diagnostics) |d| {
-                    d.http_code = response.response_code;
+                    d.response_status = response.response_code;
                     d.response_body = try d.allocator.dupe(u8, response.body);
                 } else try reportTraffic(
                     options.client.allocator,

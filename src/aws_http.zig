@@ -363,7 +363,7 @@ pub const AwsHttp = struct {
         log.debug("raw response body:\n{s}", .{aw.written()});
 
         const rc = HttpResult{
-            .response_code = @intFromEnum(response.head.status),
+            .response_code = response.head.status,
             .body = try aw.toOwnedSlice(),
             .headers = try resp_headers.toOwnedSlice(self.allocator),
             .allocator = self.allocator,
