@@ -416,7 +416,7 @@ pub fn Request(comptime request_action: anytype) type {
             );
             defer response.deinit();
 
-            if (response.response_code != options.success_http_status and response.response_code != .not_found) {
+            if (response.response_code != options.success_http_status) {
                 // If the consumer prrovided diagnostics, they are likely handling
                 // this error themselves. We'll not spam them with log.err
                 // output. Note that we may need to add additional information
