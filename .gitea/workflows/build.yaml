@@ -18,7 +18,7 @@ jobs:
       - name: Check out repository code
         uses: actions/checkout@v4
       - name: Setup Zig
-        uses: https://github.com/mlugg/setup-zig@v2.0.5
+        uses: https://codeberg.org/mlugg/setup-zig@v2.2.1
         # We will let setup-zig use minimum_zig_version from build.zig.zon
         # setup-zig also sets up the zig cache appropriately
       - name: Ulimit
