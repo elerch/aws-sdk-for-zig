@@ -20,7 +20,7 @@ jobs:
         with:
           ref: zig-0.14.x
       - name: Setup Zig
-        uses: https://github.com/mlugg/setup-zig@v2.0.1
+        uses: https://codeberg.org/mlugg/setup-zig@v2.2.1
         with:
           version: 0.14.0
       - name: Run smoke test

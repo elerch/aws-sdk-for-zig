@@ -69,6 +69,11 @@ pub const Profile = struct {
     config_file: ?[]const u8 = null,
     /// Config file. Defaults to AWS_PROFILE or default
     profile_name: ?[]const u8 = null,
+    /// Profile name specified via command line should change precedence of operation,
+    /// moves credential file checking to the top. The sdk does not have a
+    /// way to know if this is coming from a command line, so this field
+    /// serves as a way to accomplish that task
+    prefer_profile_from_file: bool = false,
 };
 
 pub const Options = struct {
@@ -79,6 +84,15 @@ pub var static_credentials: ?auth.Credentials = null;
 
 pub fn getCredentials(allocator: std.mem.Allocator, io: std.Io, options: Options) !auth.Credentials {
     if (static_credentials) |c| return c;
+    if (options.profile.prefer_profile_from_file) {
+        log.debug(
+            "Command line profile specified. Checking credentials file first. Profile name {s}",
+            .{options.profile.profile_name orelse "default"},
+        );
+        if (try getProfileCredentials(allocator, io, options.profile)) |cred| return cred;
+        // Profile not found. We'll mirror the cli here and bail early
+        return error.CredentialsNotFound;
+    }
     if (try getEnvironmentCredentials(allocator)) |cred| {
         log.debug("Found credentials in environment. Access key: {s}", .{cred.access_key});
         return cred;
@@ -398,8 +412,8 @@ fn getProfileCredentials(allocator: std.mem.Allocator, io: std.Io, options: Prof
     default_path = default_path orelse creds_file_path.home;
     const config_file_path = try filePath(
         allocator,
-        options.credential_file,
-        "AWS_SHARED_CREDENTIALS_FILE",
+        options.config_file,
+        "AWS_CONFIG_FILE",
         default_path,
         "config",
     );
@@ -408,7 +422,7 @@ fn getProfileCredentials(allocator: std.mem.Allocator, io: std.Io, options: Prof
 
     // Get active profile
     const profile = (try getEnvironmentVariable(allocator, "AWS_PROFILE")) orelse
-        try allocator.dupe(u8, "default");
+        try allocator.dupe(u8, options.profile_name orelse "default");
     defer allocator.free(profile);
     log.debug("Looking for file credentials using profile '{s}'", .{profile});
     log.debug("Checking credentials file: {s}", .{creds_file_path.evaluated_path});

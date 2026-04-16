@@ -9,7 +9,7 @@ pub const Request = struct {
     headers: []const std.http.Header = &.{},
 };
 pub const Result = struct {
-    response_code: u16, // actually 3 digits can fit in u10
+    response_code: std.http.Status,
     body: []const u8,
     headers: []const std.http.Header,
     allocator: std.mem.Allocator,

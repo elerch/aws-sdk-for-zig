@@ -6,6 +6,7 @@ const date = @import("date");
 const json = @import("json");
 const zeit = @import("zeit");
 
+const credentials = @import("aws_credentials.zig");
 const awshttp = @import("aws_http.zig");
 const url = @import("url.zig");
 const servicemodel = @import("servicemodel.zig");
@@ -19,7 +20,6 @@ const scoped_log = std.log.scoped(.aws);
 /// controls are insufficient (e.g. use in build script)
 pub fn globalLogControl(aws_level: std.log.Level, http_level: std.log.Level, signing_level: std.log.Level, off: bool) void {
     const signing = @import("aws_signing.zig");
-    const credentials = @import("aws_credentials.zig");
     logs_off = off;
     signing.logs_off = off;
     credentials.logs_off = off;
@@ -82,8 +82,9 @@ const log = struct {
 pub const Options = struct {
     region: []const u8 = "aws-global",
     dualstack: bool = false,
-    success_http_code: i64 = 200,
+    success_http_status: std.http.Status = .ok,
     client: Client,
+    credential_options: credentials.Options = .{},
 
     diagnostics: ?*Diagnostics = null,
 
@@ -91,7 +92,7 @@ pub const Options = struct {
 };
 
 pub const Diagnostics = struct {
-    http_code: i64,
+    response_status: std.http.Status,
     response_body: []const u8,
     allocator: std.mem.Allocator,
 
@@ -232,8 +233,18 @@ pub fn Request(comptime request_action: anytype) type {
             var buffer = std.Io.Writer.Allocating.init(options.client.allocator);
             defer buffer.deinit();
             if (Self.service_meta.aws_protocol == .rest_json_1) {
-                if (std.mem.eql(u8, "PUT", aws_request.method) or std.mem.eql(u8, "POST", aws_request.method))
-                    try buffer.writer.print("{f}", .{std.json.fmt(request, .{ .whitespace = .indent_4 })});
+                if (std.mem.eql(u8, "PUT", aws_request.method) or std.mem.eql(u8, "POST", aws_request.method)) {
+                    // Buried in the tests are our answer here:
+                    // https://github.com/smithy-lang/smithy/blob/main/smithy-aws-protocol-tests/model/restJson1/json-structs.smithy#L71C24-L71C78
+                    //  documentation: "Rest Json should not serialize null structure values",
+                    try buffer.writer.print(
+                        "{f}",
+                        .{std.json.fmt(request, .{
+                            .whitespace = .indent_4,
+                            .emit_null_optional_fields = false,
+                        })},
+                    );
+                }
             }
             aws_request.body = buffer.written();
             var rest_xml_body: ?[]const u8 = null;
@@ -294,14 +305,9 @@ pub fn Request(comptime request_action: anytype) type {
                 }
             }
 
-            return try Self.callAws(aws_request, .{
-                .success_http_code = Action.http_config.success_code,
-                .region = options.region,
-                .dualstack = options.dualstack,
-                .client = options.client,
-                .diagnostics = options.diagnostics,
-                .mock = options.mock,
-            });
+            var rest_options = options;
+            rest_options.success_http_status = @enumFromInt(Action.http_config.success_code);
+            return try Self.callAws(aws_request, rest_options);
         }
 
         /// Calls using one of the json protocols (json_1_0, json_1_1)
@@ -321,11 +327,20 @@ pub fn Request(comptime request_action: anytype) type {
             //       smithy spec, "A null value MAY be provided or omitted
             //       for a boxed member with no observable difference." But we're
             //       seeing a lot of differences here between spec and reality
+            //
+            //       This is deliciously unclear:
+            //       https://github.com/smithy-lang/smithy/blob/main/smithy-aws-protocol-tests/model/awsJson1_1/null.smithy#L36
+            //
+            //       It looks like struct nulls are meant to be dropped, but sparse
+            //       lists/maps included. We'll err here on the side of eliminating them
 
             const body = try std.fmt.allocPrint(
                 options.client.allocator,
                 "{f}",
-                .{std.json.fmt(request, .{ .whitespace = .indent_4 })},
+                .{std.json.fmt(request, .{
+                    .whitespace = .indent_4,
+                    .emit_null_optional_fields = false,
+                })},
             );
             defer options.client.allocator.free(body);
 
@@ -397,16 +412,27 @@ pub fn Request(comptime request_action: anytype) type {
                     .dualstack = options.dualstack,
                     .sigv4_service_name = Self.service_meta.sigv4_name,
                     .mock = options.mock,
+                    .credential_options = options.credential_options,
                 },
             );
             defer response.deinit();
 
-            if (response.response_code != options.success_http_code and response.response_code != 404) {
-                try reportTraffic(options.client.allocator, "Call Failed", aws_request, response, log.err);
+            if (response.response_code != options.success_http_status) {
+                // If the consumer prrovided diagnostics, they are likely handling
+                // this error themselves. We'll not spam them with log.err
+                // output. Note that we may need to add additional information
+                // in diagnostics, as reportTraffic provides more information
+                // than what exists in the diagnostics data
                 if (options.diagnostics) |d| {
-                    d.http_code = response.response_code;
+                    d.response_status = response.response_code;
                     d.response_body = try d.allocator.dupe(u8, response.body);
-                }
+                } else try reportTraffic(
+                    options.client.allocator,
+                    "Call Failed",
+                    aws_request,
+                    response,
+                    log.err,
+                );
                 return error.HttpFailure;
             }
 
@@ -1186,7 +1212,10 @@ fn buildPath(
                             "{f}",
                             .{std.json.fmt(
                                 @field(request, field.name),
-                                .{ .whitespace = .indent_4 },
+                                .{
+                                    .whitespace = .indent_4,
+                                    .emit_null_optional_fields = false,
+                                },
                             )},
                         );
                         const trimmed_replacement_val = std.mem.trim(u8, replacement_buffer.written(), "\"");
