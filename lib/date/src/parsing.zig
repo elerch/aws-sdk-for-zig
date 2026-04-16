@@ -1,6 +1,7 @@
 const std = @import("std");
 const log = std.log.scoped(.date);
 const zeit = @import("zeit");
+const instantWithoutIo = @import("timestamp.zig").instantWithoutIo;
 
 pub const DateTime = struct {
     day: u8,
@@ -37,12 +38,13 @@ pub const DateTime = struct {
     }
 
     pub fn instant(self: DateTime) !zeit.Instant {
-        return try zeit.instant(.{ .source = .{ .time = self.time() } });
+        return try instantWithoutIo(.{ .source = .{ .time = self.time() } });
     }
 };
 
-pub fn timestampToDateTime(timestamp: zeit.Seconds) DateTime {
-    const ins = zeit.instant(.{ .source = .{ .unix_timestamp = timestamp } }) catch @panic("Failed to create instant from timestamp");
+pub fn timestampToDateTime(timestamp: i64) DateTime {
+    // zeit.Seconds is i64, so this should be identical
+    const ins = instantWithoutIo(.{ .source = .{ .unix_timestamp = timestamp } }) catch @panic("Failed to create instant from timestamp");
     return DateTime.fromInstant(ins);
 }
 
@@ -53,7 +55,7 @@ pub fn parseEnglishToTimestamp(data: []const u8) !i64 {
 /// Converts a string to a timestamp value. May not handle dates before the
 /// epoch. Dates should look like "Fri, 03 Jun 2022 18:12:36 GMT"
 pub fn parseEnglishToDateTime(data: []const u8) !DateTime {
-    const ins = try zeit.instant(.{ .source = .{ .rfc1123 = data } });
+    const ins = try instantWithoutIo(.{ .source = .{ .rfc1123 = data } });
     return DateTime.fromInstant(ins);
 }
 
@@ -64,7 +66,7 @@ pub fn parseIso8601ToTimestamp(data: []const u8) !i64 {
 /// Converts a string to a timestamp value. May not handle dates before the
 /// epoch
 pub fn parseIso8601ToDateTime(data: []const u8) !DateTime {
-    const ins = try zeit.instant(.{ .source = .{ .iso8601 = data } });
+    const ins = try instantWithoutIo(.{ .source = .{ .iso8601 = data } });
     return DateTime.fromInstant(ins);
 }
 
@@ -84,7 +86,7 @@ fn printDateTime(dt: DateTime) void {
 }
 
 pub fn printNowUtc(io: std.Io) void {
-    const now = std.Io.Clock.Timestamp.now(io, .awake) catch return;
+    const now = std.Io.Clock.Timestamp.now(io, .awake);
     const timestamp = @as(i64, @intCast(@divFloor(now.raw.nanoseconds, std.time.ns_per_s)));
     printDateTime(timestampToDateTime(timestamp));
 }

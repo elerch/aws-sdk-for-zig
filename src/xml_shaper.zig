@@ -192,9 +192,7 @@ fn parseInternal(comptime T: type, element: *xml.Element, options: ParseOptions)
                             e,
                         },
                     );
-                    if (@errorReturnTrace()) |trace| {
-                        std.debug.dumpStackTrace(trace);
-                    }
+                    std.debug.dumpCurrentStackTrace(.{});
                 }
                 return e;
             };
@@ -381,7 +379,7 @@ fn parseInternal(comptime T: type, element: *xml.Element, options: ParseOptions)
 
                         log.debug("type = {s}, style = {s}, ptr_info.child == {s}, element = {s}", .{ @typeName(T), @tagName(array_style), @typeName(ptr_info.child), element.tag });
 
-                        var children = std.ArrayList(ptr_info.child){};
+                        var children = std.ArrayList(ptr_info.child).empty;
                         defer children.deinit(allocator);
 
                         switch (array_style) {

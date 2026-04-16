@@ -13,6 +13,8 @@ pub const Result = struct {
     body: []const u8,
     headers: []const std.http.Header,
     allocator: std.mem.Allocator,
+    /// The io that was used for the request
+    io: std.Io,
 
     pub fn deinit(self: Result) void {
         self.allocator.free(self.body);

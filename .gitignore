@@ -12,3 +12,4 @@ src/git_version.zig
 zig-out
 core
 .zig-cache
+zig-pkg/

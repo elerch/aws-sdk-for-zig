@@ -87,7 +87,7 @@ fn getJsonMembers(allocator: Allocator, shape: Shape, state: GenerationState) !?
         return null;
     }
 
-    var json_members = std.ArrayListUnmanaged(JsonMember){};
+    var json_members: std.ArrayListUnmanaged(JsonMember) = .empty;
 
     var iter = hash_map.iterator();
     while (iter.next()) |kvp| {

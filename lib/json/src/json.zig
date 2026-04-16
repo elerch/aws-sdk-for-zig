@@ -1346,7 +1346,7 @@ test "json.validate" {
 const Allocator = std.mem.Allocator;
 const ArenaAllocator = std.heap.ArenaAllocator;
 const ArrayList = std.ArrayList;
-const StringArrayHashMap = std.StringArrayHashMap;
+const StringArrayHashMap = std.array_hash_map.String;
 
 pub const ValueTree = struct {
     arena: ArenaAllocator,
@@ -1580,11 +1580,11 @@ fn parseInternal(comptime T: type, token: Token, tokens: *TokenStream, options: 
                     if (!numberToken.is_integer) {
                         // probably is in scientific notation
                         const n = try std.fmt.parseFloat(f128, numberToken.slice(tokens.slice, tokens.i - 1));
-                        return try std.meta.intToEnum(T, @as(i128, @intFromFloat(n)));
+                        return std.enums.fromInt(T, @as(i128, @intFromFloat(n))) orelse error.InvalidEnumTag;
                     }
 
                     const n = try std.fmt.parseInt(enumInfo.tag_type, numberToken.slice(tokens.slice, tokens.i - 1), 10);
-                    return try std.meta.intToEnum(T, n);
+                    return std.enums.fromInt(T, n) orelse error.InvalidEnumTag;
                 },
                 .String => |stringToken| {
                     const source_slice = stringToken.slice(tokens.slice, tokens.i - 1);
@@ -1772,7 +1772,7 @@ fn parseInternal(comptime T: type, token: Token, tokens: *TokenStream, options: 
                 .slice => {
                     switch (token) {
                         .ArrayBegin => {
-                            var arraylist = std.ArrayList(ptrInfo.child){};
+                            var arraylist = std.ArrayList(ptrInfo.child).empty;
                             errdefer {
                                 while (arraylist.pop()) |v| {
                                     parseFree(ptrInfo.child, v, options);
@@ -1817,7 +1817,7 @@ fn parseInternal(comptime T: type, token: Token, tokens: *TokenStream, options: 
                             if (key_type == null) return error.UnexpectedToken;
                             const value_type = typeForField(ptrInfo.child, "value");
                             if (value_type == null) return error.UnexpectedToken;
-                            var arraylist = std.ArrayList(ptrInfo.child){};
+                            var arraylist = std.ArrayList(ptrInfo.child).empty;
                             errdefer {
                                 while (arraylist.pop()) |v| {
                                     parseFree(ptrInfo.child, v, options);

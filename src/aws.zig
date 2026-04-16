@@ -4,7 +4,6 @@ const std = @import("std");
 const case = @import("case");
 const date = @import("date");
 const json = @import("json");
-const zeit = @import("zeit");
 
 const credentials = @import("aws_credentials.zig");
 const awshttp = @import("aws_http.zig");
@@ -115,6 +114,7 @@ pub const Services = servicemodel.Services;
 pub const ClientOptions = struct {
     proxy: ?std.http.Client.Proxy = null,
     io: std.Io,
+    map: *const std.process.Environ.Map,
 };
 pub const Client = struct {
     allocator: std.mem.Allocator,
@@ -125,7 +125,7 @@ pub const Client = struct {
     pub fn init(allocator: std.mem.Allocator, options: ClientOptions) Self {
         return Self{
             .allocator = allocator,
-            .aws_http = awshttp.AwsHttp.init(allocator, options.io, options.proxy),
+            .aws_http = awshttp.AwsHttp.init(allocator, options.io, options.map, options.proxy),
         };
     }
     pub fn deinit(self: *Client) void {
@@ -196,7 +196,7 @@ pub fn Request(comptime request_action: anytype) type {
             log.debug("Rest method: '{s}'", .{aws_request.method});
             log.debug("Rest success code: '{d}'", .{Action.http_config.success_code});
             log.debug("Rest raw uri: '{s}'", .{Action.http_config.uri});
-            var al = std.ArrayList([]const u8){};
+            var al = std.ArrayList([]const u8).empty;
             defer al.deinit(options.client.allocator);
             aws_request.path = try buildPath(
                 options.client.allocator,
@@ -481,9 +481,7 @@ pub fn Request(comptime request_action: anytype) type {
                             ) catch |e| {
                                 log.err("Could not set header value: Response header {s}. Field {s}. Value {s}", .{ header.name, f.?.name, header.value });
                                 log.err("Error: {}", .{e});
-                                if (@errorReturnTrace()) |trace| {
-                                    std.debug.dumpStackTrace(trace);
-                                }
+                                std.debug.dumpCurrentStackTrace(.{});
                             };
 
                             break;
@@ -1474,7 +1472,7 @@ test "REST Json v1 serializes lists in queries" {
 }
 test "REST Json v1 buildpath substitutes" {
     const allocator = std.testing.allocator;
-    var al = std.ArrayList([]const u8){};
+    var al = std.ArrayList([]const u8).empty;
     defer al.deinit(allocator);
     const svs = Services(.{.lambda}){};
     const request = svs.lambda.list_functions.Request{
@@ -1487,7 +1485,7 @@ test "REST Json v1 buildpath substitutes" {
 }
 test "REST Json v1 buildpath handles restricted characters" {
     const allocator = std.testing.allocator;
-    var al = std.ArrayList([]const u8){};
+    var al = std.ArrayList([]const u8).empty;
     defer al.deinit(allocator);
     const svs = Services(.{.lambda}){};
     const request = svs.lambda.list_functions.Request{

@@ -103,6 +103,7 @@ pub const Mock = struct {
     context: usize = 0,
     request_fn: *const fn (
         usize,
+        std.Io,
         std.http.Method,
         std.Uri,
         std.http.Client.RequestOptions,
@@ -111,8 +112,8 @@ pub const Mock = struct {
     receive_head: *const fn (usize) std.http.Client.Request.ReceiveHeadError!std.http.Client.Response,
     reader_decompressing: *const fn (usize) *std.Io.Reader,
 
-    fn request(m: Mock, method: std.http.Method, uri: std.Uri, options: std.http.Client.RequestOptions) std.http.Client.RequestError!std.http.Client.Request {
-        return m.request_fn(m.context, method, uri, options);
+    fn request(m: Mock, io: std.Io, method: std.http.Method, uri: std.Uri, options: std.http.Client.RequestOptions) std.http.Client.RequestError!std.http.Client.Request {
+        return m.request_fn(m.context, io, method, uri, options);
     }
     fn sendBodyComplete(m: Mock, body: []u8) std.Io.Writer.Error!void {
         return m.send_body_complete(m.context, body);
@@ -147,14 +148,16 @@ pub const AwsHttp = struct {
     allocator: std.mem.Allocator,
     proxy: ?std.http.Client.Proxy,
     io: std.Io,
+    map: *const std.process.Environ.Map,
 
     const Self = @This();
 
-    pub fn init(allocator: std.mem.Allocator, io: std.Io, proxy: ?std.http.Client.Proxy) Self {
+    pub fn init(allocator: std.mem.Allocator, io: std.Io, map: *const std.process.Environ.Map, proxy: ?std.http.Client.Proxy) Self {
         return Self{
             .allocator = allocator,
             .proxy = proxy,
             .io = io,
+            .map = map,
             // .credentialsProvider = // creds provider could be useful
         };
     }
@@ -186,11 +189,11 @@ pub const AwsHttp = struct {
         // S3 control uses <account-id>.s3-control.<region>.amazonaws.com
         //
         // So this regionSubDomain call needs to handle generic customization
-        const endpoint = try endpointForRequest(self.allocator, service, request, options);
+        const endpoint = try endpointForRequest(self.allocator, service, request, self.map, options);
         defer endpoint.deinit();
         log.debug("Calling endpoint {s}", .{endpoint.uri});
         // TODO: Should we allow customization here?
-        const creds = try credentials.getCredentials(self.allocator, self.io, options.credential_options);
+        const creds = try credentials.getCredentials(self.allocator, self.map, self.io, options.credential_options);
         defer creds.deinit();
         const signing_config: signing.Config = .{
             .region = getRegion(service, options.region),
@@ -238,7 +241,7 @@ pub const AwsHttp = struct {
         // We will use endpoint instead
         request_cp.path = endpoint.path;
 
-        var request_headers = std.ArrayList(std.http.Header){};
+        var request_headers: std.ArrayList(std.http.Header) = .empty;
         defer request_headers.deinit(self.allocator);
 
         const len = try addHeaders(self.allocator, &request_headers, endpoint.host, request_cp.body, request_cp.content_type, request_cp.headers);
@@ -252,7 +255,7 @@ pub const AwsHttp = struct {
             }
         }
 
-        var headers = std.ArrayList(std.http.Header){};
+        var headers: std.ArrayList(std.http.Header) = .empty;
         defer headers.deinit(self.allocator);
         for (request_cp.headers) |header|
             try headers.append(self.allocator, .{ .name = header.name, .value = header.value });
@@ -287,7 +290,7 @@ pub const AwsHttp = struct {
         };
 
         var req = if (options.mock) |m|
-            try m.request(method, uri, req_options) // This will call the test harness
+            try m.request(self.io, method, uri, req_options) // This will call the test harness
         else
             try cl.request(method, uri, req_options);
         defer req.deinit();
@@ -328,7 +331,7 @@ pub const AwsHttp = struct {
             .{ @intFromEnum(response.head.status), response.head.status.phrase() },
         );
         log.debug("Response headers:", .{});
-        var resp_headers = std.ArrayList(Header){};
+        var resp_headers: std.ArrayList(Header) = .empty;
         defer resp_headers.deinit(self.allocator);
         var it = response.head.iterateHeaders();
         while (it.next()) |h| { // even though we don't expect to fill the buffer,
@@ -365,10 +368,11 @@ pub const AwsHttp = struct {
         log.debug("raw response body:\n{s}", .{aw.written()});
 
         const rc = HttpResult{
-            .response_code = @intFromEnum(response.head.status),
+            .response_code = response.head.status,
             .body = try aw.toOwnedSlice(),
             .headers = try resp_headers.toOwnedSlice(self.allocator),
             .allocator = self.allocator,
+            .io = self.io,
         };
         return rc;
     }
@@ -412,25 +416,22 @@ fn addHeaders(
     return null;
 }
 
-fn getEnvironmentVariable(allocator: std.mem.Allocator, key: []const u8) !?[]const u8 {
-    return std.process.getEnvVarOwned(allocator, key) catch |e| switch (e) {
-        std.process.GetEnvVarOwnedError.EnvironmentVariableNotFound => return null,
-        else => return e,
-    };
+fn getEnvironmentVariable(map: *const std.process.Environ.Map, key: []const u8) ?[]const u8 {
+    if (!map.contains(key)) return null;
+    return map.get(key);
 }
 
 /// override endpoint url. Intended for use in testing. Normally, you should
 /// rely on AWS_ENDPOINT_URL environment variable for this
 pub var endpoint_override: ?[]const u8 = null;
 
-fn endpointForRequest(allocator: std.mem.Allocator, service: []const u8, request: HttpRequest, options: Options) !EndPoint {
+fn endpointForRequest(allocator: std.mem.Allocator, service: []const u8, request: HttpRequest, map: *const std.process.Environ.Map, options: Options) !EndPoint {
     if (endpoint_override) |override| {
         const uri = try allocator.dupe(u8, override);
         return endPointFromUri(allocator, uri, request.path);
     }
-    const environment_override = try getEnvironmentVariable(allocator, "AWS_ENDPOINT_URL");
+    const environment_override = getEnvironmentVariable(map, "AWS_ENDPOINT_URL");
     if (environment_override) |override| {
-        defer allocator.free(override);
         const uri = try allocator.dupe(u8, override);
         return endPointFromUri(allocator, uri, request.path);
     }
@@ -577,7 +578,8 @@ test "endpointForRequest standard operation" {
     const allocator = std.testing.allocator;
     const service = "dynamodb";
 
-    const endpoint = try endpointForRequest(allocator, service, request, options);
+    const map = std.process.Environ.Map.init(allocator);
+    const endpoint = try endpointForRequest(allocator, service, request, &map, options);
     defer endpoint.deinit();
     try std.testing.expectEqualStrings("https://dynamodb.us-west-2.amazonaws.com", endpoint.uri);
 }
@@ -592,7 +594,8 @@ test "endpointForRequest for cloudfront" {
     const allocator = std.testing.allocator;
     const service = "cloudfront";
 
-    const endpoint = try endpointForRequest(allocator, service, request, options);
+    const map = std.process.Environ.Map.init(allocator);
+    const endpoint = try endpointForRequest(allocator, service, request, &map, options);
     defer endpoint.deinit();
     try std.testing.expectEqualStrings("https://cloudfront.amazonaws.com", endpoint.uri);
 }
@@ -607,7 +610,8 @@ test "endpointForRequest for s3" {
     const allocator = std.testing.allocator;
     const service = "s3";
 
-    const endpoint = try endpointForRequest(allocator, service, request, options);
+    const map = std.process.Environ.Map.init(allocator);
+    const endpoint = try endpointForRequest(allocator, service, request, &map, options);
     defer endpoint.deinit();
     try std.testing.expectEqualStrings("https://s3.us-east-2.amazonaws.com", endpoint.uri);
 }
@@ -623,7 +627,8 @@ test "endpointForRequest for s3 - specific bucket" {
     const allocator = std.testing.allocator;
     const service = "s3";
 
-    const endpoint = try endpointForRequest(allocator, service, request, options);
+    const map = std.process.Environ.Map.init(allocator);
+    const endpoint = try endpointForRequest(allocator, service, request, &map, options);
     defer endpoint.deinit();
     try std.testing.expectEqualStrings("https://bucket.s3.us-east-2.amazonaws.com", endpoint.uri);
     try std.testing.expectEqualStrings("/key", endpoint.path);

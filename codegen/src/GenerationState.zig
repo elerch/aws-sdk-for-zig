@@ -39,7 +39,7 @@ pub fn indent(self: @This()) GenerationState {
 
 pub fn deindent(self: @This()) GenerationState {
     var new_state = self.clone();
-    new_state.indent_level = @max(0, new_state.indent_level - 1);
+    new_state.indent_level = if (new_state.indent_level == 0) 0 else new_state.indent_level - 1;
     return new_state;
 }
 

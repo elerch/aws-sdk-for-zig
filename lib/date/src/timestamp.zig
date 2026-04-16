@@ -10,7 +10,7 @@ pub const Timestamp = enum(zeit.Nanoseconds) {
     _,
 
     pub fn jsonStringify(value: Timestamp, jw: anytype) !void {
-        const instant = zeit.instant(.{
+        const instant = instantWithoutIo(.{
             .source = .{
                 .unix_nano = @intFromEnum(value),
             },
@@ -34,7 +34,7 @@ pub const Timestamp = enum(zeit.Nanoseconds) {
             }
         };
 
-        const ins = try zeit.instant(.{
+        const ins = try instantWithoutIo(.{
             .source = switch (date_format) {
                 DateFormat.iso8601 => .{
                     .iso8601 = val,
@@ -48,6 +48,36 @@ pub const Timestamp = enum(zeit.Nanoseconds) {
         return @enumFromInt(ins.timestamp);
     }
 };
+
+/// create a new Instant
+pub fn instantWithoutIo(cfg: zeit.Instant.Config) !zeit.Instant {
+    const ts: zeit.Nanoseconds = switch (cfg.source) {
+        .now => return error.UseZeitInstantWithIoForNowInstants,
+        .unix_timestamp => |unix| @as(i128, unix) * std.time.ns_per_s,
+        .unix_nano => |nano| nano,
+        .time => |time| time.instant().timestamp,
+        .iso8601,
+        .rfc3339,
+        => |iso| blk: {
+            const t = try zeit.Time.fromISO8601(iso);
+            break :blk t.instant().timestamp;
+        },
+        .rfc2822,
+        .rfc5322,
+        => |eml| blk: {
+            const t = try zeit.Time.fromRFC5322(eml);
+            break :blk t.instant().timestamp;
+        },
+        .rfc1123 => |http_date| blk: {
+            const t = try zeit.Time.fromRFC1123(http_date);
+            break :blk t.instant().timestamp;
+        },
+    };
+    return .{
+        .timestamp = ts,
+        .timezone = cfg.timezone,
+    };
+}
 
 test Timestamp {
     const in_date = "Wed, 23 Apr 2025 11:23:45 GMT";

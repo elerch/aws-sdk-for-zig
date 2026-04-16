@@ -11,7 +11,7 @@
         "README.md",
         "LICENSE",
     },
-    .minimum_zig_version = "0.15.1",
+    .minimum_zig_version = "0.16.0",
 
     .dependencies = .{
         .smithy = .{
@@ -29,12 +29,8 @@
             .path = "lib/json",
         },
         .case = .{
-            .url = "git+https://github.com/travisstaloch/case.git#f8003fe5f93b65f673d10d41323e347225e8cb87",
-            .hash = "case-0.0.1-chGYqx_EAADaGJjmoln5M1iMBDTrMdd8to5wdEVpfXm4",
-        },
-        .zeit = .{
-            .url = "git+https://github.com/elerch/zeit#8190461dc1f892f6370fa9d5cd76690aac0e1c71",
-            .hash = "zeit-0.6.0-5I6bk99-AgDNMIDuw2Zcoe_9QYIpzwZJqeqMpU54egTd",
+            .url = "git+https://github.com/elerch/case?ref=zig-0.16.0#82017a92e179031f21896d02262ae1e216459e4f",
+            .hash = "case-0.0.1-chGYq1fEAAAN4h3YRmkh9OTDvuUyjmoXr6PhYAUzjU0D",
         },
     },
 }

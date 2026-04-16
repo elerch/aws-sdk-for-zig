@@ -82,18 +82,18 @@ pub const Options = struct {
 
 pub var static_credentials: ?auth.Credentials = null;
 
-pub fn getCredentials(allocator: std.mem.Allocator, io: std.Io, options: Options) !auth.Credentials {
+pub fn getCredentials(allocator: std.mem.Allocator, map: *const std.process.Environ.Map, io: std.Io, options: Options) !auth.Credentials {
     if (static_credentials) |c| return c;
     if (options.profile.prefer_profile_from_file) {
         log.debug(
             "Command line profile specified. Checking credentials file first. Profile name {s}",
             .{options.profile.profile_name orelse "default"},
         );
-        if (try getProfileCredentials(allocator, io, options.profile)) |cred| return cred;
+        if (try getProfileCredentials(allocator, io, map, options.profile)) |cred| return cred;
         // Profile not found. We'll mirror the cli here and bail early
         return error.CredentialsNotFound;
     }
-    if (try getEnvironmentCredentials(allocator)) |cred| {
+    if (try getEnvironmentCredentials(allocator, map)) |cred| {
         log.debug("Found credentials in environment. Access key: {s}", .{cred.access_key});
         return cred;
     }
@@ -101,32 +101,31 @@ pub fn getCredentials(allocator: std.mem.Allocator, io: std.Io, options: Options
     // GetWebIdentity is not currently implemented. The rest are tested and gtg
     // Note: Lambda just sets environment variables
     if (try getWebIdentityToken(allocator)) |cred| return cred;
-    if (try getProfileCredentials(allocator, io, options.profile)) |cred| return cred;
+    if (try getProfileCredentials(allocator, io, map, options.profile)) |cred| return cred;
 
-    if (try getContainerCredentials(allocator, io)) |cred| return cred;
+    if (try getContainerCredentials(allocator, io, map)) |cred| return cred;
     // I don't think we need v1 at all?
     if (try getImdsv2Credentials(allocator, io)) |cred| return cred;
     return error.CredentialsNotFound;
 }
 
-fn getEnvironmentCredentials(allocator: std.mem.Allocator) !?auth.Credentials {
-    const secret_key = (try getEnvironmentVariable(allocator, "AWS_SECRET_ACCESS_KEY")) orelse return null;
-    defer allocator.free(secret_key); //yes, we're not zeroing. But then, the secret key is in an environment var anyway
+fn getEnvironmentCredentials(allocator: std.mem.Allocator, map: *const std.process.Environ.Map) !?auth.Credentials {
+    const secret_key = getEnvironmentVariable(map, "AWS_SECRET_ACCESS_KEY") orelse return null;
+    const access_key = getEnvironmentVariable(map, "AWS_ACCESS_KEY_ID") orelse return null;
+    const token = getEnvironmentVariable(map, "AWS_SESSION_TOKEN") orelse
+        getEnvironmentVariable(map, "AWS_SECURITY_TOKEN"); // Security token is backward compat only
     // Use cross-platform API (requires allocation)
     return auth.Credentials.init(
         allocator,
-        (try getEnvironmentVariable(allocator, "AWS_ACCESS_KEY_ID")) orelse return null,
+        try allocator.dupe(u8, access_key),
         try allocator.dupe(u8, secret_key),
-        (try getEnvironmentVariable(allocator, "AWS_SESSION_TOKEN")) orelse
-            try getEnvironmentVariable(allocator, "AWS_SECURITY_TOKEN"), // Security token is backward compat only
+        if (token) |t| try allocator.dupe(u8, t) else null,
     );
 }
 
-fn getEnvironmentVariable(allocator: std.mem.Allocator, key: []const u8) !?[]const u8 {
-    return std.process.getEnvVarOwned(allocator, key) catch |e| switch (e) {
-        std.process.GetEnvVarOwnedError.EnvironmentVariableNotFound => return null,
-        else => return e,
-    };
+fn getEnvironmentVariable(map: *const std.process.Environ.Map, key: []const u8) ?[]const u8 {
+    if (!map.contains(key)) return null;
+    return map.get(key);
 }
 
 fn getWebIdentityToken(allocator: std.mem.Allocator) !?auth.Credentials {
@@ -139,7 +138,7 @@ fn getWebIdentityToken(allocator: std.mem.Allocator) !?auth.Credentials {
     // TODO: implement
     return null;
 }
-fn getContainerCredentials(allocator: std.mem.Allocator, io: std.Io) !?auth.Credentials {
+fn getContainerCredentials(allocator: std.mem.Allocator, io: std.Io, map: *const std.process.Environ.Map) !?auth.Credentials {
     // A note on testing: The best way I have found to test this process is
     // the following. Setup an ECS Fargate cluster and create a task definition
     // with the command  ["/bin/bash","-c","while true; do sleep 10; done"].
@@ -180,8 +179,7 @@ fn getContainerCredentials(allocator: std.mem.Allocator, io: std.Io) !?auth.Cred
     //
     // Compile code, copy to S3, install AWS CLI within the session, download
     // from s3 and run
-    const container_relative_uri = (try getEnvironmentVariable(allocator, "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI")) orelse return null;
-    defer allocator.free(container_relative_uri);
+    const container_relative_uri = getEnvironmentVariable(map, "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI") orelse return null;
     const container_uri = try std.fmt.allocPrint(allocator, "http://169.254.170.2{s}", .{container_relative_uri});
     defer allocator.free(container_uri);
 
@@ -214,9 +212,7 @@ fn getContainerCredentials(allocator: std.mem.Allocator, io: std.Io) !?auth.Cred
         const res = std.json.parseFromSlice(CredsResponse, allocator, aw.written(), .{}) catch |e| {
             log.err("Unexpected Json response from container credentials endpoint: {s}", .{aw.written()});
             log.err("Error parsing json: {}", .{e});
-            if (@errorReturnTrace()) |trace| {
-                std.debug.dumpStackTrace(trace);
-            }
+            std.debug.dumpCurrentStackTrace(.{});
 
             return null;
         };
@@ -312,9 +308,7 @@ fn getImdsRoleName(allocator: std.mem.Allocator, client: *std.http.Client, imds_
     const imds_response = std.json.parseFromSlice(ImdsResponse, allocator, aw.written(), .{}) catch |e| {
         log.err("Unexpected Json response from IMDS endpoint: {s}", .{aw.written()});
         log.err("Error parsing json: {}", .{e});
-        if (@errorReturnTrace()) |trace| {
-            std.debug.dumpStackTrace(trace);
-        }
+        std.debug.dumpCurrentStackTrace(.{});
         return null;
     };
     defer imds_response.deinit();
@@ -367,10 +361,7 @@ fn getImdsCredentials(allocator: std.mem.Allocator, client: *std.http.Client, ro
     const imds_response = std.json.parseFromSlice(ImdsResponse, allocator, aw.written(), .{}) catch |e| {
         log.err("Unexpected Json response from IMDS endpoint: {s}", .{aw.written()});
         log.err("Error parsing json: {}", .{e});
-        if (@errorReturnTrace()) |trace| {
-            std.debug.dumpStackTrace(trace);
-        }
-
+        std.debug.dumpCurrentStackTrace(.{});
         return null;
     };
     defer imds_response.deinit();
@@ -397,12 +388,13 @@ fn getImdsCredentials(allocator: std.mem.Allocator, client: *std.http.Client, ro
 
 }
 
-fn getProfileCredentials(allocator: std.mem.Allocator, io: std.Io, options: Profile) !?auth.Credentials {
+fn getProfileCredentials(allocator: std.mem.Allocator, io: std.Io, map: *const std.process.Environ.Map, options: Profile) !?auth.Credentials {
     var default_path: ?[]const u8 = null;
     defer if (default_path) |p| allocator.free(p);
 
     const creds_file_path = try filePath(
         allocator,
+        map,
         options.credential_file,
         "AWS_SHARED_CREDENTIALS_FILE",
         default_path,
@@ -412,6 +404,7 @@ fn getProfileCredentials(allocator: std.mem.Allocator, io: std.Io, options: Prof
     default_path = default_path orelse creds_file_path.home;
     const config_file_path = try filePath(
         allocator,
+        map,
         options.config_file,
         "AWS_CONFIG_FILE",
         default_path,
@@ -421,21 +414,21 @@ fn getProfileCredentials(allocator: std.mem.Allocator, io: std.Io, options: Prof
     default_path = default_path orelse config_file_path.home;
 
     // Get active profile
-    const profile = (try getEnvironmentVariable(allocator, "AWS_PROFILE")) orelse
-        try allocator.dupe(u8, options.profile_name orelse "default");
+    const profile = try allocator.dupe(u8, getEnvironmentVariable(map, "AWS_PROFILE") orelse
+        options.profile_name orelse "default");
     defer allocator.free(profile);
     log.debug("Looking for file credentials using profile '{s}'", .{profile});
     log.debug("Checking credentials file: {s}", .{creds_file_path.evaluated_path});
-    const credentials_file = std.fs.openFileAbsolute(creds_file_path.evaluated_path, .{}) catch null;
-    defer if (credentials_file) |f| f.close();
+    const credentials_file = std.Io.Dir.openFileAbsolute(io, creds_file_path.evaluated_path, .{}) catch null;
+    defer if (credentials_file) |f| f.close(io);
     // It's much more likely that we'll find credentials in the credentials file
     // so we'll try that first
     const creds_file_creds = try credsForFile(allocator, io, credentials_file, profile);
     var conf_file_creds = PartialCredentials{};
     if (creds_file_creds.access_key == null or creds_file_creds.secret_key == null) {
         log.debug("Checking config file: {s}", .{config_file_path.evaluated_path});
-        const config_file = std.fs.openFileAbsolute(creds_file_path.evaluated_path, .{}) catch null;
-        defer if (config_file) |f| f.close();
+        const config_file = std.Io.Dir.openFileAbsolute(io, creds_file_path.evaluated_path, .{}) catch null;
+        defer if (config_file) |f| f.close(io);
         conf_file_creds = try credsForFile(allocator, io, config_file, profile);
     }
     const access_key = keyFrom(allocator, creds_file_creds.access_key, conf_file_creds.access_key);
@@ -475,7 +468,7 @@ const PartialCredentials = struct {
     access_key: ?[]const u8 = null,
     secret_key: ?[]const u8 = null,
 };
-fn credsForFile(allocator: std.mem.Allocator, io: std.Io, file: ?std.fs.File, profile: []const u8) !PartialCredentials {
+fn credsForFile(allocator: std.mem.Allocator, io: std.Io, file: ?std.Io.File, profile: []const u8) !PartialCredentials {
     if (file == null) return PartialCredentials{};
     var fbuf: [1024]u8 = undefined;
     var freader = file.?.reader(io, &fbuf);
@@ -610,6 +603,7 @@ fn trimmed(text: []const u8, start: ?usize, end: ?usize) []const u8 {
 
 fn filePath(
     allocator: std.mem.Allocator,
+    map: *const std.process.Environ.Map,
     specified_path: ?[]const u8,
     env_var_name: []const u8,
     config_dir: ?[]const u8,
@@ -617,39 +611,28 @@ fn filePath(
 ) !EvaluatedPath {
     if (specified_path) |p| return EvaluatedPath{ .evaluated_path = try allocator.dupe(u8, p) };
     // Not specified. Check environment variable, otherwise, hard coded default
-    if (try getEnvironmentVariable(allocator, env_var_name)) |v| return EvaluatedPath{ .evaluated_path = v };
+    if (getEnvironmentVariable(map, env_var_name)) |v| return EvaluatedPath{ .evaluated_path = try allocator.dupe(u8, v) };
 
     // Not in environment variable either. Go fish
-    return try getDefaultPath(allocator, config_dir, ".aws", config_file_name);
+    return try getDefaultPath(allocator, map, config_dir, ".aws", config_file_name);
 }
 
 const EvaluatedPath = struct {
     home: ?[]const u8 = null,
     evaluated_path: []const u8,
 };
-fn getDefaultPath(allocator: std.mem.Allocator, home_dir: ?[]const u8, dir: []const u8, file: []const u8) !EvaluatedPath {
-    const home = home_dir orelse try getHomeDir(allocator);
+fn getDefaultPath(allocator: std.mem.Allocator, map: *const std.process.Environ.Map, home_dir: ?[]const u8, dir: []const u8, file: []const u8) !EvaluatedPath {
+    const home = home_dir orelse try getHomeDir(allocator, map);
     log.debug("Home directory: {s}", .{home});
     const rc = try std.fs.path.join(allocator, &[_][]const u8{ home, dir, file });
     log.debug("Path evaluated as: {s}", .{rc});
     return EvaluatedPath{ .home = home, .evaluated_path = rc };
 }
 
-fn getHomeDir(allocator: std.mem.Allocator) ![]const u8 {
-    switch (builtin.os.tag) {
-        .windows => {
-            return std.process.getEnvVarOwned(allocator, "USERPROFILE") catch |err| switch (err) {
-                error.OutOfMemory => |e| return e,
-                else => return error.HomeDirUnavailable,
-            };
-        },
-        .macos, .linux, .freebsd, .netbsd, .dragonfly, .openbsd, .illumos => {
-            const home_dir = std.posix.getenv("HOME") orelse {
-                // TODO look in /etc/passwd
-                return error.HomeDirUnavailable;
-            };
-            return allocator.dupe(u8, home_dir);
-        },
+fn getHomeDir(allocator: std.mem.Allocator, map: *const std.process.Environ.Map) ![]const u8 {
+    const env_key = switch (builtin.os.tag) {
+        .windows => "USERPROFILE",
+        .macos, .linux, .freebsd, .netbsd, .dragonfly, .openbsd, .illumos => "HOME",
         // Code from https://github.com/ziglang/zig/blob/9f9f215305389c08a21730859982b68bf2681932/lib/std/fs/get_app_data_dir.zig
         // be_user_settings magic number is probably different for home directory
         // .haiku => {
@@ -665,17 +648,26 @@ fn getHomeDir(allocator: std.mem.Allocator) ![]const u8 {
         //     }
         // },
         else => @compileError("Unsupported OS"),
-    }
+    };
+    return try allocator.dupe(u8, getEnvironmentVariable(map, env_key) orelse return error.HomeDirUnavailable);
 }
 
 test "filePath" {
     const allocator = std.testing.allocator;
+    var map = std.process.Environ.Map.init(allocator);
+    defer map.deinit();
+    try map.put("USERPROFILE", "c:\\users\\myuser");
+    try map.put("HOME", "/home/user");
     // std.testing.log_level = .debug;
     // log.debug("\n", .{});
-    const path = try filePath(allocator, null, "NOTHING", null, "hello");
+    const path = try filePath(allocator, &map, null, "NOTHING", null, "hello");
     defer allocator.free(path.evaluated_path);
     defer allocator.free(path.home.?);
-    try std.testing.expect(path.evaluated_path.len > 10);
+    // try std.testing.expect(path.evaluated_path.len > 10);
+    if (builtin.os.tag == .windows)
+        try std.testing.expectEqualStrings("c:\\users\\myuser\\.aws\\hello", path.evaluated_path)
+    else
+        try std.testing.expectEqualStrings("/home/user/.aws/hello", path.evaluated_path);
     try std.testing.expectEqualStrings("hello", path.evaluated_path[path.evaluated_path.len - 5 ..]);
     try std.testing.expect(path.home != null);
 }

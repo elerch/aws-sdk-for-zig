@@ -8,7 +8,7 @@ pub const HashedFile = struct {
     hash: [Hash.digest_length]u8,
     failure: Error!void,
 
-    const Error = std.fs.File.OpenError || std.fs.File.ReadError || std.fs.File.StatError;
+    const Error = std.Io.File.OpenError || std.Io.File.ReadStreamingError || std.Io.File.StatError;
 
     fn lessThan(context: void, lhs: *const HashedFile, rhs: *const HashedFile) bool {
         _ = context;
@@ -76,13 +76,13 @@ pub fn hex64(x: u64) [16]u8 {
     return result;
 }
 
-pub const walkerFn = *const fn (std.fs.Dir.Walker.Entry) bool;
+pub const walkerFn = *const fn (std.Io.Dir.Walker.Entry) bool;
 
-fn included(entry: std.fs.Dir.Walker.Entry) bool {
+fn included(entry: std.Io.Dir.Walker.Entry) bool {
     _ = entry;
     return true;
 }
-fn excluded(entry: std.fs.Dir.Walker.Entry) bool {
+fn excluded(entry: std.Io.Dir.Walker.Entry) bool {
     _ = entry;
     return false;
 }
@@ -94,33 +94,33 @@ pub const ComputeDirectoryOptions = struct {
 };
 
 pub fn computeDirectoryHash(
-    thread_pool: *std.Thread.Pool,
-    dir: std.fs.Dir,
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    dir: std.Io.Dir,
     options: *ComputeDirectoryOptions,
 ) ![Hash.digest_length]u8 {
-    const gpa = thread_pool.allocator;
 
     // We'll use an arena allocator for the path name strings since they all
     // need to be in memory for sorting.
-    var arena_instance = std.heap.ArenaAllocator.init(gpa);
+    var arena_instance = std.heap.ArenaAllocator.init(allocator);
     defer arena_instance.deinit();
     const arena = arena_instance.allocator();
 
     // Collect all files, recursively, then sort.
     // Normally we're looking at around 300 model files
-    var all_files = try std.ArrayList(*HashedFile).initCapacity(gpa, 300);
-    defer all_files.deinit(gpa);
+    var all_files = try std.ArrayList(*HashedFile).initCapacity(allocator, 300);
+    defer all_files.deinit(allocator);
 
-    var walker = try dir.walk(gpa);
+    var walker = try dir.walk(allocator);
     defer walker.deinit();
 
     {
         // The final hash will be a hash of each file hashed independently. This
         // allows hashing in parallel.
-        var wait_group: std.Thread.WaitGroup = .{};
-        defer wait_group.wait();
+        var g: std.Io.Group = .init;
+        errdefer g.cancel(io);
 
-        while (try walker.next()) |entry| {
+        while (try walker.next(io)) |entry| {
             switch (entry.kind) {
                 .directory => continue,
                 .file => {},
@@ -128,7 +128,7 @@ pub fn computeDirectoryHash(
             }
             if (options.isExcluded(entry) or !options.isIncluded(entry))
                 continue;
-            const alloc = if (options.needFileHashes) gpa else arena;
+            const alloc = if (options.needFileHashes) allocator else arena;
             const hashed_file = try alloc.create(HashedFile);
             const fs_path = try alloc.dupe(u8, entry.path);
             hashed_file.* = .{
@@ -137,11 +137,11 @@ pub fn computeDirectoryHash(
                 .hash = undefined, // to be populated by the worker
                 .failure = undefined, // to be populated by the worker
             };
-            wait_group.start();
-            try thread_pool.spawn(workerHashFile, .{ dir, hashed_file, &wait_group });
+            g.async(io, workerHashFile, .{ io, dir, hashed_file, &g });
 
-            try all_files.append(gpa, hashed_file);
+            try all_files.append(allocator, hashed_file);
         }
+        try g.await(io);
     }
 
     std.mem.sort(*HashedFile, all_files.items, {}, HashedFile.lessThan);
@@ -156,23 +156,26 @@ pub fn computeDirectoryHash(
         hasher.update(&hashed_file.hash);
     }
     if (any_failures) return error.DirectoryHashUnavailable;
-    if (options.needFileHashes) options.fileHashes = try all_files.toOwnedSlice(gpa);
+    if (options.needFileHashes) options.fileHashes = try all_files.toOwnedSlice(allocator);
     return hasher.finalResult();
 }
-fn workerHashFile(dir: std.fs.Dir, hashed_file: *HashedFile, wg: *std.Thread.WaitGroup) void {
-    defer wg.finish();
-    hashed_file.failure = hashFileFallible(dir, hashed_file);
+fn workerHashFile(io: std.Io, dir: std.Io.Dir, hashed_file: *HashedFile, wg: *std.Io.Group) void {
+    _ = wg; // assume here that 0.16.0 Io.Group no longer needs to be notified at the time of completion
+    hashed_file.failure = hashFileFallible(io, dir, hashed_file);
 }
 
-fn hashFileFallible(dir: std.fs.Dir, hashed_file: *HashedFile) HashedFile.Error!void {
+fn hashFileFallible(io: std.Io, dir: std.Io.Dir, hashed_file: *HashedFile) HashedFile.Error!void {
     var buf: [8000]u8 = undefined;
-    var file = try dir.openFile(hashed_file.fs_path, .{});
-    defer file.close();
+    var file = try dir.openFile(io, hashed_file.fs_path, .{});
+    defer file.close(io);
     var hasher = Hash.init(.{});
     hasher.update(hashed_file.normalized_path);
-    hasher.update(&.{ 0, @intFromBool(try isExecutable(file)) });
+    hasher.update(&.{ 0, @intFromBool(try isExecutable(io, file)) });
     while (true) {
-        const bytes_read = try file.read(&buf);
+        const bytes_read = file.readStreaming(io, &.{&buf}) catch |err| switch (err) {
+            error.EndOfStream => break,
+            else => return err,
+        };
         if (bytes_read == 0) break;
         hasher.update(buf[0..bytes_read]);
     }
@@ -197,7 +200,7 @@ fn normalizePath(arena: std.mem.Allocator, fs_path: []const u8) ![]const u8 {
     return normalized;
 }
 
-fn isExecutable(file: std.fs.File) !bool {
+fn isExecutable(io: std.Io, file: std.Io.File) !bool {
     if (builtin.os.tag == .windows) {
         // TODO check the ACL on Windows.
         // Until this is implemented, this could be a false negative on
@@ -205,7 +208,7 @@ fn isExecutable(file: std.fs.File) !bool {
         // when unpacking the tarball.
         return false;
     } else {
-        const stat = try file.stat();
-        return (stat.mode & std.posix.S.IXUSR) != 0;
+        const stat = try file.stat(io);
+        return stat.kind == .file and (stat.permissions.toMode() & std.posix.S.IXUSR != 0);
     }
 }

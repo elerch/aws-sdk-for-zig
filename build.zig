@@ -47,7 +47,7 @@ pub fn build(b: *Builder) !void {
         .target = target,
         .optimize = optimize,
     });
-    configure(mod_exe, dep_mods, true);
+    configure(mod_exe, dep_mods);
 
     const exe = b.addExecutable(.{
         .name = "demo",
@@ -72,7 +72,7 @@ pub fn build(b: *Builder) !void {
         .target = b.graph.host,
         .optimize = if (b.verbose) .Debug else .ReleaseSafe,
     });
-    configure(cg_mod, dep_mods, false);
+    configure(cg_mod, dep_mods);
 
     const cg_exe = b.addExecutable(.{
         .name = "codegen",
@@ -133,7 +133,7 @@ pub fn build(b: *Builder) !void {
     // consuming build.zig files to be able to use the SDK at build time for
     // things like code deployments, e.g. https://git.lerch.org/lobo/lambda-zig
     const has_pre_generated =
-        if (b.build_root.handle.access("src/models/service_manifest.zig", .{})) true else |_| false;
+        if (b.build_root.handle.access(b.graph.io, "src/models/service_manifest.zig", .{})) true else |_| false;
 
     // Only depend on codegen if we don't have pre-generated models
     if (!has_pre_generated)
@@ -150,7 +150,7 @@ pub fn build(b: *Builder) !void {
         .target = target,
         .optimize = optimize,
     });
-    configure(service_manifest_module, dep_mods, true);
+    configure(service_manifest_module, dep_mods);
 
     mod_exe.addImport("service_manifest", service_manifest_module);
 
@@ -161,13 +161,13 @@ pub fn build(b: *Builder) !void {
         .optimize = optimize,
     });
     mod_aws.addImport("service_manifest", service_manifest_module);
-    configure(mod_aws, dep_mods, true);
+    configure(mod_aws, dep_mods);
 
     // Expose module to others
     const mod_aws_signing = b.addModule("aws-signing", .{
         .root_source_file = b.path("src/aws_signing.zig"),
     });
-    configure(mod_aws_signing, dep_mods, false);
+    configure(mod_aws_signing, dep_mods);
 
     // Similar to creating the run step earlier, this exposes a `test` step to
     // the `zig build --help` menu, providing a way for the user to request
@@ -197,7 +197,7 @@ pub fn build(b: *Builder) !void {
             .optimize = optimize,
         });
         mod_unit_tests.addImport("service_manifest", service_manifest_module);
-        configure(mod_unit_tests, dep_mods, true);
+        configure(mod_unit_tests, dep_mods);
 
         // Creates a step for unit testing. This only builds the test executable
         // but does not run it.
@@ -250,12 +250,11 @@ pub fn build(b: *Builder) !void {
     package.dependOn(&pkg_step.step);
 }
 
-fn configure(compile: *std.Build.Module, modules: std.StringHashMap(*std.Build.Module), include_time: bool) void {
+fn configure(compile: *std.Build.Module, modules: std.StringHashMap(*std.Build.Module)) void {
     compile.addImport("smithy", modules.get("smithy").?);
     compile.addImport("date", modules.get("date").?);
     compile.addImport("json", modules.get("json").?);
     compile.addImport("case", modules.get("case").?);
-    if (include_time) compile.addImport("zeit", modules.get("zeit").?);
 }
 
 fn getDependencyModules(b: *std.Build, args: anytype) !std.StringHashMap(*std.Build.Module) {
@@ -265,10 +264,6 @@ fn getDependencyModules(b: *std.Build, args: anytype) !std.StringHashMap(*std.Bu
     const dep_smithy = b.dependency("smithy", args);
     const mod_smithy = dep_smithy.module("smithy");
     try result.putNoClobber("smithy", mod_smithy);
-
-    const dep_zeit = b.dependency("zeit", args);
-    const mod_zeit = dep_zeit.module("zeit");
-    try result.putNoClobber("zeit", mod_zeit);
 
     const dep_case = b.dependency("case", args);
     const mod_case = dep_case.module("case");
@@ -329,6 +324,7 @@ const PackageStep = struct {
         _ = options;
         const self: *PackageStep = @fieldParentPtr("step", step);
         const b = step.owner;
+        const io = b.graph.io;
 
         // Get the path to generated models
         const models_path = self.cg_output_dir.getPath2(b, &self.step);
@@ -336,17 +332,17 @@ const PackageStep = struct {
         // Create output directory for packaging
         const package_dir = b.pathJoin(&.{ "zig-out", "package" });
         const models_dest_dir = b.pathJoin(&.{ package_dir, "src", "models" });
-        std.fs.cwd().makePath(models_dest_dir) catch |err| {
+        std.Io.Dir.cwd().createDirPath(io, models_dest_dir) catch |err| {
             return step.fail("Failed to create package directory: {}", .{err});
         };
 
         // Copy all source files to package directory
         for (package_files) |file_name|
-            copyFile(b, b.build_root.handle, file_name, package_dir) catch {};
+            copyFile(io, b, b.build_root.handle, file_name, package_dir) catch {};
 
         // Copy directories
         for (package_dirs) |dir_name|
-            copyDirRecursive(b, b.build_root.handle, dir_name, package_dir) catch |err| {
+            copyDirRecursive(io, b, b.build_root.handle, dir_name, package_dir) catch |err| {
                 return step.fail("Failed to copy directory '{s}': {}", .{ dir_name, err });
             };
 
@@ -358,24 +354,24 @@ const PackageStep = struct {
         step.result_cached = false;
     }
 
-    fn copyFile(b: *std.Build, src_dir: std.fs.Dir, file_path: []const u8, dest_prefix: []const u8) !void {
+    fn copyFile(io: std.Io, b: *std.Build, src_dir: std.Io.Dir, file_path: []const u8, dest_prefix: []const u8) !void {
         const dest_path = b.pathJoin(&.{ dest_prefix, file_path });
 
         // Ensure parent directory exists
         if (std.fs.path.dirname(dest_path)) |parent|
-            std.fs.cwd().makePath(parent) catch {};
+            std.Io.Dir.cwd().createDirPath(io, parent) catch {};
 
-        src_dir.copyFile(file_path, std.fs.cwd(), dest_path, .{}) catch return;
+        src_dir.copyFile(file_path, std.Io.Dir.cwd(), dest_path, io, .{}) catch return;
     }
 
-    fn copyDirRecursive(b: *std.Build, src_base: std.fs.Dir, dir_path: []const u8, dest_prefix: []const u8) !void {
-        var src_dir = src_base.openDir(dir_path, .{ .iterate = true }) catch return;
-        defer src_dir.close();
+    fn copyDirRecursive(io: std.Io, b: *std.Build, src_base: std.Io.Dir, dir_path: []const u8, dest_prefix: []const u8) !void {
+        var src_dir = src_base.openDir(io, dir_path, .{ .iterate = true }) catch return;
+        defer src_dir.close(io);
 
         var walker = try src_dir.walk(b.allocator);
         defer walker.deinit();
 
-        while (try walker.next()) |entry| {
+        while (try walker.next(io)) |entry| {
             // Skip zig build artifact directories
             if (std.mem.indexOf(u8, entry.path, "zig-out") != null or
                 std.mem.indexOf(u8, entry.path, ".zig-cache") != null or
@@ -386,22 +382,22 @@ const PackageStep = struct {
             const dest_path = b.pathJoin(&.{ dest_prefix, dir_path, entry.path });
 
             switch (entry.kind) {
-                .directory => std.fs.cwd().makePath(dest_path) catch {},
+                .directory => std.Io.Dir.cwd().createDirPath(io, dest_path) catch {},
                 .file => {
                     // Ensure parent directory exists
                     if (std.fs.path.dirname(dest_path)) |parent| {
-                        std.fs.cwd().makePath(parent) catch {};
+                        std.Io.Dir.cwd().createDirPath(io, parent) catch {};
                     }
-                    src_base.copyFile(src_path, std.fs.cwd(), dest_path, .{}) catch {};
+                    src_base.copyFile(src_path, std.Io.Dir.cwd(), dest_path, io, .{}) catch {};
                 },
                 .sym_link => {
                     var link_buf: [std.fs.max_path_bytes]u8 = undefined;
-                    const link_target = entry.dir.readLink(entry.basename, &link_buf) catch continue;
+                    const link_target = entry.dir.readLink(io, entry.basename, &link_buf) catch continue;
                     // Ensure parent directory exists
                     if (std.fs.path.dirname(dest_path)) |parent| {
-                        std.fs.cwd().makePath(parent) catch {};
+                        std.Io.Dir.cwd().createDirPath(io, parent) catch {};
                     }
-                    std.fs.cwd().symLink(link_target, dest_path, .{}) catch {};
+                    std.Io.Dir.cwd().symLink(io, link_buf[0..link_target], dest_path, .{}) catch {};
                 },
                 else => {},
             }
@@ -409,16 +405,17 @@ const PackageStep = struct {
     }
 
     fn copyGeneratedModels(b: *std.Build, models_path: []const u8, models_dest_dir: []const u8) !void {
-        var models_dir = std.fs.cwd().openDir(models_path, .{ .iterate = true }) catch
+        const io = b.graph.io;
+        var models_dir = std.Io.Dir.cwd().openDir(io, models_path, .{ .iterate = true }) catch
             return error.ModelsNotFound;
-        defer models_dir.close();
+        defer models_dir.close(io);
 
         var iter = models_dir.iterate();
-        while (try iter.next()) |entry| {
+        while (try iter.next(io)) |entry| {
             if (entry.kind != .file) continue;
 
             const dest_path = b.pathJoin(&.{ models_dest_dir, entry.name });
-            models_dir.copyFile(entry.name, std.fs.cwd(), dest_path, .{}) catch continue;
+            models_dir.copyFile(entry.name, std.Io.Dir.cwd(), dest_path, io, .{}) catch continue;
         }
     }
 };

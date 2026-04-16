@@ -32,10 +32,9 @@ pub fn log(
     const prefix = "[" ++ @tagName(level) ++ "] " ++ scope_prefix;
 
     // Print the message to stderr, silently ignoring any errors
-    std.debug.lockStdErr();
-    defer std.debug.unlockStdErr();
-    var stderr_writer = std.fs.File.stderr().writer(&.{});
-    const stderr = &stderr_writer.interface;
+    const locked = std.debug.lockStderr(&.{});
+    defer std.debug.unlockStderr();
+    const stderr = &locked.file_writer.interface;
     nosuspend stderr.print(prefix ++ format ++ "\n", args) catch return;
 }
 
@@ -59,16 +58,15 @@ const Tests = enum {
     rest_xml_work_with_s3,
 };
 
-pub fn main() anyerror!void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+pub fn main(init: std.process.Init) anyerror!void {
+    const allocator = init.gpa;
+    const io = init.io;
+    const map = init.environ_map;
     var tests = try std.ArrayList(Tests).initCapacity(allocator, @typeInfo(Tests).@"enum".fields.len);
     defer tests.deinit(allocator);
-    var args = try std.process.argsWithAllocator(allocator);
-    defer args.deinit();
+    var args = try init.minimal.args.iterateAllocator(init.arena.allocator());
     var stdout_buf: [4096]u8 = undefined;
-    const stdout_raw = std.fs.File.stdout().writer(&stdout_buf);
+    const stdout_raw = std.Io.File.stdout().writer(io, &stdout_buf);
     var stdout = stdout_raw.interface;
     defer stdout.flush() catch @panic("could not flush stdout");
     var arg0: ?[]const u8 = null;
@@ -111,10 +109,7 @@ pub fn main() anyerror!void {
     }
 
     std.log.info("Start\n", .{});
-    var threaded: std.Io.Threaded = .init(allocator);
-    defer threaded.deinit();
-    const io = threaded.io();
-    const client_options = aws.ClientOptions{ .proxy = proxy, .io = io };
+    const client_options = aws.ClientOptions{ .proxy = proxy, .io = io, .map = map };
     var client = aws.Client.init(allocator, client_options);
     const options = aws.Options{
         .region = "us-west-2",
@@ -376,7 +371,7 @@ fn proxyFromString(string: []const u8) !std.http.Client.Proxy {
         rc.protocol = .tls;
     } else return error.InvalidScheme;
     var split_iterator = std.mem.splitScalar(u8, remaining, ':');
-    const host_str = std.mem.trimRight(u8, split_iterator.first(), "/");
+    const host_str = std.mem.trimEnd(u8, split_iterator.first(), "/");
     rc.host = try std.Io.net.HostName.init(host_str);
     if (split_iterator.next()) |port|
         rc.port = try std.fmt.parseInt(u16, port, 10);

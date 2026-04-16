@@ -157,7 +157,7 @@ pub const SigningError = error{
     XAmzExpiresHeaderInRequest,
     /// Used if the request headers already includes x-amz-region-set
     XAmzRegionSetHeaderInRequest,
-} || error{OutOfMemory} || std.Io.Clock.Error;
+} || error{OutOfMemory}; // || std.Io.Clock.Error;
 
 const forbidden_headers = .{
     .{ .name = "x-amz-content-sha256", .err = SigningError.XAmzContentSha256HeaderInRequest },
@@ -196,7 +196,7 @@ pub fn signRequest(allocator: std.mem.Allocator, io: std.Io, request: base.Reque
     var rc = request;
 
     const signing_time = config.signing_time orelse blk: {
-        const now = try std.Io.Clock.Timestamp.now(io, .awake);
+        const now = std.Io.Clock.Timestamp.now(io, .real);
         break :blk @as(i64, @intCast(@divFloor(now.raw.nanoseconds, std.time.ns_per_s)));
     };
 
@@ -336,9 +336,7 @@ pub fn signRequest(allocator: std.mem.Allocator, io: std.Io, request: base.Reque
 pub fn freeSignedRequest(allocator: std.mem.Allocator, request: *base.Request, config: Config) void {
     validateConfig(config) catch |e| {
         log.err("Signing validation failed during signature free: {}", .{e});
-        if (@errorReturnTrace()) |trace| {
-            std.debug.dumpStackTrace(trace);
-        }
+        std.debug.dumpCurrentStackTrace(.{});
         return;
     };
 
@@ -369,7 +367,7 @@ pub const UnverifiedRequest = struct {
     raw: *std.http.Server.Request,
 
     pub fn init(allocator: std.mem.Allocator, request: *std.http.Server.Request) !UnverifiedRequest {
-        var al = std.ArrayList(std.http.Header){};
+        var al = std.ArrayList(std.http.Header).empty;
         defer al.deinit(allocator);
         var it = request.iterateHeaders();
         while (it.next()) |h| try al.append(allocator, h);
@@ -811,7 +809,7 @@ fn canonicalQueryString(allocator: std.mem.Allocator, path: []const u8) ![]const
 
     // Split this by component
     var portions = std.mem.splitScalar(u8, query, '&');
-    var sort_me = std.ArrayList([]const u8){};
+    var sort_me = std.ArrayList([]const u8).empty;
     defer sort_me.deinit(allocator);
     while (portions.next()) |item|
         try sort_me.append(allocator, item);
@@ -1105,9 +1103,7 @@ test "can sign" {
     // [debug] (awshttp):      Content-Length: 43
 
     const allocator = std.testing.allocator;
-    var threaded: std.Io.Threaded = .init(allocator);
-    defer threaded.deinit();
-    const io = threaded.io();
+    const io = std.testing.io;
     var headers = try std.ArrayList(std.http.Header).initCapacity(allocator, 5);
     defer headers.deinit(allocator);
     try headers.append(allocator, .{ .name = "Content-Type", .value = "application/x-www-form-urlencoded; charset=utf-8" });
@@ -1159,9 +1155,7 @@ test "can sign" {
 var test_credential: ?Credentials = null;
 test "can verify server request" {
     const allocator = std.testing.allocator;
-    var threaded: std.Io.Threaded = .init(allocator);
-    defer threaded.deinit();
-    const io = threaded.io();
+    const io = std.testing.io;
 
     const access_key = try allocator.dupe(u8, "ACCESS");
     const secret_key = try allocator.dupe(u8, "SECRET");
@@ -1214,9 +1208,7 @@ test "can verify server request" {
 }
 test "can verify server request without x-amz-content-sha256" {
     const allocator = std.testing.allocator;
-    var threaded: std.Io.Threaded = .init(allocator);
-    defer threaded.deinit();
-    const io = threaded.io();
+    const io = std.testing.io;
 
     const access_key = try allocator.dupe(u8, "ACCESS");
     const secret_key = try allocator.dupe(u8, "SECRET");

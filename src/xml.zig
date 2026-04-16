@@ -31,8 +31,8 @@ pub const Element = struct {
     fn init(tag: []const u8, alloc: Allocator) Element {
         return .{
             .tag = tag,
-            .attributes = AttributeList{},
-            .children = ContentList{},
+            .attributes = .empty,
+            .children = .empty,
             .allocator = alloc,
         };
     }

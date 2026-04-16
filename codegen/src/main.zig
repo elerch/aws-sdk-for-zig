@@ -25,27 +25,21 @@ const next_version = std.SemanticVersion.parse(next_version_str) catch unreachab
 const zig_version = @import("builtin").zig_version;
 const is_next = zig_version.order(next_version) == .eq or zig_version.order(next_version) == .gt;
 
-pub fn main() anyerror!void {
-    const root_progress_node = std.Progress.start(.{});
+pub fn main(init: std.process.Init) anyerror!void {
+    const io = init.io;
+    const root_progress_node = std.Progress.start(io, .{});
     defer root_progress_node.end();
 
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
+    const allocator = init.arena.allocator();
 
-    var threaded: std.Io.Threaded = .init(allocator);
-    defer threaded.deinit();
-    const io = threaded.io();
-
-    const args = try std.process.argsAlloc(allocator);
-    defer std.process.argsFree(allocator, args);
-    var stdout_writer = std.fs.File.stdout().writer(&.{});
+    const args = try init.minimal.args.toSlice(allocator);
+    var stdout_writer = std.Io.File.stdout().writer(io, &.{});
     const stdout = &stdout_writer.interface;
 
-    var output_dir = std.fs.cwd();
-    defer if (output_dir.fd > 0) output_dir.close();
-    var models_dir: ?std.fs.Dir = null;
-    defer if (models_dir) |*m| m.close();
+    var output_dir = std.Io.Dir.cwd();
+    defer if (output_dir.handle > 0) output_dir.close(io);
+    var models_dir: ?std.Io.Dir = null;
+    defer if (models_dir) |*m| m.close(io);
     for (args, 0..) |arg, i| {
         if (std.mem.eql(u8, "--help", arg) or
             std.mem.eql(u8, "-h", arg))
@@ -55,15 +49,17 @@ pub fn main() anyerror!void {
             try stdout.print(" --output specifies an output directory, otherwise the current working directory will be used\n", .{});
             std.process.exit(0);
         }
-        if (std.mem.eql(u8, "--output", arg))
-            output_dir = try output_dir.makeOpenPath(args[i + 1], .{});
+        if (std.mem.eql(u8, "--output", arg)) {
+            try output_dir.createDirPath(io, args[i + 1]);
+            output_dir = try std.Io.Dir.cwd().openDir(io, args[i + 1], .{ .iterate = true });
+        }
         if (std.mem.eql(u8, "--models", arg))
-            models_dir = try std.fs.cwd().openDir(args[i + 1], .{ .iterate = true });
+            models_dir = try std.Io.Dir.cwd().openDir(io, args[i + 1], .{ .iterate = true });
     }
 
-    var manifest_file = try output_dir.createFile("service_manifest.zig", .{});
-    defer manifest_file.close();
-    var manifest = manifest_file.writer(&manifest_buf).interface;
+    var manifest_file = try output_dir.createFile(io, "service_manifest.zig", .{});
+    defer manifest_file.close(io);
+    var manifest = manifest_file.writer(io, &manifest_buf).interface;
     defer manifest.flush() catch @panic("Could not flush service manifest");
     var files_processed: usize = 0;
     var skip_next = true;
@@ -92,20 +88,20 @@ pub fn main() anyerror!void {
         // can be made
 
         if (models_dir) |m| {
-            var cwd = try std.fs.cwd().openDir(".", .{});
-            defer cwd.close();
-            defer cwd.setAsCwd() catch unreachable;
+            var cwd = try std.Io.Dir.cwd().openDir(io, ".", .{});
+            defer cwd.close(io);
+            defer std.process.setCurrentDir(io, cwd) catch unreachable;
 
-            try m.setAsCwd();
+            try std.process.setCurrentDir(io, m);
             try processDirectories(io, m, output_dir, &root_progress_node);
         }
     }
 
     if (args.len == 0)
-        _ = try generateServices(allocator, io, ";", std.fs.File.stdin(), stdout);
+        _ = try generateServices(allocator, io, ";", std.Io.File.stdin(), stdout);
 
     if (verbose) {
-        const output_path = try output_dir.realpathAlloc(allocator, ".");
+        const output_path = try output_dir.realPathFileAlloc(io, ".", allocator);
         std.debug.print("Output path: {s}\n", .{output_path});
     }
 }
@@ -114,25 +110,23 @@ const OutputManifest = struct {
     model_dir_hash_digest: [Hasher.hex_multihash_len]u8,
     output_dir_hash_digest: [Hasher.hex_multihash_len]u8,
 };
-fn processDirectories(io: std.Io, models_dir: std.fs.Dir, output_dir: std.fs.Dir, parent_progress: *const std.Progress.Node) !void {
+fn processDirectories(io: std.Io, models_dir: std.Io.Dir, output_dir: std.Io.Dir, parent_progress: *const std.Progress.Node) !void {
     // Let's get ready to hash!!
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
-    var thread_pool: std.Thread.Pool = undefined;
-    try thread_pool.init(.{ .allocator = allocator });
-    defer thread_pool.deinit();
 
     const count, var calculated_manifest =
         try calculateDigests(
+            allocator,
+            io,
             models_dir,
             output_dir,
-            &thread_pool,
         );
     const output_stored_manifest = if (is_next)
-        output_dir.readFileAlloc("output_manifest.json", allocator, .unlimited) catch null
+        output_dir.readFileAlloc(io, "output_manifest.json", allocator, .unlimited) catch null
     else
-        output_dir.readFileAlloc(allocator, "output_manifest.json", std.math.maxInt(usize)) catch null;
+        output_dir.readFileAlloc(io, allocator, "output_manifest.json", std.math.maxInt(usize)) catch null;
     if (output_stored_manifest) |o| {
         // we have a stored manifest. Parse it and compare to our calculations
         // we can leak as we're using an arena allocator
@@ -147,16 +141,16 @@ fn processDirectories(io: std.Io, models_dir: std.fs.Dir, output_dir: std.fs.Dir
         }
     }
     // Do this in a brain dead fashion from here, no optimization
-    const manifest_file = try output_dir.createFile("service_manifest.zig", .{});
-    defer manifest_file.close();
-    var manifest = manifest_file.writer(&manifest_buf);
+    const manifest_file = try output_dir.createFile(io, "service_manifest.zig", .{});
+    defer manifest_file.close(io);
+    var manifest = manifest_file.writer(io, &manifest_buf);
     defer manifest.interface.flush() catch @panic("Error flushing service_manifest.zig");
     var mi = models_dir.iterate();
 
     const generating_models_progress = parent_progress.start("generating models", count);
     defer generating_models_progress.end();
 
-    while (try mi.next()) |e| {
+    while (try mi.next(io)) |e| {
         if ((e.kind == .file or e.kind == .sym_link) and std.mem.endsWith(u8, e.name, ".json")) {
             try processFile(io, e.name, output_dir, &manifest.interface);
             generating_models_progress.completeOne();
@@ -164,26 +158,26 @@ fn processDirectories(io: std.Io, models_dir: std.fs.Dir, output_dir: std.fs.Dir
     }
     // re-calculate so we can store the manifest
     model_digest = calculated_manifest.model_dir_hash_digest;
-    _, calculated_manifest = try calculateDigests(models_dir, output_dir, &thread_pool);
+    _, calculated_manifest = try calculateDigests(allocator, io, models_dir, output_dir);
     const data = try std.fmt.allocPrint(allocator, "{f}", .{std.json.fmt(calculated_manifest, .{ .whitespace = .indent_2 })});
-    try output_dir.writeFile(.{ .sub_path = "output_manifest.json", .data = data });
+    try output_dir.writeFile(io, .{ .sub_path = "output_manifest.json", .data = data });
 }
 
 var model_digest: ?[Hasher.hex_multihash_len]u8 = null;
-fn calculateDigests(models_dir: std.fs.Dir, output_dir: std.fs.Dir, thread_pool: *std.Thread.Pool) !struct { usize, OutputManifest } {
+fn calculateDigests(allocator: std.mem.Allocator, io: std.Io, models_dir: std.Io.Dir, output_dir: std.Io.Dir) !struct { usize, OutputManifest } {
     const Include = struct {
         threadlocal var count: usize = 0;
-        pub fn include(entry: std.fs.Dir.Walker.Entry) bool {
+        pub fn include(entry: std.Io.Dir.Walker.Entry) bool {
             const included = std.mem.endsWith(u8, entry.basename, ".json");
             if (included) count += 1;
             return included;
         }
     };
 
-    const model_hash = if (model_digest) |m| m[0..Hasher.digest_len].* else try Hasher.computeDirectoryHash(thread_pool, models_dir, @constCast(&Hasher.ComputeDirectoryOptions{
+    const model_hash = if (model_digest) |m| m[0..Hasher.digest_len].* else try Hasher.computeDirectoryHash(allocator, io, models_dir, @constCast(&Hasher.ComputeDirectoryOptions{
         .isIncluded = Include.include,
         .isExcluded = struct {
-            pub fn exclude(entry: std.fs.Dir.Walker.Entry) bool {
+            pub fn exclude(entry: std.Io.Dir.Walker.Entry) bool {
                 _ = entry;
                 return false;
             }
@@ -192,14 +186,18 @@ fn calculateDigests(models_dir: std.fs.Dir, output_dir: std.fs.Dir, thread_pool:
     }));
     if (verbose) std.log.info("Model directory hash: {s}", .{model_digest orelse Hasher.hexDigest(model_hash)});
 
-    const output_hash = try Hasher.computeDirectoryHash(thread_pool, try output_dir.openDir(".", .{ .iterate = true }), @constCast(&Hasher.ComputeDirectoryOptions{
+    const output_hash = try Hasher.computeDirectoryHash(allocator, io, try output_dir.openDir(
+        io,
+        ".",
+        .{ .iterate = true },
+    ), @constCast(&Hasher.ComputeDirectoryOptions{
         .isIncluded = struct {
-            pub fn include(entry: std.fs.Dir.Walker.Entry) bool {
+            pub fn include(entry: std.Io.Dir.Walker.Entry) bool {
                 return std.mem.endsWith(u8, entry.basename, ".zig");
             }
         }.include,
         .isExcluded = struct {
-            pub fn exclude(entry: std.fs.Dir.Walker.Entry) bool {
+            pub fn exclude(entry: std.Io.Dir.Walker.Entry) bool {
                 _ = entry;
                 return false;
             }
@@ -208,13 +206,14 @@ fn calculateDigests(models_dir: std.fs.Dir, output_dir: std.fs.Dir, thread_pool:
     }));
     if (verbose) std.log.info("Output directory hash: {s}", .{Hasher.hexDigest(output_hash)});
     return .{
-        Include.count, .{
+        Include.count,
+        .{
             .model_dir_hash_digest = model_digest orelse Hasher.hexDigest(model_hash),
             .output_dir_hash_digest = Hasher.hexDigest(output_hash),
         },
     };
 }
-fn processFile(io: std.Io, file_name: []const u8, output_dir: std.fs.Dir, manifest: *std.Io.Writer) !void {
+fn processFile(io: std.Io, file_name: []const u8, output_dir: std.Io.Dir, manifest: *std.Io.Writer) !void {
     // It's probably best to create our own allocator here so we can deint at the end and
     // toss all allocations related to the services in this file
     // I can't guarantee we're not leaking something, and at the end of the
@@ -232,7 +231,6 @@ fn processFile(io: std.Io, file_name: []const u8, output_dir: std.fs.Dir, manife
     _ = try writer.write("const smithy = @import(\"smithy\");\n");
     _ = try writer.write("const json = @import(\"json\");\n");
     _ = try writer.write("const date = @import(\"date\");\n");
-    _ = try writer.write("const zeit = @import(\"zeit\");\n");
     _ = try writer.write("\n");
     _ = try writer.write("const serializeMap = json.serializeMap;\n");
     _ = try writer.write("\n");
@@ -272,9 +270,9 @@ fn processFile(io: std.Io, file_name: []const u8, output_dir: std.fs.Dir, manife
     const formatted = try zigFmt(allocator, unformatted);
 
     // Dump our buffer out to disk
-    var file = try output_dir.createFile(output_file_name, .{ .truncate = true });
-    defer file.close();
-    try file.writeAll(formatted);
+    var file = try output_dir.createFile(io, output_file_name, .{ .truncate = true });
+    defer file.close(io);
+    try file.writeStreamingAll(io, formatted);
 
     for (service_names) |name| {
         try manifest.print("pub const {s} = @import(\"{s}\");\n", .{ name, std.fs.path.basename(output_file_name) });
@@ -298,8 +296,8 @@ fn generateServicesForFilePath(
     path: []const u8,
     writer: *std.Io.Writer,
 ) ![][]const u8 {
-    const file = try std.fs.cwd().openFile(path, .{});
-    defer file.close();
+    const file = try std.Io.Dir.cwd().openFile(io, path, .{});
+    defer file.close(io);
     return try generateServices(allocator, io, terminator, file, writer);
 }
 
@@ -404,7 +402,7 @@ fn generateServices(
     allocator: std.mem.Allocator,
     io: std.Io,
     comptime _: []const u8,
-    file: std.fs.File,
+    file: std.Io.File,
     writer: *std.Io.Writer,
 ) ![][]const u8 {
     var fbuf: [1024]u8 = undefined;
@@ -429,14 +427,14 @@ fn generateServices(
     // a reference count in case there are recursive data structures
     var shape_references = std.StringHashMap(u64).init(allocator);
     defer shape_references.deinit();
-    var stack: std.ArrayList([]const u8) = .{};
+    var stack: std.ArrayList([]const u8) = .empty;
     defer stack.deinit(allocator);
     for (services.items) |service|
         try countReferences(allocator, service, shapes, &shape_references, &stack);
 
     var constant_names = try std.ArrayList([]const u8).initCapacity(allocator, services.items.len);
     defer constant_names.deinit(allocator);
-    var unresolved: std.ArrayList(smithy.ShapeInfo) = .{};
+    var unresolved: std.ArrayList(smithy.ShapeInfo) = .empty;
     defer unresolved.deinit(allocator);
     var generated = std.StringHashMap(void).init(allocator);
     defer generated.deinit();
@@ -526,7 +524,7 @@ fn generateAdditionalTypes(allocator: std.mem.Allocator, file_state: FileGenerat
     while (file_state.additional_types_to_generate.pop()) |t| {
         if (file_state.additional_types_generated.getEntry(t.name) != null) continue;
         // std.log.info("\t\t{s}", .{t.name});
-        var type_stack: std.ArrayList(*const smithy.ShapeInfo) = .{};
+        var type_stack: std.ArrayList(*const smithy.ShapeInfo) = .empty;
         defer type_stack.deinit(allocator);
         const state = GenerationState{
             .type_stack = &type_stack,
@@ -577,7 +575,7 @@ fn generateOperation(allocator: std.mem.Allocator, operation: smithy.ShapeInfo, 
     const snake_case_name = try support.constantName(allocator, operation.name, .snake);
     defer allocator.free(snake_case_name);
 
-    var type_stack: std.ArrayList(*const smithy.ShapeInfo) = .{};
+    var type_stack: std.ArrayList(*const smithy.ShapeInfo) = .empty;
     defer type_stack.deinit(allocator);
     const state = GenerationState{
         .type_stack = &type_stack,
@@ -585,8 +583,7 @@ fn generateOperation(allocator: std.mem.Allocator, operation: smithy.ShapeInfo, 
         .allocator = allocator,
         .indent_level = 1,
     };
-    var child_state = state;
-    child_state.indent_level += 1;
+    const child_state = state.indent();
     // indent should start at 4 spaces here
     const operation_name = avoidReserved(snake_case_name);
 
@@ -687,17 +684,17 @@ fn generateMetadataFunction(operation_name: []const u8, state: GenerationState, 
     // }
     // We want to add a short "get my parents" function into the response
     var child_state = state;
-    child_state.indent_level += 1;
+    child_state = child_state.indent();
     try outputIndent(child_state, writer);
     _ = try writer.write("pub fn metaInfo() struct { ");
     try writer.print("service_metadata: @TypeOf(service_metadata), action: @TypeOf({s})", .{operation_name});
     _ = try writer.write(" } {\n");
-    child_state.indent_level += 1;
+    child_state = child_state.indent();
     try outputIndent(child_state, writer);
     _ = try writer.write("return .{ .service_metadata = service_metadata, ");
     try writer.print(".action = {s}", .{operation_name});
     _ = try writer.write(" };\n");
-    child_state.indent_level -= 1;
+    child_state = child_state.deindent();
     try outputIndent(child_state, writer);
     _ = try writer.write("}\n");
     try outputIndent(state, writer);
@@ -873,8 +870,7 @@ fn generateMapTypeFor(map: anytype, writer: *std.Io.Writer, state: GenerationSta
 
     try writer.writeAll("pub const is_map_type = true;\n\n");
 
-    var child_state = state;
-    child_state.indent_level += 1;
+    const child_state = state.indent();
 
     _ = try writer.write("key: ");
     _ = try generateTypeFor(map.key, writer, child_state, options.endStructure(true));
@@ -923,8 +919,7 @@ fn generateComplexTypeFor(shape_id: []const u8, members: []smithy.TypeMember, ty
     // prolog. We'll rely on caller to get the spacing correct here
     _ = try writer.write(type_type_name);
     _ = try writer.write(" {\n");
-    var child_state = state;
-    child_state.indent_level += 1;
+    const child_state = state.indent();
     var payload: ?[]const u8 = null;
     for (members) |member| {
         // This is our mapping
@@ -1011,8 +1006,7 @@ fn generateComplexTypeFor(shape_id: []const u8, members: []smithy.TypeMember, ty
     try writer.writeByte('\n');
     try outputIndent(child_state, writer);
     _ = try writer.write("pub fn fieldNameFor(_: @This(), comptime field_name: []const u8) []const u8 {\n");
-    var grandchild_state = child_state;
-    grandchild_state.indent_level += 1;
+    const grandchild_state = child_state.indent();
     // We need to force output here becaseu we're referencing the field in the return statement below
     try writeMappings(grandchild_state, "", "mappings", field_name_mappings, true, writer);
     try outputIndent(grandchild_state, writer);
@@ -1038,8 +1032,7 @@ fn writeMappings(
     }
     try writer.print("{s}const {s} = .", .{ @"pub", mapping_name });
     _ = try writer.write("{\n");
-    var child_state = state;
-    child_state.indent_level += 1;
+    const child_state = state.indent();
     for (mappings.items) |mapping| {
         try outputIndent(child_state, writer);
         try writer.print(".{s} = \"{s}\",\n", .{ avoidReserved(mapping.snake), mapping.original });

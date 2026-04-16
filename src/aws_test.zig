@@ -253,8 +253,8 @@ const TestOptions = struct {
 };
 const TestSetup = struct {
     allocator: std.mem.Allocator,
-    threaded: std.Io.Threaded,
     io: std.Io,
+    map: *const std.process.Environ.Map,
     options: TestOptions,
     creds: aws_auth.Credentials,
     client: aws.Client,
@@ -265,7 +265,6 @@ const TestSetup = struct {
 
     pub const RequestActuals = struct {
         request: *std.http.Client.Request,
-        trace: []const u8,
 
         // Looks like uri might be getting trounced before deinit
         request_uri: []const u8,
@@ -304,7 +303,6 @@ const TestSetup = struct {
             }
             allocator.free(self.extra_headers);
 
-            allocator.free(self.trace);
             allocator.free(self.request_uri);
             allocator.destroy(self.request.reader.in);
             allocator.destroy(self.request.client);
@@ -325,24 +323,21 @@ const TestSetup = struct {
 
     fn request(
         self_ptr: usize,
+        io: std.Io,
         method: std.http.Method,
         uri: std.Uri,
         options: std.http.Client.RequestOptions,
     ) std.http.Client.RequestError!std.http.Client.Request {
+        _ = io;
         const self: *Self = @ptrFromInt(self_ptr);
-        if (self.request_actuals) |r| {
-            std.debug.print("request has been called twice. Previous stack trace:\n", .{});
-            var stderr = std.fs.File.stderr().writer(&.{});
-            stderr.interface.writeAll(r.trace) catch @panic("could not write to stderr");
+        if (self.request_actuals) |_| {
+            std.debug.print("request has been called twice:\n", .{});
             std.debug.print("Current stack trace:\n", .{});
             std.debug.dumpCurrentStackTrace(.{});
             return error.ConnectionRefused; // we should not be called twice
         }
         const acts = try self.allocator.create(RequestActuals);
         errdefer self.allocator.destroy(acts);
-        var aw = std.Io.Writer.Allocating.init(self.allocator);
-        defer aw.deinit();
-        std.debug.writeCurrentStackTrace(.{}, &aw.writer, .no_color) catch return error.OutOfMemory;
         const req = try self.allocator.create(std.http.Client.Request);
         errdefer self.allocator.destroy(req);
         const reader = try self.allocator.create(std.Io.Reader);
@@ -386,7 +381,6 @@ const TestSetup = struct {
             });
 
         acts.* = .{
-            .trace = try self.allocator.dupe(u8, aw.written()),
             .request = req,
             .request_uri = try std.fmt.allocPrint(self.allocator, "{f}", .{uri}),
             .extra_headers = try al.toOwnedSlice(self.allocator),
@@ -445,9 +439,10 @@ const TestSetup = struct {
         return self.request_actuals.?.request.reader.in;
     }
     fn init(options: TestOptions) !*Self {
-        var threaded: std.Io.Threaded = .init(options.allocator);
-        const io = threaded.io();
-        const client = aws.Client.init(options.allocator, .{ .io = io });
+        const io = std.testing.io;
+        const map = try options.allocator.create(std.process.Environ.Map);
+        map.* = std.process.Environ.Map.init(options.allocator);
+        const client = aws.Client.init(options.allocator, .{ .io = io, .map = map });
         const call_options = try options.allocator.create(aws.Options);
         const self = try options.allocator.create(Self);
         call_options.* = .{
@@ -467,8 +462,8 @@ const TestSetup = struct {
         self.* = .{
             .options = options,
             .allocator = options.allocator,
-            .threaded = threaded,
             .io = io,
+            .map = map,
             .creds = aws_auth.Credentials.init(
                 options.allocator,
                 try options.allocator.dupe(u8, "ACCESS"),
@@ -482,6 +477,7 @@ const TestSetup = struct {
         return self;
     }
     fn deinit(self: *Self) void {
+        self.options.allocator.destroy(self.map);
         if (self.response_actuals) |r| {
             self.allocator.free(r.body);
             self.allocator.destroy(r);
@@ -492,7 +488,6 @@ const TestSetup = struct {
         }
         self.allocator.destroy(self.call_options);
         self.call_options = undefined;
-        self.threaded.deinit();
         self.allocator.destroy(self);
         aws_creds.static_credentials = null;
     }
@@ -1182,13 +1177,9 @@ test "json_1_1: ECR timestamps" {
     try std.testing.expectEqualStrings("https://146325435496.dkr.ecr.us-west-2.amazonaws.com", call.response.authorization_data.?[0].proxy_endpoint.?);
     // try std.testing.expectEqual(@as(i64, 1.73859841557E9), call.response.authorization_data.?[0].expires_at.?);
 
-    const zeit = @import("zeit");
-    const expected_ins = try zeit.instant(.{
-        .source = .{ .iso8601 = "2022-05-17T06:56:13.652000+00:00" },
-    });
-    const expected_ts: date.Timestamp = @enumFromInt(expected_ins.timestamp);
-
-    try std.testing.expectEqual(expected_ts, call.response.authorization_data.?[0].expires_at.?);
+    const expected_ts = try date.Timestamp.parse("2022-05-17T06:56:13.652000+00:00");
+    const actual = call.response.authorization_data.?[0].expires_at.?;
+    try std.testing.expectEqual(expected_ts, actual);
 }
 
 test "jsonStringify: structure + enums" {
@@ -1340,7 +1331,7 @@ test "works against a live server" {
     const Server = struct {
         allocator: std.mem.Allocator,
         io: std.Io,
-        ready: std.Thread.Semaphore = .{},
+        ready: std.Io.Semaphore = .{},
         requests_received: usize = 0,
         thread: ?std.Thread = null,
         listening_uri: []const u8 = undefined,
@@ -1362,7 +1353,7 @@ test "works against a live server" {
                 threadMain,
                 .{self},
             );
-            try self.ready.timedWait(1000 * std.time.ns_per_ms);
+            try self.ready.wait(self.io); // This could hang the test...
             awshttp.endpoint_override = self.listening_uri;
             if (awshttp.endpoint_override == null) return error.TestSetupStartFailure;
             std.log.debug("endpoint override set to {?s}", .{awshttp.endpoint_override});
@@ -1391,7 +1382,7 @@ test "works against a live server" {
                 self.allocator.free(self.listening_uri);
                 self.listening_uri = undefined;
             }
-            self.ready.post();
+            self.ready.post(self.io);
             while (true) {
                 var connection = try server.accept(self.io);
                 defer connection.close(self.io);
@@ -1424,9 +1415,8 @@ test "works against a live server" {
         }
     };
     const allocator = std.testing.allocator;
-    var threaded: std.Io.Threaded = .init(allocator);
-    defer threaded.deinit();
-    const io = threaded.io();
+    const io = std.testing.io;
+    const map = std.process.Environ.Map.init(allocator);
     var server = Server{ .allocator = allocator, .io = io };
     try server.start();
     var stopped = false;
@@ -1447,7 +1437,7 @@ test "works against a live server" {
     // }
 
     const sts = (Services(.{.sts}){}).sts;
-    const client = aws.Client.init(std.testing.allocator, .{ .io = io });
+    const client = aws.Client.init(std.testing.allocator, .{ .io = io, .map = &map });
     const creds = aws_auth.Credentials.init(
         allocator,
         try allocator.dupe(u8, "ACCESS"),
