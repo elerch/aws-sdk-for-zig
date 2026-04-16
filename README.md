@@ -1,17 +1,17 @@
 AWS SDK for Zig
 ===============
 
-[Zig 0.15.1](https://ziglang.org/download/#release-0.15.1):
+[Zig 0.16.0](https://ziglang.org/download/#release-0.16.0):
 
-[![Build Status: Zig 0.15.1](https://git.lerch.org/lobo/aws-sdk-for-zig/actions/workflows/build.yaml/badge.svg)](https://git.lerch.org/lobo/aws-sdk-for-zig/actions?workflow=build.yaml&state=closed)
+[![Build Status: Zig 0.16.0](https://git.lerch.org/lobo/aws-sdk-for-zig/actions/workflows/build.yaml/badge.svg)](https://git.lerch.org/lobo/aws-sdk-for-zig/actions?workflow=build.yaml&state=closed)
 
 [Nightly Zig](https://ziglang.org/download/):
 
 [![Build Status: Zig Nightly](https://git.lerch.org/lobo/aws-sdk-for-zig/actions/workflows/zig-nightly.yaml/badge.svg)](https://git.lerch.org/lobo/aws-sdk-for-zig/actions?workflow=zig-nightly.yaml&state=closed)
 
-[Zig 0.14.1](https://ziglang.org/download/#release-0.14.1):
+[Zig 0.15.2](https://ziglang.org/download/#release-0.15.2):
 
-[![Build Status: Zig 0.14.x](https://git.lerch.org/lobo/aws-sdk-for-zig/actions/workflows/zig-previous.yaml/badge.svg)](https://git.lerch.org/lobo/aws-sdk-for-zig/actions?workflow=zig-previous.yaml&state=closed)
+[![Build Status: Zig 0.15.2](https://git.lerch.org/lobo/aws-sdk-for-zig/actions/workflows/zig-previous.yaml/badge.svg)](https://git.lerch.org/lobo/aws-sdk-for-zig/actions?workflow=zig-previous.yaml&state=closed)
 
 Current executable size for the demo is 980k after compiling with -Doptimize=ReleaseSmall
 in x86_64-linux, and will vary based on services used. Tested targets:
@@ -34,7 +34,7 @@ Branches
                    a new zig release appears. Expect significant delays in any
                    build failures (PRs always welcome!).
 * **master**:      This branch tracks the latest released zig version
-* **zig-0.14.x**:  This branch tracks the 0.14/0.14.1 released zig versions.
+* **zig-0.15.x**:  This branch tracks the 0.15.2 released zig version.
                    Support for these previous version is best effort, generally
                    degrading over time. Fixes will generally appear in master, then
                    backported into the previous version.
