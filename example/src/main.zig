@@ -11,12 +11,11 @@ pub const std_options: std.Options = .{
     },
 };
 
-pub fn main() anyerror!void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+pub fn main(init: std.process.Init) anyerror!void {
+    const allocator = init.gpa;
+    const io = init.io;
     var stdout_buffer: [1024]u8 = undefined;
-    var stdout_raw = std.fs.File.stdout().writer(&stdout_buffer);
+    var stdout_raw = std.Io.File.stdout().writer(io, &stdout_buffer);
     const stdout = &stdout_raw.interface;
     defer stdout.flush() catch unreachable;
 
@@ -28,10 +27,7 @@ pub fn main() anyerror!void {
     // };
     //
     // var client = aws.Client.init(allocator, .{ .proxy = proxy });
-    var threaded: std.Io.Threaded = .init(allocator);
-    defer threaded.deinit();
-    const io = threaded.io();
-    var client = aws.Client.init(allocator, .{ .io = io });
+    var client = aws.Client.init(allocator, .{ .io = io, .map = init.environ_map });
     defer client.deinit();
 
     const options = aws.Options{
