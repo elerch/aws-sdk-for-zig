@@ -57,30 +57,32 @@ pub fn main(init: std.process.Init) anyerror!void {
             models_dir = try std.Io.Dir.cwd().openDir(io, args[i + 1], .{ .iterate = true });
     }
 
-    var manifest_file = try output_dir.createFile(io, "service_manifest.zig", .{});
-    defer manifest_file.close(io);
-    var manifest = manifest_file.writer(io, &manifest_buf).interface;
-    defer manifest.flush() catch @panic("Could not flush service manifest");
     var files_processed: usize = 0;
-    var skip_next = true;
-    for (args) |arg| {
-        if (skip_next) {
-            skip_next = false;
-            continue;
-        }
-        if (std.mem.eql(u8, "--verbose", arg)) {
-            verbose = true;
-            continue;
-        }
+    {
+        var manifest_file = try output_dir.createFile(io, "service_manifest.zig", .{});
+        defer manifest_file.close(io);
+        var manifest = manifest_file.writer(io, &manifest_buf).interface;
+        defer manifest.flush() catch @panic("Could not flush service manifest");
+        var skip_next = true;
+        for (args) |arg| {
+            if (skip_next) {
+                skip_next = false;
+                continue;
+            }
+            if (std.mem.eql(u8, "--verbose", arg)) {
+                verbose = true;
+                continue;
+            }
 
-        if (std.mem.eql(u8, "--models", arg) or
-            std.mem.eql(u8, "--output", arg))
-        {
-            skip_next = true;
-            continue;
+            if (std.mem.eql(u8, "--models", arg) or
+                std.mem.eql(u8, "--output", arg))
+            {
+                skip_next = true;
+                continue;
+            }
+            try processFile(io, arg, output_dir, &manifest);
+            files_processed += 1;
         }
-        try processFile(io, arg, output_dir, &manifest);
-        files_processed += 1;
     }
     if (files_processed == 0) {
         // no files specified, look for json files in models directory or cwd
@@ -102,7 +104,15 @@ pub fn main(init: std.process.Init) anyerror!void {
 
     if (verbose) {
         const output_path = try output_dir.realPathFileAlloc(io, ".", allocator);
+        // Build system suppresses stdout, we have to send this to stderr
         std.debug.print("Output path: {s}\n", .{output_path});
+        std.debug.print(
+            \\Note: if this is run from within zig build, output from verbose mode will
+            \\      trigger zig to say 'failed command'. This program has succeeded,
+            \\      and the message from the build system will not effect actual processing
+            \\      of the build. It is simply indicative of the build runner detecting
+            \\      output
+        , .{});
     }
 }
 
