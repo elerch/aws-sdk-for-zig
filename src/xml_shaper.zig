@@ -244,7 +244,7 @@ fn parseInternal(comptime T: type, element: *xml.Element, options: ParseOptions)
         },
         .@"struct" => |struct_info| {
             var r: T = undefined;
-            var fields_seen = [_]bool{false} ** struct_info.fields.len;
+            var fields_seen: [struct_info.fields.len]bool = @splat(false);
             var fields_set: u64 = 0;
             // errdefer {
             //     // TODO: why so high here? This was needed for ec2 describe instances

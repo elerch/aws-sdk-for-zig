@@ -448,7 +448,7 @@ pub fn Request(comptime request_action: anytype) type {
                     T: type,
                     header_name: []const u8,
                 };
-                comptime var fields = [_]?HeaderInfo{null} ** std.meta.fields(@TypeOf(action.Response.http_header)).len;
+                comptime var fields: [std.meta.fields(@TypeOf(action.Response.http_header)).len]?HeaderInfo = @splat(null);
                 inline for (std.meta.fields(@TypeOf(action.Response.http_header)), 0..) |f, inx| {
                     fields[inx] = HeaderInfo{
                         .name = f.name,
