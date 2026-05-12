@@ -1453,7 +1453,7 @@ fn camelCaseComp(field: []const u8, key: []const u8, options: ParseOptions) !boo
     if (utf8_source_key.nextCodepoint()) |codepoint| {
         if (codepoint >= 'A' and codepoint <= 'Z') {
             const allocator = options.allocator orelse return error.AllocatorRequired;
-            const source_key_camel_case = try allocator.dupeZ(u8, key);
+            const source_key_camel_case = try allocator.dupe(u8, key);
             defer allocator.free(source_key_camel_case);
             // First codepoint is uppercase Latin char, which is all we're handling atm
             source_key_camel_case[0] = source_key_camel_case[0] + ('a' - 'A');
@@ -1504,7 +1504,7 @@ fn snakeCaseComp(field: []const u8, key: []const u8, options: ParseOptions) !boo
 
     // We now transform the key by lowercasing. We will only deal with Latin
     var utf8_source_key = (std.unicode.Utf8View.init(key) catch unreachable).iterator();
-    const normalized_key = try allocator.dupeZ(u8, key);
+    const normalized_key = try allocator.dupe(u8, key);
     defer allocator.free(normalized_key);
     inx = 0;
     while (utf8_source_key.nextCodepoint()) |codepoint| {
